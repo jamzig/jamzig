@@ -6,6 +6,10 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const test_vector = try safrole.TestVector.init(allocator, "tests/vectors/jam/safrole/tiny/enact-epoch-change-with-no-tickets-1.json");
-    std.debug.print("Test vector: {}\n", .{test_vector});
+    const test_vector = try safrole.TestVector.build_from(allocator, "tests/vectors/jam/safrole/tiny/publish-tickets-no-mark-1.json");
+    defer test_vector.deinit();
+
+    // std.debug.print("Test vector: {}\n", .{test_vector.value.input.entropy});
+    std.debug.print("Test vector: {any}\n", .{test_vector.value.input.extrinsic[1]});
+    std.debug.print("Test vector: {}\n", .{test_vector.value});
 }

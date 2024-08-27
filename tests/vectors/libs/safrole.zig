@@ -2,13 +2,93 @@ const std = @import("std");
 const json = std.json;
 const Allocator = std.mem.Allocator;
 
-const Input = struct {};
+const HexBytes = struct {
+    bytes: []u8,
 
-const PreState = struct {};
+    pub fn jsonParse(allocator: Allocator, scanner: *json.Scanner, _: json.ParseOptions) json.ParseError(@TypeOf(scanner.*))!HexBytes {
+        const token = try scanner.nextAlloc(allocator, .alloc_always);
+        std.debug.print("token: {}\n", .{token});
+        switch (token) {
+            .allocated_string => |string| {
+                // ensure the string starts with "0x"
+                if (string.len < 2 or string[0] != '0' or string[1] != 'x') {
+                    return error.UnexpectedToken;
+                }
+                const bytes = try HexBytes.hexStringToBytes(allocator, string[2..]);
+                return HexBytes{ .bytes = bytes };
+            },
+            else => {
+                return error.UnexpectedToken;
+            },
+        }
+    }
 
-const Output = struct {};
+    pub fn hexStringToBytes(allocator: Allocator, hex_str: []const u8) json.ParseError(json.Scanner)![]u8 {
+        const len = hex_str.len;
+        if (len % 2 != 0) return error.LengthMismatch; // Ensure even number of characters
 
-const PostState = struct {};
+        const byte_count = len / 2;
+        var result = try allocator.alloc(u8, byte_count);
+
+        var i: usize = 0;
+        while (i < byte_count) : (i += 1) {
+            const hex_pair = hex_str[i * 2 .. i * 2 + 2];
+            result[i] = try std.fmt.parseInt(u8, hex_pair, 16);
+        }
+
+        return result;
+    }
+};
+
+const Input = struct {
+    slot: u64,
+    entropy: HexBytes,
+    extrinsic: []Extrinsic,
+};
+
+const Extrinsic = struct {
+    attempt: u8,
+    signature: HexBytes,
+};
+
+const KeySet = struct {
+    bandersnatch: []const u8,
+    ed25519: []const u8,
+    bls: []const u8,
+    metadata: []const u8,
+};
+
+const GammaS = struct {
+    keys: []const u8,
+};
+
+const PreState = struct {
+    // tau: u64,
+    // eta: []const u8,
+    // lambda: []KeySet,
+    // kappa: []KeySet,
+    // gamma_k: []KeySet,
+    // iota: []KeySet,
+    // gamma_a: []KeySet,
+    // gamma_s: GammaS,
+    // gamma_z: []const u8,
+};
+
+const Output = struct {
+    // err: ?[]const u8,
+};
+
+const PostState = struct {
+    // tau: u64,
+    // eta: []const u8,
+    // lambda: []KeySet,
+    // kappa: []KeySet,
+    // gamma_k: []KeySet,
+    // iota: []KeySet,
+    // gamma_a: []KeySet,
+    // gamma_s: GammaS,
+    // gamma_z: []const u8,
+};
 
 pub const TestVector = struct {
     input: Input,
@@ -16,7 +96,7 @@ pub const TestVector = struct {
     output: Output,
     post_state: PostState,
 
-    pub fn init(allocator: Allocator, file_path: []const u8) !TestVector {
+    pub fn build_from(allocator: Allocator, file_path: []const u8) !json.Parsed(TestVector) {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
@@ -29,13 +109,6 @@ pub const TestVector = struct {
             return error.IncompleteRead;
         }
 
-        return try TestVector.parse(allocator, buffer);
-    }
-
-    pub fn parse(allocator: Allocator, json_str: []const u8) !TestVector {
-        var parsed = try json.parseFromSlice(TestVector, allocator, json_str, .{ .ignore_unknown_fields = true });
-        defer parsed.deinit();
-
-        return parsed.value;
+        return try json.parseFromSlice(TestVector, allocator, buffer, .{ .ignore_unknown_fields = true, .parse_numbers = false });
     }
 };
