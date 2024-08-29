@@ -26,6 +26,10 @@ pub const HexBytes = struct {
         const bytes = nextHexStringToBytes(allocator, scanner) catch return error.SyntaxError;
         return HexBytes{ .bytes = bytes };
     }
+
+    pub fn format(self: *HexBytes, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{x}", .{self.bytes});
+    }
 };
 
 pub fn nextHexStringToBytes(allocator: Allocator, scanner: *json.Scanner) Error![]u8 {

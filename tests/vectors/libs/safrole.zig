@@ -101,6 +101,13 @@ const Output = union(enum) {
         }
         unreachable;
     }
+
+    pub fn format(self: Output, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        switch (self) {
+            .err => try writer.print("err = {?s}", .{self.err}),
+            .ok => |marks| try writer.print("ok = {any}", .{marks}),
+        }
+    }
 };
 
 const OutputErr = ?[]u8;
@@ -108,6 +115,13 @@ const OutputErr = ?[]u8;
 const OutputMarks = struct {
     epoch_mark: ?EpochMark,
     tickets_mark: ?TicketMark,
+
+    pub fn format(self: OutputMarks, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        const epoch_len = if (self.epoch_mark) |epoch| epoch.validators.len else 0;
+        const tickets_len = if (self.tickets_mark) |tickets| tickets.len else 0;
+
+        try writer.print("epoch_mark.len = {}, tickets_mark.len = {}", .{ epoch_len, tickets_len });
+    }
 };
 
 pub const TestVector = struct {

@@ -25,7 +25,7 @@ const TestVectors = struct {
     }
 };
 
-// read a dir find all the json files and try to build a TestVector from them.
+/// Read a directory, find all the JSON files, and try to build a TestVector from them.
 fn buildTestVectors(allocator: std.mem.Allocator, path: []const u8) !TestVectors {
     var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
     defer dir.close();
@@ -57,20 +57,37 @@ fn buildTestVectors(allocator: std.mem.Allocator, path: []const u8) !TestVectors
     return test_vectors;
 }
 
-test "Correct parsing of all test vectors" {
+test "Load and dump a tiny test vector, and check the outputs" {
     const allocator = std.testing.allocator;
 
-    // const test_vector = try safrole.TestVector.build_from(allocator, "tests/vectors/jam/safrole/tiny/publish-tickets-no-mark-1.json");
-    // defer test_vector.deinit();
+    const test_jsons: [4][]const u8 = .{
+        "tests/vectors/jam/safrole/tiny/publish-tickets-no-mark-1.json",
+        "tests/vectors/jam/safrole/tiny/publish-tickets-no-mark-4.json",
+        "tests/vectors/jam/safrole/tiny/publish-tickets-no-mark-9.json",
+        "tests/vectors/jam/safrole/tiny/publish-tickets-with-mark-4.json",
+    };
+
+    // const stdout = std.io.getStdOut().writer();
+    for (test_jsons) |test_json| {
+        const test_vector = try safrole.TestVector.build_from(allocator, test_json);
+        defer test_vector.deinit();
+
+        std.debug.print("Test vector: {?}\n", .{test_vector.value.output});
+
+        // try std.json.stringify(test_vector.value.output, .{ .whitespace = .indent_1 }, stdout);
+    }
+}
+
+test "Correct parsing of all tiny test vectors" {
+    const allocator = std.testing.allocator;
 
     var test_vectors = try buildTestVectors(allocator, "tests/vectors/jam/safrole/tiny/");
     defer test_vectors.deinit();
+}
 
-    // std.debug.print("Test vector: {}\n", .{test_vector.value.input.entropy});
-    // std.debug.print("Test vector: {any}\n", .{test_vector.value.input.extrinsic[1]});
-    // std.debug.print("Test vector: {}\n", .{test_vector.value});
+test "Correct parsing of all full test vectors" {
+    const allocator = std.testing.allocator;
 
-    // stringify the JSON string
-    // const stdout = std.io.getStdOut().writer();
-    // try std.json.stringify(test_vector.value, .{ .whitespace = .indent_2 }, stdout);
+    var test_vectors = try buildTestVectors(allocator, "tests/vectors/jam/safrole/full/");
+    defer test_vectors.deinit();
 }
