@@ -2,14 +2,23 @@ const std = @import("std");
 const json = std.json;
 const Allocator = std.mem.Allocator;
 
-const Error = error{ PrefixMismatch, LengthMismatch, UnexpectedToken, AllocNextError } || std.mem.Allocator.Error || std.fmt.ParseIntError;
+const Error = error{
+    PrefixMismatch,
+    LengthMismatch,
+    UnexpectedToken,
+    AllocNextError,
+} || std.mem.Allocator.Error || std.fmt.ParseIntError;
 
 pub fn HexBytesFixed(comptime size: u16) type {
     return struct {
         bytes: []u8,
         size: u16,
 
-        pub fn jsonParse(allocator: Allocator, scanner: *json.Scanner, _: json.ParseOptions) json.ParseError(@TypeOf(scanner.*))!HexBytesFixed(size) {
+        pub fn jsonParse(
+            allocator: Allocator,
+            scanner: *json.Scanner,
+            _: json.ParseOptions,
+        ) json.ParseError(@TypeOf(scanner.*))!HexBytesFixed(size) {
             const bytes = nextHexStringToBytes(allocator, scanner) catch return error.SyntaxError;
             if (bytes.len != size) {
                 return error.LengthMismatch;
@@ -22,7 +31,11 @@ pub fn HexBytesFixed(comptime size: u16) type {
 pub const HexBytes = struct {
     bytes: []u8,
 
-    pub fn jsonParse(allocator: Allocator, scanner: *json.Scanner, _: json.ParseOptions) json.ParseError(@TypeOf(scanner.*))!HexBytes {
+    pub fn jsonParse(
+        allocator: Allocator,
+        scanner: *json.Scanner,
+        _: json.ParseOptions,
+    ) json.ParseError(@TypeOf(scanner.*))!HexBytes {
         const bytes = nextHexStringToBytes(allocator, scanner) catch return error.SyntaxError;
         return HexBytes{ .bytes = bytes };
     }
@@ -32,7 +45,10 @@ pub const HexBytes = struct {
     }
 };
 
-pub fn nextHexStringToBytes(allocator: Allocator, scanner: *json.Scanner) Error![]u8 {
+pub fn nextHexStringToBytes(
+    allocator: Allocator,
+    scanner: *json.Scanner,
+) Error![]u8 {
     const token = scanner.nextAlloc(allocator, .alloc_always) catch return error.AllocNextError;
     switch (token) {
         .allocated_string => |string| {
@@ -49,7 +65,10 @@ pub fn nextHexStringToBytes(allocator: Allocator, scanner: *json.Scanner) Error!
     }
 }
 
-pub fn hexStringToBytes(allocator: Allocator, hex_str: []const u8) Error![]u8 {
+pub fn hexStringToBytes(
+    allocator: Allocator,
+    hex_str: []const u8,
+) Error![]u8 {
     const len = hex_str.len;
     if (len % 2 != 0) return error.LengthMismatch; // Ensure even number of characters
 
