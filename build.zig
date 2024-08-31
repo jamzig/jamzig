@@ -94,12 +94,34 @@ pub fn build(b: *std.Build) !void {
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
+    // Create a module
+
+    const jamzig_module = b.addModule("jamzig", .{
+        .root_source_file = b.path("src/jamzig.zig"),
+    });
+
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // Add the integration tests
+    const safrole_tests = b.addTest(.{
+        .name = "SafeRole Integration Tests",
+        .root_source_file = b.path("tests/safrole_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Add the src directory to the include path for tests
+    safrole_tests.root_module.addImport("jamzig", jamzig_module);
+
+    const run_safrole_tests = b.addRunArtifact(safrole_tests);
+
+    const integration_test_step = b.step("integration_test", "Run integration tests");
+    integration_test_step.dependOn(&run_safrole_tests.step);
 }
 
 const RustDeps = struct {
