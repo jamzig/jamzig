@@ -23,9 +23,21 @@ pub const EpochMark = struct {};
 
 pub const TicketsMark = struct {};
 
-pub const CustomErrorCode = enum {
-    bad_slot,
-    // ... other error codes
+pub const CustomErrorCode = enum(u8) {
+    /// Bad slot value.
+    bad_slot = 0,
+    /// Received a ticket while in epoch's tail.
+    unexpected_ticket = 1,
+    /// Tickets must be sorted.
+    bad_ticket_order = 2,
+    /// Invalid ticket ring proof.
+    bad_ticket_proof = 3,
+    /// Invalid ticket attempt value.
+    bad_ticket_attempt = 4,
+    /// Reserved
+    reserved = 5,
+    /// Found a ticket duplicate.
+    duplicate_ticket = 6,
 };
 
 // Constants
