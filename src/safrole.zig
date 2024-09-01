@@ -1,11 +1,12 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
 
 pub const types = @import("safrole/types.zig");
 
 // Constants
 pub const EPOCH_LENGTH: u32 = 600; // E in the grapaper
 
-pub fn transition(pre_state: *const types.State, input: types.Input, post_state: *types.State) types.Output {
+pub fn transition(allocator: std.mem.Allocator, pre_state: *const types.State, input: *types.Input, post_state: *types.State) !types.Output {
     // Equation 41: H_t ∈ N_T, P(H)_t < H_t ∧ H_t · P ≤ T
     if (input.slot <= pre_state.tau) {
         return types.Output{ .err = .bad_slot };
@@ -29,10 +30,15 @@ pub fn transition(pre_state: *const types.State, input: types.Input, post_state:
 
     // Additional logic for other state updates can be added here
 
+    // Create empty ArrayLists for epoch_mark and tickets_mark
+
     return types.Output{
         .ok = types.OutputMarks{
-            .epoch_mark = null, // Update this if needed
-            .tickets_mark = null, // Update this if needed
+            .epoch_mark = types.EpochMark{
+                .entropy = [_]u8{0} ** 32, // Initialize with 32 zero bytes
+                .validators = try allocator.alloc(types.BandersnatchKey, 0),
+            },
+            .tickets_mark = null,
         },
     };
 }

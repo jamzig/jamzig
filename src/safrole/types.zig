@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 pub const BlsKey = [144]u8;
 pub const Ed25519Key = [32]u8;
@@ -75,6 +76,20 @@ pub const State = struct {
     /// which is a cryptographic commitment to the current state of ticket
     /// submissions.
     gamma_z: GammaZ,
+
+    /// Frees all allocated memory in the State struct.
+    fn deinit(self: *State, allocator: Allocator) void {
+        allocator.free(self.lambda);
+        allocator.free(self.kappa);
+        allocator.free(self.gamma_k);
+        allocator.free(self.iota);
+        allocator.free(self.gamma_a);
+
+        switch (self.gamma_s) {
+            .tickets => |tickets| allocator.free(tickets),
+            .keys => |keys| allocator.free(keys),
+        }
+    }
 };
 
 pub const Input = struct {

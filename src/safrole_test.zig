@@ -2,6 +2,7 @@ const std = @import("std");
 
 const TestVector = @import("tests/vectors/libs/safrole.zig").TestVector;
 
+const tests = @import("tests.zig");
 const safrole = @import("safrole.zig");
 
 test "update tau" {
@@ -11,24 +12,18 @@ test "update tau" {
     const tv = &tv_parsed.value;
 
     // Assume these are populated from your JSON parsing
-    const pre_state = safrole.types.State{ .tau = tv.pre_state.tau };
-    const input = safrole.types.Input{ .slot = tv.input.slot };
-    var post_state = pre_state;
+    const pre_state = try tests.stateFromTestVector(allocator, &tv.pre_state);
+    const input = try tests.inputFromTestVector(allocator, &tv.input);
 
-    const output = safrole.transition(
-        &pre_state,
+    // this needs to be fixed
+    const post_state = pre_state;
+
+    _ = try safrole.transition(
+        allocator,
+        pre_state,
         input,
-        &post_state,
+        post_state,
     );
 
-    // Handle the output
-    switch (output) {
-        .ok => |_| {
-            std.debug.print("Tau updated successfully to: {}\n", .{pre_state.tau});
-            // Handle marks if needed
-        },
-        .err => |error_code| {
-            std.debug.print("Error updating tau: {}\n", .{error_code});
-        },
-    }
+    try std.testing.expectEqual(1, post_state.tau);
 }
