@@ -83,6 +83,41 @@ pub fn formatState(state: types.State, writer: anytype) !void {
     try writer.writeAll("}\n");
 }
 
+pub fn formatOutput(output: types.Output, writer: anytype) !void {
+    try writer.writeAll("Output {\n");
+
+    switch (output) {
+        .err => |err| {
+            try writer.print("  err: {s}\n", .{@tagName(err)});
+        },
+        .ok => |marks| {
+            try writer.writeAll("  ok: {\n");
+            if (marks.epoch_mark) |epoch_mark| {
+                try writer.writeAll("    epoch_mark: {\n");
+                try writer.print("      entropy: 0x{x}\n", .{std.fmt.fmtSliceHexLower(&epoch_mark.entropy)});
+                try writer.print("      validators: {} validators\n", .{epoch_mark.validators.len});
+                for (epoch_mark.validators, 0..) |validator, i| {
+                    try writer.print("        Validator {}: 0x{x}\n", .{ i, std.fmt.fmtSliceHexLower(&validator) });
+                }
+                try writer.writeAll("    }\n");
+            } else {
+                try writer.writeAll("    epoch_mark: null\n");
+            }
+
+            if (marks.tickets_mark) |tickets_mark| {
+                try writer.writeAll("    tickets_mark: {\n");
+                try formatTicketSlice(writer, "tickets", tickets_mark);
+                try writer.writeAll("    }\n");
+            } else {
+                try writer.writeAll("    tickets_mark: null\n");
+            }
+            try writer.writeAll("  }\n");
+        },
+    }
+
+    try writer.writeAll("}\n");
+}
+
 fn formatTicketSlice(writer: anytype, name: []const u8, tickets: []const types.TicketBody) !void {
     try writer.print("  {s}: {} tickets\n", .{ name, tickets.len });
     for (tickets, 0..) |ticket, i| {

@@ -42,6 +42,42 @@ pub fn inputFromTestVector(allocator: Allocator, from: *const tv_lib_safrole.Inp
     return to;
 }
 
+pub fn outputFromTestVector(allocator: Allocator, from: *const tv_lib_safrole.Output) Error!lib_safrole.Output {
+    return switch (from.*) {
+        .err => |err| lib_safrole.Output{ .err = try convertOutputError(err) },
+        .ok => |marks| lib_safrole.Output{
+            .ok = lib_safrole.OutputMarks{
+                .epoch_mark = if (marks.epoch_mark) |epoch_mark|
+                    try convertEpochMark(allocator, epoch_mark)
+                else
+                    null,
+                .tickets_mark = if (marks.tickets_mark) |tickets_mark|
+                    try convertTicketBodySlice(allocator, tickets_mark)
+                else
+                    null,
+            },
+        },
+    };
+}
+
+fn convertOutputError(from: ?[]const u8) Error!lib_safrole.OutputError {
+    if (from) |err_str| {
+        inline for (@typeInfo(lib_safrole.OutputError).Enum.fields) |field| {
+            if (std.mem.eql(u8, err_str, field.name)) {
+                return @field(lib_safrole.OutputError, field.name);
+            }
+        }
+    }
+    return error.FromError;
+}
+
+fn convertEpochMark(allocator: Allocator, from: tv_lib_safrole.EpochMark) Error!lib_safrole.EpochMark {
+    return lib_safrole.EpochMark{
+        .entropy = convertOpaqueHash(from.entropy),
+        .validators = try convertBandersnatchKeysSlice(allocator, from.validators),
+    };
+}
+
 fn convertEta(from: [4]tv_lib_safrole.OpaqueHash) [4]lib_safrole.OpaqueHash {
     return .{
         convertOpaqueHash(from[0]),

@@ -126,6 +126,31 @@ pub const Input = struct {
 pub const Output = union(enum) {
     err: OutputError,
     ok: OutputMarks,
+
+    /// Frees all allocated memory in the Output struct.
+    pub fn deinit(self: Output, allocator: Allocator) void {
+        switch (self) {
+            .err => {},
+            .ok => |marks| {
+                if (marks.epoch_mark) |epoch_mark| {
+                    allocator.free(epoch_mark.validators);
+                }
+                if (marks.tickets_mark) |tickets_mark| {
+                    allocator.free(tickets_mark);
+                }
+            },
+        }
+    }
+
+    /// Implement the default format function
+    pub fn format(
+        self: Output,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try @import("types/format.zig").formatOutput(self, writer);
+    }
 };
 
 pub const OutputError = enum(u8) {
