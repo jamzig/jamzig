@@ -5,6 +5,18 @@ const TestVector = @import("tests/vectors/libs/safrole.zig").TestVector;
 const tests = @import("tests.zig");
 const safrole = @import("safrole.zig");
 
+test "format State" {
+    const allocator = std.testing.allocator;
+    const tv_parsed = try TestVector.build_from(allocator, "src/tests/vectors/jam/safrole/tiny/enact-epoch-change-with-no-tickets-1.json");
+    defer tv_parsed.deinit();
+    const tv = &tv_parsed.value;
+
+    const state = try tests.stateFromTestVector(allocator, &tv.pre_state);
+    defer state.deinit(allocator);
+
+    std.debug.print("\n{any}\n", .{state});
+}
+
 test "update tau" {
     const allocator = std.testing.allocator;
     const tv_parsed = try TestVector.build_from(allocator, "src/tests/vectors/jam/safrole/tiny/enact-epoch-change-with-no-tickets-1.json");

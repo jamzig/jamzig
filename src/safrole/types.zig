@@ -90,6 +90,16 @@ pub const State = struct {
             .keys => |keys| allocator.free(keys),
         }
     }
+
+    /// Implement the default format function
+    pub fn format(
+        self: State,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try @import("types/format.zig").formatState(self, writer);
+    }
 };
 
 pub const Input = struct {
