@@ -15,6 +15,15 @@ pub fn build(b: *std.Build) !void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    // This is a list of filters that can be passed to the test step to run only
+    // can be specified by:
+    //
+    //      -Dtest-filter=[list]         Skip tests that do not match filter
+    //
+    const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &[0][]const u8{};
+
+    std.debug.print("Test filters: {any}\n", .{test_filters});
+
     var rust_deps = try buildRustDependencies(b);
     defer rust_deps.deinit();
 
@@ -62,15 +71,20 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // This creates the test step
     const unit_tests = b.addTest(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,
         .optimize = optimize,
+        .filters = test_filters,
     });
 
-    const run_unit_tests = b.addRunArtifact(unit_tests);
+    // Add the pretty module as a dependency to the executable
+    //https://github.com/timfayz/pretty
+    const pretty = b.dependency("pretty", .{ .target = target, .optimize = optimize });
+    unit_tests.root_module.addImport("pretty", pretty.module("pretty"));
 
-    // Create a module
+    const run_unit_tests = b.addRunArtifact(unit_tests);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request

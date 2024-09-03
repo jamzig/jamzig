@@ -1,4 +1,5 @@
 const std = @import("std");
+const pretty = @import("pretty");
 
 const TestVector = @import("tests/vectors/libs/safrole.zig").TestVector;
 
@@ -13,6 +14,8 @@ test "format Input" {
 
     const input = try tests.inputFromTestVector(allocator, &tv.input);
     input.deinit(allocator);
+
+    try pretty.print(allocator, input, .{});
 
     std.debug.print("\n{any}\n", .{input});
 }
