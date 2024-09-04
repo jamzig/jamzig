@@ -67,4 +67,9 @@ test "tiny/enact-epoch-change-with-no-tickets-1" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(1, result.state.?.tau);
+
+    var post_eta = try tests.hexStringToBytes(allocator, "a0243a82952899598fcbc74aff0df58a71059a9882d4416919055c5d64bf2a45");
+    defer allocator.free(post_eta);
+
+    try std.testing.expectEqual(result.state.?.eta[0], post_eta[0..32].*);
 }

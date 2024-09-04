@@ -9,6 +9,8 @@ const tv_lib_safrole = @import("tests/vectors/libs/safrole.zig");
 
 const lib_safrole = @import("safrole/types.zig");
 
+pub const hexStringToBytes = tv_types.hex.hexStringToBytes;
+
 const Error = error{ FromError, OutOfMemory };
 const Allocator = std.mem.Allocator;
 
