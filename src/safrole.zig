@@ -2,6 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 
 pub const types = @import("safrole/types.zig");
+pub const entropy = @import("safrole/entropy.zig");
 
 // Constants
 pub const EPOCH_LENGTH: u32 = 600; // E in the grapaper
@@ -30,6 +31,10 @@ pub fn transition(allocator: std.mem.Allocator, pre_state: types.State, input: t
     var post_state = try pre_state.deepClone(allocator);
 
     post_state.tau = input.slot;
+
+    // Combine previous entropy accumulator (η0) with new entropy
+    // input η′0 ≡H(η0 ⌢ Y(Hv))
+    post_state.eta[0] = entropy.update(post_state.eta[0], input.entropy);
 
     // Calculate epoch and slot phase
     const prev_epoch = pre_state.tau / EPOCH_LENGTH;
