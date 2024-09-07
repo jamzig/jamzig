@@ -5,11 +5,23 @@ const TestVector = @import("../tests/vectors/libs/safrole.zig").TestVector;
 const tests = @import("../tests.zig");
 const safrole = @import("../safrole.zig");
 
+const diff = @import("../safrole_test/diffz.zig");
+
 pub const Fixtures = struct {
     pre_state: safrole.types.State,
     post_state: safrole.types.State,
     input: safrole.types.Input,
     output: safrole.types.Output,
+
+    pub fn diffStates(self: @This(), allocator: std.mem.Allocator) ![]const u8 {
+        return try diff.diffStates(allocator, &self.pre_state, &self.post_state);
+    }
+
+    pub fn diffStatesAndPrint(self: @This(), allocator: std.mem.Allocator) !void {
+        const diff_result = try self.diffStates(allocator);
+        defer allocator.free(diff_result);
+        try std.io.getStdErr().writer().print("{s}\n", .{diff_result});
+    }
 
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
         self.pre_state.deinit(allocator);
@@ -43,8 +55,3 @@ pub fn buildFixtures(allocator: std.mem.Allocator, name: []const u8) !Fixtures {
         .output = output,
     };
 }
-
-// pub fn diffFixtureStates(allocator: std.mem.Allocator, fixture: Fixtures) ![]const u8 {
-//
-// }
-//

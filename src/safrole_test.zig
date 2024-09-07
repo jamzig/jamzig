@@ -54,6 +54,8 @@ test "tiny/enact-epoch-change-with-no-tickets-1" {
     );
     defer fixtures.deinit(allocator);
 
+    try fixtures.diffStatesAndPrint(allocator);
+
     var result = try safrole.transition(
         allocator,
         fixtures.pre_state,
@@ -80,6 +82,8 @@ test "tiny/enact-epoch-change-with-no-tickets-2" {
         "tiny/enact-epoch-change-with-no-tickets-2.json",
     );
     defer fixtures.deinit(allocator);
+
+    try fixtures.diffStatesAndPrint(allocator);
 
     var result = try safrole.transition(
         allocator,
