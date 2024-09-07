@@ -26,6 +26,31 @@ pub const Fixtures = struct {
         try std.io.getStdErr().writer().print("{s}\n", .{diff_result});
     }
 
+    pub fn diffAgainstPostState(
+        self: @This(),
+        allocator: std.mem.Allocator,
+        state: *safrole.types.State,
+    ) ![]const u8 {
+        return try diff.diffStates(
+            allocator,
+            &self.post_state,
+            state,
+        );
+    }
+
+    pub fn diffAgainstPostStateAndPrint(
+        self: @This(),
+        allocator: std.mem.Allocator,
+        state: *safrole.types.State,
+    ) !void {
+        const diff_result = self.diffAgainstPostState(allocator, state) catch |err| {
+            std.debug.print("DiffAgainstPostState err {any}\n", .{err});
+            return err;
+        };
+        defer allocator.free(diff_result);
+        try std.io.getStdErr().writer().print("{s}\n", .{diff_result});
+    }
+
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
         self.pre_state.deinit(allocator);
         self.input.deinit(allocator);

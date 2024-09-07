@@ -83,7 +83,7 @@ test "tiny/enact-epoch-change-with-no-tickets-2" {
     );
     defer fixtures.deinit(allocator);
 
-    try fixtures.diffStatesAndPrint(allocator);
+    // try fixtures.diffStatesAndPrint(allocator);
 
     var result = try safrole.transition(
         allocator,
@@ -91,4 +91,11 @@ test "tiny/enact-epoch-change-with-no-tickets-2" {
         fixtures.input,
     );
     defer result.deinit(allocator);
+
+    try std.testing.expect(result.output == .err);
+    if (result.output == .err) {
+        try std.testing.expectEqual(.bad_slot, result.output.err);
+    } else {
+        @panic("unexpected output, expected and error");
+    }
 }
