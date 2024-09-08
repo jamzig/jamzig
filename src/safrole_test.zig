@@ -4,47 +4,6 @@ const tests = @import("tests.zig");
 const safrole = @import("safrole.zig");
 const safrole_fixtures = @import("safrole_test/fixtures.zig");
 
-// Input {
-// ---- Slot ----
-//   slot: 1
-//
-// ---- Entropy ----
-//   entropy: 0x8c2e6d327dfaa6ff8195513810496949210ad20a96e2b0672a3e1b9335080801
-//
-// ---- Extrinsic ----
-//   extrinsic: 0 ticket envelopes
-// }
-
-//   State Changes {
-//
-//   ---- Timeslot (τ) ----
-// !   tau: 0
-//
-//   ---- Entropy Accumulator (η) ----
-//     eta: [
-// !     0x03170a2e7597b7b7e3d84c05391d139a62b157e78786d8c082f29dcf4c111314
-//       0xee155ace9c40292074cb6aff8c9ccdd273c81648ff1149ef36bcea6ebb8a3e25
-//       0xbb30a42c1e62f0afda5f0a4e8a562f7a13a24cea00ee81917b86b89e801314aa
-//       0xe88bd757ad5b9bedf372d8d3f0cf6c962a469db61a265f6418e1ffed86da29ec
-// --- 1,11 ----
-//   State {
-//
-//   ---- Timeslot (τ) ----
-// !   tau: 1
-//
-//   ---- Entropy Accumulator (η) ----
-//     eta: [
-// !     0xa0243a82952899598fcbc74aff0df58a71059a9882d4416919055c5d64bf2a45
-//       0xee155ace9c40292074cb6aff8c9ccdd273c81648ff1149ef36bcea6ebb8a3e25
-//       0xbb30a42c1e62f0afda5f0a4e8a562f7a13a24cea00ee81917b86b89e801314aa
-//       0xe88bd757ad5b9bedf372d8d3f0cf6c962a469db61a265f6418e1ffed86da29ec
-
-// Expected Output {
-//   ok: {
-//     epoch_mark: null
-//     tickets_mark: null
-//   }
-// }
 test "tiny/enact-epoch-change-with-no-tickets-1" {
     const allocator = std.testing.allocator;
 
@@ -54,7 +13,7 @@ test "tiny/enact-epoch-change-with-no-tickets-1" {
     );
     defer fixtures.deinit();
 
-    try fixtures.diffStatesAndPrint();
+    // try fixtures.printInputStateChangesAndOutput();
 
     var result = try safrole.transition(
         allocator,
@@ -83,7 +42,7 @@ test "tiny/enact-epoch-change-with-no-tickets-2" {
     );
     defer fixtures.deinit();
 
-    // try fixtures.diffStatesAndPrint(allocator);
+    // try fixtures.printInputStateChangesAndOutput();
 
     var result = try safrole.transition(
         allocator,
@@ -92,10 +51,35 @@ test "tiny/enact-epoch-change-with-no-tickets-2" {
     );
     defer result.deinit(allocator);
 
+    // ensure result.state is null
+    try std.testing.expect(result.state == null);
+
     try std.testing.expect(result.output == .err);
     if (result.output == .err) {
         try std.testing.expectEqual(.bad_slot, result.output.err);
     } else {
         @panic("unexpected output, expected and error");
     }
+}
+
+test "tiny/enact-epoch-change-with-no-tickets-3" {
+    const allocator = std.testing.allocator;
+
+    const fixtures = try safrole_fixtures.buildFixtures(
+        allocator,
+        "tiny/enact-epoch-change-with-no-tickets-3.json",
+    );
+    defer fixtures.deinit();
+
+    // try fixtures.printInputStateChangesAndOutput();
+
+    var result = try safrole.transition(
+        allocator,
+        fixtures.pre_state,
+        fixtures.input,
+    );
+    defer result.deinit(allocator);
+
+    // Compare the fixture poststate with the result state
+    try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
 }
