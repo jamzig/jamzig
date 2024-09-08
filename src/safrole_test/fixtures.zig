@@ -51,6 +51,21 @@ pub const Fixtures = struct {
         try std.io.getStdErr().writer().print("{s}\n", .{diff_result});
     }
 
+    pub fn printOutput(self: @This()) !void {
+        try std.io.getStdErr().writer().print("Output: {any}\n", .{self.output});
+    }
+
+    pub fn printInput(self: @This()) !void {
+        try std.io.getStdErr().writer().print("Input: {any}\n", .{self.input});
+    }
+
+    pub fn printInputStateChangesAndOutput(self: @This()) !void {
+        std.debug.print("Fixture input, state changes and expected output:\n", .{});
+        try self.printInput();
+        try self.diffStatesAndPrint();
+        try self.printOutput();
+    }
+
     pub fn deinit(self: @This()) void {
         self.pre_state.deinit(self.allocator);
         self.input.deinit(self.allocator);
