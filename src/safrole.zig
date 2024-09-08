@@ -4,9 +4,34 @@ const ArrayList = std.ArrayList;
 pub const types = @import("safrole/types.zig");
 pub const entropy = @import("safrole/entropy.zig");
 
-// Constants
-pub const EPOCH_LENGTH: u32 = 600; // E in the grapaper
+pub const Params = struct {
+    epoch_length: u32 = 600,
+};
 
+const Safrole = struct {
+    allocator: std.mem.Allocator,
+    state: types.State,
+
+    epoch_length: u32,
+
+    pub fn init(allocator: std.mem.Allocator, state: types.State, params: Params) Safrole {
+        return .{
+            .allocator = allocator,
+            .state = state,
+            .params = params,
+        };
+    }
+
+    pub fn Y(self: *@This(), input: types.Input) !TransitionResult {
+        return transition(self.allocator, self.state, input);
+    }
+
+    pub fn deinit(self: Safrole) void {
+        self.state.deinit(self.allocator);
+    }
+};
+
+// Constant
 pub const TransitionResult = struct {
     output: types.Output,
     state: ?types.State,
@@ -19,7 +44,12 @@ pub const TransitionResult = struct {
     }
 };
 
-pub fn transition(allocator: std.mem.Allocator, pre_state: types.State, input: types.Input) !TransitionResult {
+pub fn transition(
+    allocator: std.mem.Allocator,
+    params: Params,
+    pre_state: types.State,
+    input: types.Input,
+) !TransitionResult {
     // Equation 41: H_t ∈ N_T, P(H)_t < H_t ∧ H_t · P ≤ T
     if (input.slot <= pre_state.tau) {
         return .{
@@ -37,9 +67,9 @@ pub fn transition(allocator: std.mem.Allocator, pre_state: types.State, input: t
     post_state.eta[0] = entropy.update(post_state.eta[0], input.entropy);
 
     // Calculate epoch and slot phase
-    const prev_epoch = pre_state.tau / EPOCH_LENGTH;
+    const prev_epoch = pre_state.tau / params.epoch_length;
     // const prev_slot_phase = pre_state.tau % EPOCH_LENGTH;
-    const current_epoch = input.slot / EPOCH_LENGTH;
+    const current_epoch = input.slot / params.epoch_length;
     // const current_slot_phase = input.slot % EPOCH_LENGTH;
 
     // Check for epoch transition
