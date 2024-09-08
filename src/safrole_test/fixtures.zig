@@ -51,12 +51,20 @@ pub const Fixtures = struct {
         try std.io.getStdErr().writer().print("{s}\n", .{diff_result});
     }
 
-    pub fn printOutput(self: @This()) !void {
-        try std.io.getStdErr().writer().print("Output: {any}\n", .{self.output});
-    }
-
     pub fn printInput(self: @This()) !void {
         try std.io.getStdErr().writer().print("Input: {any}\n", .{self.input});
+    }
+
+    pub fn printPreState(self: @This()) !void {
+        try std.io.getStdErr().writer().print("PreState: {any}\n", .{self.pre_state});
+    }
+
+    pub fn printPostState(self: @This()) !void {
+        try std.io.getStdErr().writer().print("PostState: {any}\n", .{self.post_state});
+    }
+
+    pub fn printOutput(self: @This()) !void {
+        try std.io.getStdErr().writer().print("Output: {any}\n", .{self.output});
     }
 
     pub fn printInputStateChangesAndOutput(self: @This()) !void {
