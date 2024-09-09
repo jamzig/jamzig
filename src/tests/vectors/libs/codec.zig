@@ -1,27 +1,27 @@
 const std = @import("std");
 
-const U8 = u8;
-const U16 = u16;
-const U32 = u32;
-const U64 = u64;
-const ByteSequence = []u8;
-const ByteArray32 = [32]u8;
+pub const U8 = u8;
+pub const U16 = u16;
+pub const U32 = u32;
+pub const U64 = u64;
+pub const ByteSequence = []u8;
+pub const ByteArray32 = [32]u8;
 
-const OpaqueHash = ByteArray32;
-const TimeSlot = U32;
-const ServiceId = U32;
-const Gas = U64;
-const ValidatorIndex = U16;
-const CoreIndex = U16;
-const TicketAttempt = u1; // as the range is 0..1
+pub const OpaqueHash = ByteArray32;
+pub const TimeSlot = U32;
+pub const ServiceId = U32;
+pub const Gas = U64;
+pub const ValidatorIndex = U16;
+pub const CoreIndex = U16;
+pub const TicketAttempt = u1; // as the range is 0..1
 
-const BandersnatchKey = ByteArray32;
-const Ed25519Key = ByteArray32;
-const BandersnatchVrfSignature = [96]u8;
-const BandersnatchRingSignature = [784]u8;
-const Ed25519Signature = [64]u8;
+pub const BandersnatchKey = ByteArray32;
+pub const Ed25519Key = ByteArray32;
+pub const BandersnatchVrfSignature = [96]u8;
+pub const BandersnatchRingSignature = [784]u8;
+pub const Ed25519Signature = [64]u8;
 
-const RefineContext = struct {
+pub const RefineContext = struct {
     anchor: OpaqueHash,
     state_root: OpaqueHash,
     beefy_root: OpaqueHash,
@@ -30,22 +30,22 @@ const RefineContext = struct {
     prerequisite: ?OpaqueHash = null,
 };
 
-const ImportSpec = struct {
+pub const ImportSpec = struct {
     tree_root: OpaqueHash,
     index: U16,
 };
 
-const ExtrinsicSpec = struct {
+pub const ExtrinsicSpec = struct {
     hash: OpaqueHash,
     len: U32,
 };
 
-const Authorizer = struct {
+pub const Authorizer = struct {
     code_hash: OpaqueHash,
     params: ByteSequence,
 };
 
-const WorkItem = struct {
+pub const WorkItem = struct {
     service: ServiceId,
     code_hash: OpaqueHash,
     payload: ByteSequence,
@@ -55,7 +55,7 @@ const WorkItem = struct {
     export_count: U16,
 };
 
-const WorkPackage = struct {
+pub const WorkPackage = struct {
     authorization: ByteSequence,
     auth_code_host: ServiceId,
     authorizer: Authorizer,
@@ -63,15 +63,15 @@ const WorkPackage = struct {
     items: [4]WorkItem,
 };
 
-const WorkExecResult = union(enum(u8)) {
-    ok: ByteSequence = 0,
-    out_of_gas: void = 1,
-    panic: void = 2,
-    bad_code: void = 3,
-    code_oversize: void = 4,
+pub const WorkExecResult = union(enum) {
+    ok: ByteSequence,
+    out_of_gas: void,
+    panic: void,
+    bad_code: void,
+    code_oversize: void,
 };
 
-const WorkResult = struct {
+pub const WorkResult = struct {
     service: ServiceId,
     code_hash: OpaqueHash,
     payload_hash: OpaqueHash,
@@ -79,14 +79,14 @@ const WorkResult = struct {
     result: WorkExecResult,
 };
 
-const WorkPackageSpec = struct {
+pub const WorkPackageSpec = struct {
     hash: OpaqueHash,
     len: U32,
     root: OpaqueHash,
     segments: OpaqueHash,
 };
 
-const WorkReport = struct {
+pub const WorkReport = struct {
     package_spec: WorkPackageSpec,
     context: RefineContext,
     core_index: CoreIndex,
@@ -95,19 +95,19 @@ const WorkReport = struct {
     results: [4]WorkResult,
 };
 
-const EpochMark = struct {
+pub const EpochMark = struct {
     entropy: OpaqueHash,
     validators: []BandersnatchKey, // validators-count size
 };
 
-const TicketBody = struct {
+pub const TicketBody = struct {
     id: OpaqueHash,
     attempt: TicketAttempt,
 };
 
 const TicketsMark = []TicketBody; // epoch-length
 
-const Header = struct {
+pub const Header = struct {
     parent: OpaqueHash,
     parent_state_root: OpaqueHash,
     extrinsic_hash: OpaqueHash,
@@ -120,52 +120,52 @@ const Header = struct {
     seal: BandersnatchVrfSignature,
 };
 
-const TicketEnvelope = struct {
+pub const TicketEnvelope = struct {
     attempt: TicketAttempt,
     signature: BandersnatchRingSignature,
 };
 
 const TicketsExtrinsic = [16]TicketEnvelope;
 
-const Judgement = struct {
+pub const Judgement = struct {
     vote: bool,
     index: ValidatorIndex,
     signature: Ed25519Signature,
 };
 
-const Verdict = struct {
+pub const Verdict = struct {
     target: OpaqueHash,
     age: U32,
     votes: []Judgement, // validators_super_majority
 };
 
-const Culprit = struct {
+pub const Culprit = struct {
     target: OpaqueHash,
     key: Ed25519Key,
     signature: Ed25519Signature,
 };
 
-const Fault = struct {
+pub const Fault = struct {
     target: OpaqueHash,
     vote: bool,
     key: Ed25519Key,
     signature: Ed25519Signature,
 };
 
-const DisputesExtrinsic = struct {
+pub const DisputesExtrinsic = struct {
     verdicts: []Verdict,
     culprits: []Culprit,
     faults: []Fault,
 };
 
-const Preimage = struct {
+pub const Preimage = struct {
     requester: ServiceId,
     blob: ByteSequence,
 };
 
 const PreimagesExtrinsic = []Preimage;
 
-const AvailAssurance = struct {
+pub const AvailAssurance = struct {
     anchor: OpaqueHash,
     bitfield: [1]u8, // avail_bitfield_bytes
     validator_index: ValidatorIndex,
@@ -174,12 +174,12 @@ const AvailAssurance = struct {
 
 const AssurancesExtrinsic = []AvailAssurance; // validators_count
 
-const ValidatorSignature = struct {
+pub const ValidatorSignature = struct {
     validator_index: ValidatorIndex,
     signature: Ed25519Signature,
 };
 
-const ReportGuarantee = struct {
+pub const ReportGuarantee = struct {
     report: WorkReport,
     slot: TimeSlot,
     signatures: []ValidatorSignature,
@@ -187,7 +187,7 @@ const ReportGuarantee = struct {
 
 const GuaranteesExtrinsic = []ReportGuarantee; // cores_count
 
-const Extrinsic = struct {
+pub const Extrinsic = struct {
     tickets: TicketsExtrinsic,
     disputes: DisputesExtrinsic,
     preimages: PreimagesExtrinsic,
@@ -195,7 +195,7 @@ const Extrinsic = struct {
     guarantees: GuaranteesExtrinsic,
 };
 
-const Block = struct {
+pub const Block = struct {
     header: Header,
     extrinsic: Extrinsic,
 };
