@@ -1,11 +1,15 @@
 const std = @import("std");
+const types = @import("types.zig");
+
+pub const HexBytes = types.hex.HexBytes;
+pub const HexBytesFixed = types.hex.HexBytesFixed;
 
 pub const U8 = u8;
 pub const U16 = u16;
 pub const U32 = u32;
 pub const U64 = u64;
-pub const ByteSequence = []u8;
-pub const ByteArray32 = [32]u8;
+pub const ByteSequence = HexBytes;
+pub const ByteArray32 = HexBytesFixed(32);
 
 pub const OpaqueHash = ByteArray32;
 pub const TimeSlot = U32;
@@ -17,9 +21,9 @@ pub const TicketAttempt = u1; // as the range is 0..1
 
 pub const BandersnatchKey = ByteArray32;
 pub const Ed25519Key = ByteArray32;
-pub const BandersnatchVrfSignature = [96]u8;
-pub const BandersnatchRingSignature = [784]u8;
-pub const Ed25519Signature = [64]u8;
+pub const BandersnatchVrfSignature = HexBytesFixed(96);
+pub const BandersnatchRingSignature = HexBytesFixed(784);
+pub const Ed25519Signature = HexBytesFixed(64);
 
 pub const RefineContext = struct {
     anchor: OpaqueHash,
@@ -42,13 +46,13 @@ pub const ExtrinsicSpec = struct {
 
 pub const Authorizer = struct {
     code_hash: OpaqueHash,
-    params: ByteSequence,
+    params: HexBytes,
 };
 
 pub const WorkItem = struct {
     service: ServiceId,
     code_hash: OpaqueHash,
-    payload: ByteSequence,
+    payload: HexBytes,
     gas_limit: Gas,
     import_segments: []ImportSpec,
     extrinsic: []ExtrinsicSpec,
@@ -56,19 +60,65 @@ pub const WorkItem = struct {
 };
 
 pub const WorkPackage = struct {
-    authorization: ByteSequence,
+    authorization: HexBytes,
     auth_code_host: ServiceId,
     authorizer: Authorizer,
     context: RefineContext,
-    items: [4]WorkItem,
+    items: []WorkItem, // max 4 workitems allowed
 };
 
 pub const WorkExecResult = union(enum) {
-    ok: ByteSequence,
+    ok: HexBytes,
     out_of_gas: void,
     panic: void,
     bad_code: void,
     code_oversize: void,
+
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: *std.json.Scanner,
+        options: std.json.ParseOptions,
+    ) std.json.ParseError(std.json.Scanner)!WorkExecResult {
+        if (.object_begin != try source.next()) return error.UnexpectedToken;
+
+        while (true) {
+            const name_token: ?std.json.Token = try source.nextAllocMax(allocator, .alloc_if_needed, options.max_value_len.?);
+            _ = switch (name_token.?) {
+                .string, .allocated_string => |slice| {
+                    if (std.mem.eql(u8, slice, "ok")) {
+                        const bytes = try std.json.innerParse(HexBytes, allocator, source, options);
+                        if (.object_end != try source.next()) return error.UnexpectedToken;
+                        return .{ .ok = bytes };
+                    } else if (std.mem.eql(u8, slice, "out_of_gas")) {
+                        _ = try source.next(); // ignore the null token
+                        if (.object_end != try source.next()) return error.UnexpectedToken;
+                        return .out_of_gas;
+                    } else if (std.mem.eql(u8, slice, "panic")) {
+                        _ = try source.next(); // ignore the null token
+                        if (.object_end != try source.next()) return error.UnexpectedToken;
+                        return .panic;
+                    } else if (std.mem.eql(u8, slice, "bad_code")) {
+                        _ = try source.next(); // ignore the null token
+                        if (.object_end != try source.next()) return error.UnexpectedToken;
+                        return .bad_code;
+                    } else if (std.mem.eql(u8, slice, "code_oversize")) {
+                        _ = try source.next(); // ignore the null token
+                        if (.object_end != try source.next()) return error.UnexpectedToken;
+                        return .code_oversize;
+                    } else {
+                        @panic("Unexpected field name");
+                    }
+                },
+                .object_end => { // No more fields.
+                    break;
+                },
+                else => {
+                    return error.UnexpectedToken;
+                },
+            };
+        }
+        unreachable;
+    }
 };
 
 pub const WorkResult = struct {
@@ -91,8 +141,8 @@ pub const WorkReport = struct {
     context: RefineContext,
     core_index: CoreIndex,
     authorizer_hash: OpaqueHash,
-    auth_output: ByteSequence,
-    results: [4]WorkResult,
+    auth_output: HexBytes,
+    results: []WorkResult, // max 4 allowed
 };
 
 pub const EpochMark = struct {
@@ -125,7 +175,7 @@ pub const TicketEnvelope = struct {
     signature: BandersnatchRingSignature,
 };
 
-const TicketsExtrinsic = [16]TicketEnvelope;
+const TicketsExtrinsic = []TicketEnvelope;
 
 pub const Judgement = struct {
     vote: bool,
@@ -160,14 +210,14 @@ pub const DisputesExtrinsic = struct {
 
 pub const Preimage = struct {
     requester: ServiceId,
-    blob: ByteSequence,
+    blob: HexBytes,
 };
 
 const PreimagesExtrinsic = []Preimage;
 
 pub const AvailAssurance = struct {
     anchor: OpaqueHash,
-    bitfield: [1]u8, // avail_bitfield_bytes
+    bitfield: HexBytes, // avail_bitfield_bytes
     validator_index: ValidatorIndex,
     signature: Ed25519Signature,
 };

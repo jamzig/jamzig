@@ -1,4 +1,6 @@
 comptime {
+    _ = @import("tests/vectors/codec.zig");
+
     _ = @import("safrole_test.zig");
     _ = @import("safrole/types_test.zig");
     _ = @import("safrole_test/diffz.zig");
