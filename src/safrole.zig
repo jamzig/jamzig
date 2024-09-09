@@ -99,7 +99,8 @@ pub fn transition(
         // TODO: (58) Zero out any offenders on post_state.iota, The origin of
         // the offenders is explained in section 10.
 
-        // Change ordering of our seal keys
+        // Tiny-4 presents us with a set of keys, and not tickets so we
+        // are in fallback mode.
         const gamma_s = post_state.gamma_s.keys;
         // TODO: gamma_s is a union check state
         post_state.gamma_s.keys = try Z_outsideInOrdering(types.BandersnatchKey, allocator, gamma_s);

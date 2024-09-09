@@ -6,8 +6,6 @@ pub const Ed25519Key = [32]u8;
 pub const BandersnatchKey = [32]u8;
 pub const OpaqueHash = [32]u8;
 
-pub const TicketOrKey = union(enum) { tickets: []TicketBody, keys: []BandersnatchKey };
-
 pub const EpochMark = struct {
     entropy: OpaqueHash,
     validators: []BandersnatchKey,
@@ -32,9 +30,16 @@ pub const ValidatorData = struct {
     metadata: [128]u8,
 };
 
-// TODO: Make a custom type to handle TicketOrKey
-// see mark-5
-pub const GammaS = TicketOrKey;
+// γₛ ∈ ⟦C⟧E ∪ ⟦HB⟧E
+// the current epoch’s slot-sealer series, which is either a
+// full complement of E tickets or, in the case of a fallback
+// mode, a series of E Bandersnatch keys
+pub const GammaS = union(enum) { tickets: []TicketBody, keys: []BandersnatchKey };
+
+// γₐ ∈ ⟦C⟧∶E
+// is the ticket accumulator, a series of highestscoring ticket identifiers to
+// be used for the next epoch
+pub const GammaA = []TicketBody;
 
 pub const GammaZ = [144]u8; // types.hex.HexBytesFixed(144);
 
@@ -66,10 +71,11 @@ pub const State = struct {
 
     /// γₐ: The sealing lottery ticket accumulator, part of the process ensuring
     /// randomness and fairness in block sealing.
-    gamma_a: []TicketBody,
+    gamma_a: GammaA,
 
-    /// γₛ: The sealing-key sequence for the current epoch, representing the order
-    /// and structure of keys used in the sealing process.
+    /// γₛ: the current epoch’s slot-sealer series, which is either a
+    // full complement of E tickets or, in the case of a fallback
+    // mode, a series of E Bandersnatch keys
     gamma_s: GammaS,
 
     /// γ𝑧: The Bandersnatch root for the current epoch’s ticket submissions,
@@ -112,8 +118,8 @@ pub const State = struct {
             .iota = try allocator.dupe(ValidatorData, self.iota),
             .gamma_a = try allocator.dupe(TicketBody, self.gamma_a),
             .gamma_s = switch (self.gamma_s) {
-                .tickets => |tickets| TicketOrKey{ .tickets = try allocator.dupe(TicketBody, tickets) },
-                .keys => |keys| TicketOrKey{ .keys = try allocator.dupe(BandersnatchKey, keys) },
+                .tickets => |tickets| GammaS{ .tickets = try allocator.dupe(TicketBody, tickets) },
+                .keys => |keys| GammaS{ .keys = try allocator.dupe(BandersnatchKey, keys) },
             },
             .gamma_z = self.gamma_z,
         };
