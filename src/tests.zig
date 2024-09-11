@@ -1,4 +1,5 @@
 comptime {
+    _ = @import("codec.zig");
     _ = @import("codec_test.zig");
     _ = @import("tests/vectors/codec.zig");
 

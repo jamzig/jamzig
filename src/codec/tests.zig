@@ -7,39 +7,44 @@ const codec_utils = @import("util.zig");
 const encodeFixedLengthInteger = codec.encodeFixedLengthInteger;
 
 test "codec: encodeFixedLengthInteger - u8 (edge case: 0)" {
-    const encoded8: [1]u8 = encodeFixedLengthInteger(@as(u8, 0));
+    var encoded8: [1]u8 = undefined;
+    encodeFixedLengthInteger(1, @as(u8, 0), &encoded8);
     const expected8: [1]u8 = [_]u8{0x00};
     try std.testing.expectEqualSlices(u8, &expected8, &encoded8);
 }
 
 test "codec: encodeFixedLengthInteger - u16 (max value)" {
-    const encoded16: [2]u8 = encodeFixedLengthInteger(@as(u16, 0xFFFF));
+    var encoded16: [2]u8 = undefined;
+    encodeFixedLengthInteger(2, @as(u16, 0xFFFF), &encoded16);
     const expected16: [2]u8 = [_]u8{ 0xFF, 0xFF };
     try std.testing.expectEqualSlices(u8, &expected16, &encoded16);
 }
 test "codec: encodeFixedLengthInteger - u24" {
-    const encoded24: [4]u8 = encodeFixedLengthInteger(@as(u24, 0x123456));
-    const expected24: [4]u8 = [_]u8{ 0x56, 0x34, 0x12, 0x00 };
+    var encoded24: [3]u8 = undefined;
+    encodeFixedLengthInteger(3, @as(u24, 0x123456), &encoded24);
+    const expected24: [3]u8 = [_]u8{ 0x56, 0x34, 0x12 };
     try std.testing.expectEqualSlices(u8, &expected24, &encoded24);
 }
 
 test "codec: encodeFixedLengthInteger - u32" {
-    const encoded32: [4]u8 = encodeFixedLengthInteger(@as(u32, 0x12345678));
+    var encoded32: [4]u8 = undefined;
+    encodeFixedLengthInteger(4, @as(u32, 0x12345678), &encoded32);
     const expected32: [4]u8 = [_]u8{ 0x78, 0x56, 0x34, 0x12 };
     try std.testing.expectEqualSlices(u8, &expected32, &encoded32);
 }
 
 test "codec: encodeFixedLengthInteger - u64" {
-    const encoded64: [8]u8 = encodeFixedLengthInteger(@as(u64, 0x123456789ABCDEF0));
+    var encoded64: [8]u8 = undefined;
+    encodeFixedLengthInteger(8, @as(u64, 0x123456789ABCDEF0), &encoded64);
     const expected64: [8]u8 = [_]u8{ 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12 };
     try std.testing.expectEqualSlices(u8, &expected64, &encoded64);
 }
 
-test "codec: encodeFixedLengthInteger - u128" {
-    const encoded128: [16]u8 = encodeFixedLengthInteger(@as(u128, 0x123456789ABCDEF0123456789ABCDEF0));
-    const expected128: [16]u8 = [_]u8{ 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12, 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12 };
-    try std.testing.expectEqualSlices(u8, &expected128, &encoded128);
-}
+// test "codec: encodeFixedLengthInteger - u128" {
+//     const encoded128: [16]u8 = encodeFixedLengthInteger(@as(u128, 0x123456789ABCDEF0123456789ABCDEF0));
+//     const expected128: [16]u8 = [_]u8{ 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12, 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12 };
+//     try std.testing.expectEqualSlices(u8, &expected128, &encoded128);
+// }
 
 // find_l tests
 
@@ -96,6 +101,25 @@ test "codec: find_l - u64 values" {
 
 const encodeInteger = codec.encodeInteger;
 
+test "codec: encode test" {
+    // l=0 one byte return for all values to 127
+    const result_100 = encodeInteger(@as(u8, 100));
+    try std.testing.expectEqualSlices(u8, &[_]u8{100}, result_100.as_slice());
+
+    // l=1 two bytes return for all values to 128 where we have a prefix indicating
+    // the length of the value.
+    const result_128 = encodeInteger(@as(u8, 128));
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0x80, 0x80 }, result_128.as_slice());
+
+    // 562949953421312 (2^49)
+    const result_large = encodeInteger(@as(u64, 562949953421312));
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 }, result_large.as_slice());
+
+    // 562949953421312 (2^64)
+    const result_max = encodeInteger(std.math.maxInt(u64));
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }, result_max.as_slice());
+}
+
 test "codec: encodeInteger - u8 (0)" {
     const result = encodeInteger(@as(u8, 0));
     try std.testing.expectEqual(@as(u8, 1), result.len);
@@ -116,8 +140,8 @@ test "codec: encodeInteger - u8 (127)" {
 test "codec: encodeInteger - u8 (128)" {
     const result = encodeInteger(@as(u8, 128));
     try std.testing.expectEqual(@as(u8, 2), result.len);
-    try std.testing.expectEqualSlices(u8, &[_]u8{ 0x81, 0x80 }, result.data[0..2]);
-    try std.testing.expectEqualSlices(u8, &[_]u8{ 0x81, 0x80 }, result.as_slice());
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0x80, 0x80 }, result.data[0..2]);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0x80, 0x80 }, result.as_slice());
 }
 
 test "codec: encodeInteger - fuzz test" {

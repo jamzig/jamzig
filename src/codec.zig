@@ -7,28 +7,24 @@ pub fn deserialize(comptime T: type, data: []u8) !T {
 
 /// (271) Function to encode an integer into a specified number of octets in
 /// little-endian format
-pub fn encodeFixedLengthInteger(x: anytype) [@sizeOf(@TypeOf(x))]u8 {
-    const L = @sizeOf(@TypeOf(x)); // Determine the size of the value in bytes
-    return encodeFixedLengthIntegerWithSize(L, x);
-}
+pub fn encodeFixedLengthInteger(l: usize, x: anytype, buffer: []u8) void {
+    std.debug.assert(l > 0);
+    std.debug.assert(buffer.len >= l);
 
-fn encodeFixedLengthIntegerWithSize(comptime L: usize, x: anytype) [L]u8 {
-    var result: [L]u8 = undefined;
-
-    if (L == 1) {
-        result[0] = @intCast(x);
-        return result;
+    if (l == 1) {
+        buffer[0] = @intCast(x & 0xff);
+        return;
     }
 
-    var value: @TypeOf(x) = x;
+    var value: u64 = @intCast(x);
     var i: usize = 0;
 
-    while (i < L) : (i += 1) {
-        result[i] = @intCast(value & 0xff);
+    while (i < l) : (i += 1) {
+        const masked_value = value & 0xff;
+
+        buffer[i] = @intCast(masked_value);
         value >>= 8;
     }
-
-    return result;
 }
 
 /// Encoding result as specified in the encoding section of the gray paper
@@ -75,12 +71,16 @@ pub fn encodeInteger(x: anytype) EncodingResult {
         } else {
             // In this case, we need to store the length and pack the value
             // of the remainder at the end.
-            const data = encodeFixedLengthInteger(x);
-            return EncodingResult.build(prefix, &data);
+            var data: [8]u8 = undefined;
+            encodeFixedLengthInteger(l, x, &data);
+            return EncodingResult.build(prefix, data[0..l]);
         }
     } else {
         // When `l` is not found, we need to encode the value as a fixed-length integer.
-        const data = encodeFixedLengthInteger(x);
+
+        var data: [8]u8 = undefined;
+        encodeFixedLengthInteger(8, x, &data);
+
         return EncodingResult.build(0xFF, &data);
     }
 }
