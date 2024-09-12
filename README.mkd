@@ -1,0 +1,50 @@
+# JAMZIG node
+
+
+## **Enabling Tracing **
+=====================================
+
+This project allows you to enable tracing on specific scopes or source files using the `tracing` module. Tracing can be useful for debugging and understanding the execution flow of your program.
+
+**Enabling Tracing by Scope**
+-----------------------------
+
+To enable tracing by scope, you can pass the `tracing_scope` option to the build command. This option takes a list of scopes that you want to enable tracing for.
+
+For example, to enable tracing for the `main` scope, you can use the following command:
+```bash
+zig build -Dtracing_scope=main
+```
+You can also enable tracing for multiple scopes by passing a list of scopes separated by commas:
+```bash
+zig build -Dtracing_scope=main,codec
+```
+**Enabling Tracing by Source File or Function**
+--------------------------------
+
+To enable tracing by source file, you can pass the `tracing_source` option to the build command. This option takes a list of source files that you want to enable tracing for.
+
+For example, to enable tracing for the `src/main.zig` file, you can use the following command:
+```bash
+zig build -Dtracing_source=src/main.zig
+```
+You can also enable tracing for multiple source files by passing a list of files separated by commas:
+```bash
+zig build -Dtracing_source=src/main.zig,src/codec.zig
+```
+**Using the Tracing Module**
+---------------------------
+
+To use the tracing module in your code, you need to import the `tracing` module and call the `src` function to log a message.
+
+For example:
+```zig
+const tracing = @import("tracing.zig");
+
+pub fn main() !void {
+    tracing.src(@src(), "Hello, World!  \n", .{});
+}
+```
+This will log a message with the file and line number of the `main` function.
+
+Note: The `@src()` function returns the source location of the current file and line number.

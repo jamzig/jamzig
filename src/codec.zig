@@ -50,6 +50,7 @@ fn recursiveDeserializeLeaky(comptime T: type, allocator: std.mem.Allocator, sca
             // pub const Optional = struct {
             //     child: type,
             // };
+            std.log.info("Deserializing optional\n", .{});
             const present = try scanner.readByte();
             if (present == 0) {
                 return null;

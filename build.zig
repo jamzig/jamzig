@@ -15,6 +15,9 @@ pub fn build(b: *std.Build) !void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const tracing_scopes = b.option([][]const u8, "tracing_scope", "Enable detailed tracing by scope") orelse &[_][]const u8{};
+    const tracing_source_location = b.option([][]const u8, "tracing_source", "Enable detailed tracing by source location") orelse &[_][]const u8{};
+
     const tracy = b.option([]const u8, "tracy", "Enable Tracy integration. Supply path to Tracy source");
     const tracy_callstack = b.option(bool, "tracy-callstack", "Include callstack information with Tracy data. Does nothing if -Dtracy is not provided") orelse (tracy != null);
     const tracy_allocation = b.option(bool, "tracy-allocation", "Include allocation information with Tracy data. Does nothing if -Dtracy is not provided") orelse (tracy != null);
@@ -50,6 +53,9 @@ pub fn build(b: *std.Build) !void {
 
     const exe_options = b.addOptions();
     exe.root_module.addOptions("build_options", exe_options);
+
+    exe_options.addOption([]const []const u8, "enable_tracing_scopes", tracing_scopes);
+    exe_options.addOption([]const []const u8, "enable_tracing_source_location", tracing_source_location);
 
     exe_options.addOption(bool, "enable_tracy", tracy != null);
     exe_options.addOption(bool, "enable_tracy_callstack", tracy_callstack);
