@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArenaAllocator = std.heap.ArenaAllocator;
 const decoder = @import("codec/decoder.zig");
 const Scanner = @import("codec/scanner.zig").Scanner;
 
@@ -8,22 +9,26 @@ pub fn Deserialized(T: anytype) type {
         arena: *std.heap.ArenaAllocator,
 
         pub fn deinit(self: @This()) void {
+            const allocator = self.arena.child_allocator;
             self.arena.deinit();
+            allocator.destroy(self.arena);
         }
     };
 }
 
 pub fn deserialize(comptime T: type, parent_allocator: std.mem.Allocator, data: []u8) !Deserialized(T) {
-    var arena = std.heap.ArenaAllocator.init(parent_allocator);
-    errdefer arena.deinit();
+    var result = Deserialized(T){
+        .arena = try parent_allocator.create(ArenaAllocator),
+        .value = undefined,
+    };
+    errdefer parent_allocator.destroy(result.arena);
+    result.arena.* = ArenaAllocator.init(parent_allocator);
+    errdefer result.arena.deinit();
 
     var scanner = Scanner.initCompleteInput(data);
-    const value = try recursiveDeserializeLeaky(T, arena.allocator(), &scanner);
+    result.value = try recursiveDeserializeLeaky(T, result.arena.allocator(), &scanner);
 
-    return Deserialized(T){
-        .value = value,
-        .arena = &arena,
-    };
+    return result;
 }
 
 /// `scanner_or_reader` must be either a `*std.json.Scanner` with complete input or a `*std.json.Reader`.
@@ -87,6 +92,17 @@ fn recursiveDeserializeLeaky(comptime T: type, allocator: std.mem.Allocator, sca
                 },
             }
         },
+        .@"union" => |unionInfo| {
+            // unionInfo = struct {
+            //     layout: ContainerLayout,
+            //     tag_type: ?type,
+            //     fields: []const UnionField,
+            //     decls: []const Declaration,
+            // };
+            _ = unionInfo;
+            @compileError("Unions are not supported for deserialization");
+        },
+
         else => {
             @compileError("Unsupported type for deserialization: " ++ @typeName(T));
         },

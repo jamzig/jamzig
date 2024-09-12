@@ -119,6 +119,10 @@ pub const Header = struct {
     author_index: ValidatorIndex,
     entropy_source: BandersnatchVrfSignature,
     seal: BandersnatchVrfSignature,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try @import("types/format.zig").formatHeader(self, writer);
+    }
 };
 
 pub const TicketEnvelope = struct {

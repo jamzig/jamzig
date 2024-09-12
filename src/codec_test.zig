@@ -17,6 +17,6 @@ test "codec.active: deserialize header from supplied test vector" {
 
     std.debug.print("header: {any}\n", .{header.value});
 
-    try std.json.stringify(header.value, .{ .whitespace = .indent_2 }, std.io.getStdErr().writer());
+    // try std.json.stringify(header.value, .{ .whitespace = .indent_2 }, std.io.getStdErr().writer());
     std.debug.print("\n", .{});
 }
