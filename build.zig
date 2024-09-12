@@ -15,6 +15,10 @@ pub fn build(b: *std.Build) !void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const tracy = b.option([]const u8, "tracy", "Enable Tracy integration. Supply path to Tracy source");
+    const tracy_callstack = b.option(bool, "tracy-callstack", "Include callstack information with Tracy data. Does nothing if -Dtracy is not provided") orelse (tracy != null);
+    const tracy_allocation = b.option(bool, "tracy-allocation", "Include allocation information with Tracy data. Does nothing if -Dtracy is not provided") orelse (tracy != null);
+
     // This is a list of filters that can be passed to the test step to run only
     // can be specified by:
     //
@@ -43,6 +47,29 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+
+    const exe_options = b.addOptions();
+    exe.root_module.addOptions("build_options", exe_options);
+
+    exe_options.addOption(bool, "enable_tracy", tracy != null);
+    exe_options.addOption(bool, "enable_tracy_callstack", tracy_callstack);
+    exe_options.addOption(bool, "enable_tracy_allocation", tracy_allocation);
+
+    if (tracy) |tracy_path| {
+        const client_cpp = b.pathJoin(
+            &[_][]const u8{ tracy_path, "public", "TracyClient.cpp" },
+        );
+
+        // On mingw, we need to opt into windows 7+ to get some features required by tracy.
+        const tracy_c_flags: []const []const u8 = &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
+
+        exe.addIncludePath(.{ .cwd_relative = tracy_path });
+        exe.addCSourceFile(.{ .file = .{ .cwd_relative = client_cpp }, .flags = tracy_c_flags });
+
+        // exe.root_module.linkSystemLibrary("c++", .{ .use_pkg_config = .no });
+        exe.linkLibCpp();
+        exe.linkLibC();
+    }
 
     // Resister the dependencies
     // exe.root_module.addImport("diffz", diffz_dependency.module("diffz"));

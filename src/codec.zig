@@ -2,6 +2,7 @@ const std = @import("std");
 const ArenaAllocator = std.heap.ArenaAllocator;
 const decoder = @import("codec/decoder.zig");
 const Scanner = @import("codec/scanner.zig").Scanner;
+const tracy = @import("tracy.zig");
 
 pub fn Deserialized(T: anytype) type {
     return struct {
@@ -17,6 +18,9 @@ pub fn Deserialized(T: anytype) type {
 }
 
 pub fn deserialize(comptime T: type, parent_allocator: std.mem.Allocator, data: []u8) !Deserialized(T) {
+    const t = tracy.trace(@src());
+    defer t.end();
+
     var result = Deserialized(T){
         .arena = try parent_allocator.create(ArenaAllocator),
         .value = undefined,
