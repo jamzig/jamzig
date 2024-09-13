@@ -47,6 +47,7 @@ test "codec.active: decode header-1" {
     std.debug.print("\n", .{});
 
     const expected = try convert.headerFromTestVector(allocator, &vector.expected.value);
+    defer convert.freeObject(allocator, expected);
 
     std.debug.print("expected: {any}\n", .{expected});
 

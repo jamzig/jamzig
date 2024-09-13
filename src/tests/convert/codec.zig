@@ -270,3 +270,37 @@ fn convertTicketBody(from: tv_lib_codec.TicketBody) lib_codec.TicketBody {
         .attempt = from.attempt,
     };
 }
+
+/// This a generic function to free an converted object using the allocator.
+pub fn freeObject(allocator: Allocator, obj: anytype) void {
+    const T = @TypeOf(obj);
+    switch (@typeInfo(T)) {
+        .@"struct" => |structInfo| {
+            inline for (structInfo.fields) |field| {
+                if (@typeInfo(field.type) == .pointer and @typeInfo(field.type).pointer.size == .Slice) {
+                    allocator.free(@field(obj, field.name));
+                } else {
+                    freeObject(allocator, @field(obj, field.name));
+                }
+            }
+        },
+        .pointer => |ptrInfo| {
+            if (ptrInfo.size == .Slice) {
+                allocator.free(obj);
+            } else if (ptrInfo.size == .One) {
+                freeObject(allocator, obj.*);
+            }
+        },
+        .optional => {
+            if (obj) |value| {
+                freeObject(allocator, value);
+            }
+        },
+        .array => {
+            for (obj) |item| {
+                freeObject(allocator, item);
+            }
+        },
+        else => {},
+    }
+}
