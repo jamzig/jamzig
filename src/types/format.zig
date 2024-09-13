@@ -23,7 +23,7 @@ pub fn formatHeader(header: types.Header, writer: anytype) !void {
 
     if (header.tickets_mark) |tickets_mark| {
         try writer.print("  tickets_mark: [\n", .{});
-        for (tickets_mark) |ticket| {
+        for (tickets_mark.tickets) |ticket| {
             try writer.print("    {{ id: 0x{s}, attempt: {d} }}\n", .{ std.fmt.fmtSliceHexLower(&ticket.id), ticket.attempt });
         }
         try writer.print("  ]\n", .{});

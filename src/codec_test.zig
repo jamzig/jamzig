@@ -23,8 +23,16 @@ test "codec.active: decode header" {
     // validators-super-majority INTEGER ::= 5
     // -- (cores-count + 7) / 8
     // avail-bitfield-bytes INTEGER ::= 1
+    //
+    const params = types.CodecParams{
+        .validators = 6,
+        .epoch_length = 12,
+        .cores_count = 2,
+        .validators_super_majority = 5,
+        .avail_bitfield_bytes = 1,
+    };
 
-    var header = try codec.deserialize(types.Header, allocator, vector.binary);
+    var header = try codec.deserialize(types.Header, params, allocator, vector.binary);
     defer header.deinit();
 
     std.debug.print("header: {any}\n", .{header.value});

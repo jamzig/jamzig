@@ -61,6 +61,7 @@ pub const WorkPackage = struct {
     auth_code_host: ServiceId,
     authorizer: Authorizer,
     context: RefineContext,
+    // TODO: check this
     items: []WorkItem, // max 4 workitems allowed
 };
 
@@ -93,12 +94,18 @@ pub const WorkReport = struct {
     core_index: CoreIndex,
     authorizer_hash: OpaqueHash,
     auth_output: []u8,
+    // TODO: check this
     results: []WorkResult, // max 4 allowed
 };
 
 pub const EpochMark = struct {
     entropy: OpaqueHash,
     validators: []BandersnatchKey, // validators-count size
+
+    // validator size is defined at runtime
+    pub fn validators_size(params: CodecParams) usize {
+        return params.validators;
+    }
 };
 
 pub const TicketBody = struct {
@@ -106,17 +113,13 @@ pub const TicketBody = struct {
     attempt: TicketAttempt,
 };
 
-const TicketsMark = []TicketBody; // epoch-length
+pub const TicketsMark = struct {
+    tickets: []TicketBody, // epoch-length
 
-const CodecParams = struct {
-    validators: usize,
-    epoch_length: usize,
-    cores_count: usize,
-
-    // -- (validators-count * 2/3 + 1)
-    validators_super_majority: usize,
-    // -- (cores-count + 7) / 8
-    avail_bitfield_bytes: usize,
+    // epoch length is defined at runtime
+    pub fn tickets_size(params: CodecParams) usize {
+        return params.epoch_length;
+    }
 };
 
 pub const Header = struct {
@@ -214,4 +217,15 @@ pub const Extrinsic = struct {
 pub const Block = struct {
     header: Header,
     extrinsic: Extrinsic,
+};
+
+pub const CodecParams = struct {
+    validators: usize,
+    epoch_length: usize,
+    cores_count: usize,
+
+    // -- (validators-count * 2/3 + 1)
+    validators_super_majority: usize,
+    // -- (cores-count + 7) / 8
+    avail_bitfield_bytes: usize,
 };

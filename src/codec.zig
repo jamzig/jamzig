@@ -17,7 +17,7 @@ pub fn Deserialized(T: anytype) type {
     };
 }
 
-pub fn deserialize(comptime T: type, parent_allocator: std.mem.Allocator, data: []u8) !Deserialized(T) {
+pub fn deserialize(comptime T: type, comptime params: anytype, parent_allocator: std.mem.Allocator, data: []u8) !Deserialized(T) {
     trace(@src(), "deserialize: start", .{});
     defer trace(@src(), "deserialize: end", .{});
 
@@ -30,7 +30,7 @@ pub fn deserialize(comptime T: type, parent_allocator: std.mem.Allocator, data: 
     errdefer result.arena.deinit();
 
     var scanner = Scanner.initCompleteInput(data);
-    result.value = try recursiveDeserializeLeaky(T, result.arena.allocator(), &scanner);
+    result.value = try recursiveDeserializeLeaky(T, params, result.arena.allocator(), &scanner);
 
     return result;
 }
@@ -38,7 +38,7 @@ pub fn deserialize(comptime T: type, parent_allocator: std.mem.Allocator, data: 
 /// `scanner_or_reader` must be either a `*std.json.Scanner` with complete input or a `*std.json.Reader`.
 /// Allocations made during this operation are not carefully tracked and may not be possible to individually clean up.
 /// It is recommended to use a `std.heap.ArenaAllocator` or similar.
-fn recursiveDeserializeLeaky(comptime T: type, allocator: std.mem.Allocator, scanner: *Scanner) !T {
+fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, scanner: *Scanner) !T {
     trace(@src(), "start - type: {s}", .{@typeName(T)});
     defer trace(@src(), "recursiveDeserializeLeaky: end - type: {s}", .{@typeName(T)});
 
@@ -62,7 +62,7 @@ fn recursiveDeserializeLeaky(comptime T: type, allocator: std.mem.Allocator, sca
                 return null;
             } else if (present == 1) {
                 trace(@src(), "handling optional: present {any}", .{@typeName(optionalInfo.child)});
-                return try recursiveDeserializeLeaky(optionalInfo.child, allocator, scanner);
+                return try recursiveDeserializeLeaky(optionalInfo.child, params, allocator, scanner);
             } else {
                 return error.InvalidValueForOptional;
             }
@@ -77,9 +77,23 @@ fn recursiveDeserializeLeaky(comptime T: type, allocator: std.mem.Allocator, sca
             var result: T = undefined;
             inline for (fields) |field| {
                 trace(@src(), "deserializing struct field: {s}", .{field.name});
+
                 const field_type = field.type;
-                const field_value = try recursiveDeserializeLeaky(field_type, allocator, scanner);
-                @field(result, field.name) = field_value;
+                if (@hasDecl(T, field.name ++ "_size")) {
+                    // Special handling for fields with a corresponding _size function
+                    // if this function is present we ware using the size from the size function
+                    // otherwise we will use the frin the prefex
+                    const size_fn = @field(T, field.name ++ "_size");
+                    const size = @call(.auto, size_fn, .{params});
+                    const slice = try allocator.alloc(std.meta.Child(field_type), size);
+                    for (slice) |*item| {
+                        item.* = try recursiveDeserializeLeaky(std.meta.Child(field_type), params, allocator, scanner);
+                    }
+                    @field(result, field.name) = slice;
+                } else {
+                    const field_value = try recursiveDeserializeLeaky(field_type, params, allocator, scanner);
+                    @field(result, field.name) = field_value;
+                }
             }
             return result;
         },
@@ -99,7 +113,7 @@ fn recursiveDeserializeLeaky(comptime T: type, allocator: std.mem.Allocator, sca
                     trace(@src(), "recursiveDeserializeLeaky: slice length: {}", .{len.value});
                     const slice = try allocator.alloc(pointerInfo.child, @intCast(len.value));
                     for (slice) |*item| {
-                        item.* = try recursiveDeserializeLeaky(pointerInfo.child, allocator, scanner);
+                        item.* = try recursiveDeserializeLeaky(pointerInfo.child, params, allocator, scanner);
                     }
                     return slice;
                 },
