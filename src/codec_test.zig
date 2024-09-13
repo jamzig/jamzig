@@ -6,33 +6,37 @@ const codec_test = @import("tests/vectors/codec.zig");
 
 const types = @import("types.zig");
 
-test "codec.active: decode header" {
+/// The Tiny PARAMS as they are defined in the ASN
+const TINY_PARAMS = types.CodecParams{
+    .validators = 6,
+    .epoch_length = 12,
+    .cores_count = 2,
+    .validators_super_majority = 5,
+    .avail_bitfield_bytes = 1,
+};
+
+test "codec: decode header-0" {
     const allocator = std.testing.allocator;
 
     const vector = try codec_test.CodecTestVector(codec_test.types.Header).build_from(allocator, "src/tests/vectors/codec/codec/data/header_0.json");
     defer vector.deinit();
 
-    // We need to specify these variables at runtime, and at deserialization
-    // check if they are present.
-    //
-    // validators-count INTEGER ::= 6
-    // epoch-length INTEGER ::= 12
-    // cores-count INTEGER ::= 2
-    //
-    // -- (validators-count * 2/3 + 1)
-    // validators-super-majority INTEGER ::= 5
-    // -- (cores-count + 7) / 8
-    // avail-bitfield-bytes INTEGER ::= 1
-    //
-    const params = types.CodecParams{
-        .validators = 6,
-        .epoch_length = 12,
-        .cores_count = 2,
-        .validators_super_majority = 5,
-        .avail_bitfield_bytes = 1,
-    };
+    var header = try codec.deserialize(types.Header, TINY_PARAMS, allocator, vector.binary);
+    defer header.deinit();
 
-    var header = try codec.deserialize(types.Header, params, allocator, vector.binary);
+    std.debug.print("header: {any}\n", .{header.value});
+
+    // try std.json.stringify(header.value, .{ .whitespace = .indent_2 }, std.io.getStdErr().writer());
+    std.debug.print("\n", .{});
+}
+
+test "codec.active: decode header-1" {
+    const allocator = std.testing.allocator;
+
+    const vector = try codec_test.CodecTestVector(codec_test.types.Header).build_from(allocator, "src/tests/vectors/codec/codec/data/header_1.json");
+    defer vector.deinit();
+
+    var header = try codec.deserialize(types.Header, TINY_PARAMS, allocator, vector.binary);
     defer header.deinit();
 
     std.debug.print("header: {any}\n", .{header.value});

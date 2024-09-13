@@ -14,7 +14,7 @@ pub const ServiceId = U32;
 pub const Gas = U64;
 pub const ValidatorIndex = U16;
 pub const CoreIndex = U16;
-pub const TicketAttempt = u1; // as the range is 0..1
+pub const TicketAttempt = u8; // as the range is 0..1
 
 pub const BandersnatchKey = ByteArray32;
 pub const Ed25519Key = ByteArray32;
