@@ -4,6 +4,8 @@ const testing = std.testing;
 const codec = @import("codec.zig");
 const codec_test = @import("tests/vectors/codec.zig");
 
+const convert = @import("tests/convert/codec.zig");
+
 const types = @import("types.zig");
 
 /// The Tiny PARAMS as they are defined in the ASN
@@ -36,11 +38,17 @@ test "codec.active: decode header-1" {
     const vector = try codec_test.CodecTestVector(codec_test.types.Header).build_from(allocator, "src/tests/vectors/codec/codec/data/header_1.json");
     defer vector.deinit();
 
-    var header = try codec.deserialize(types.Header, TINY_PARAMS, allocator, vector.binary);
+    const header = try codec.deserialize(types.Header, TINY_PARAMS, allocator, vector.binary);
     defer header.deinit();
 
     std.debug.print("header: {any}\n", .{header.value});
 
     // try std.json.stringify(header.value, .{ .whitespace = .indent_2 }, std.io.getStdErr().writer());
     std.debug.print("\n", .{});
+
+    const expected = try convert.headerFromTestVector(allocator, &vector.expected.value);
+
+    std.debug.print("expected: {any}\n", .{expected});
+
+    try std.testing.expectEqualDeep(expected, header.value);
 }

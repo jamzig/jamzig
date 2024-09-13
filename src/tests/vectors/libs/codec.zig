@@ -155,7 +155,7 @@ pub const TicketBody = struct {
     attempt: TicketAttempt,
 };
 
-const TicketsMark = []TicketBody; // epoch-length
+pub const TicketsMark = []TicketBody; // epoch-length
 
 pub const Header = struct {
     parent: OpaqueHash,
