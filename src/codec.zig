@@ -128,15 +128,35 @@ fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocat
             }
         },
         .@"union" => |unionInfo| {
+            trace(@src(), "handling union field: {s}", .{@typeName(T)});
+
             // unionInfo = struct {
             //     layout: ContainerLayout,
             //     tag_type: ?type,
             //     fields: []const UnionField,
             //     decls: []const Declaration,
             // };
-            _ = unionInfo;
-            trace(@src(), "handling union field: {s}", .{@typeName(T)});
-            @compileError("Unions are not supported for deserialization. Field: " ++ @typeName(T));
+
+            // Read the union tag (index) using variable-length encoding
+            const tag_value = try decoder.decodeInteger(scanner.remainingBuffer());
+            try scanner.advanceCursor(tag_value.bytes_read);
+
+            inline for (unionInfo.fields, 0..) |field, idx| {
+                if (tag_value.value == idx) {
+                    trace(@src(), "union field: {s}", .{field.name});
+
+                    // Check if the active field's type is void
+                    if (field.type == void) {
+                        return @unionInit(T, field.name, {});
+                    } else {
+                        // Recursively deserialize the active field
+                        const field_value: []u8 = try recursiveDeserializeLeaky(field.type, params, allocator, scanner);
+                        return @unionInit(T, field.name, field_value);
+                    }
+                }
+            }
+
+            return error.InvalidUnionTag;
         },
 
         else => {

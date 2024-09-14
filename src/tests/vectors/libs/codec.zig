@@ -67,12 +67,12 @@ pub const WorkPackage = struct {
     items: []WorkItem, // max 4 workitems allowed
 };
 
-pub const WorkExecResult = union(enum) {
-    ok: HexBytes,
-    out_of_gas: void,
-    panic: void,
-    bad_code: void,
-    code_oversize: void,
+pub const WorkExecResult = union(enum(u8)) {
+    ok: HexBytes = 0,
+    out_of_gas: void = 1,
+    panic: void = 2,
+    bad_code: void = 3,
+    code_oversize: void = 4,
 
     pub fn jsonParse(
         allocator: std.mem.Allocator,

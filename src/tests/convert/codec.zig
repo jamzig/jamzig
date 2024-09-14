@@ -10,12 +10,23 @@ pub const generic = @import("generic.zig");
 
 /// Mapping between types in the test vector and the codec.
 const TypeMapping = struct {
+    pub fn HexBytes(allocator: Allocator, from: tv_types.hex.HexBytes) ![]u8 {
+        return try allocator.dupe(u8, from.bytes);
+    }
     pub fn @"HexBytesFixed(32)"(from: tv_types.hex.HexBytesFixed(32)) [32]u8 {
         return convertHexBytesFixedToArray(32, from);
     }
 
+    pub fn @"HexBytesFixed(64)"(from: tv_types.hex.HexBytesFixed(64)) [64]u8 {
+        return convertHexBytesFixedToArray(64, from);
+    }
+
     pub fn @"HexBytesFixed(96)"(from: tv_types.hex.HexBytesFixed(96)) [96]u8 {
         return convertHexBytesFixedToArray(96, from);
+    }
+
+    pub fn @"HexBytesFixed(784)"(from: tv_types.hex.HexBytesFixed(784)) [784]u8 {
+        return convertHexBytesFixedToArray(784, from);
     }
 
     pub fn TicketBody(allocator: Allocator, from: []const tv_lib_codec.TicketBody) !lib_codec.TicketsMark {
@@ -24,6 +35,15 @@ const TypeMapping = struct {
             tickets[i] = convertTicketBody(ticket);
         }
         return lib_codec.TicketsMark{ .tickets = tickets };
+    }
+    pub fn WorkExecResult(allocator: Allocator, from: tv_lib_codec.WorkExecResult) !lib_codec.WorkExecResult {
+        return switch (from) {
+            .ok => |ok| lib_codec.WorkExecResult{ .ok = try allocator.dupe(u8, ok.bytes) },
+            .out_of_gas => lib_codec.WorkExecResult.out_of_gas,
+            .panic => lib_codec.WorkExecResult.panic,
+            .bad_code => lib_codec.WorkExecResult.bad_code,
+            .code_oversize => lib_codec.WorkExecResult.code_oversize,
+        };
     }
 };
 

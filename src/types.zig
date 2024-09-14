@@ -158,7 +158,7 @@ pub const Verdict = struct {
     votes: []Judgement, // validators_super_majority
 
     // validators_super_majority size is defined at runtime
-    fn votes_size(params: CodecParams) usize {
+    pub fn votes_size(params: CodecParams) usize {
         return params.validators_super_majority;
     }
 };
@@ -194,6 +194,10 @@ pub const AvailAssurance = struct {
     bitfield: []u8, // avail_bitfield_bytes
     validator_index: ValidatorIndex,
     signature: Ed25519Signature,
+
+    pub fn bitfield_size(params: CodecParams) usize {
+        return params.avail_bitfield_bytes;
+    }
 };
 
 const AssurancesExtrinsic = []AvailAssurance; // validators_count
