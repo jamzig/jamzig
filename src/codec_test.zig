@@ -18,8 +18,11 @@ const TINY_PARAMS = types.CodecParams{
 };
 
 /// Helper function to decode and compare test vectors
-fn testDecodeAndCompare(comptime DomainType: type, comptime VectorType: type, file_path: []const u8) !void {
+fn testDecodeAndCompare(comptime DomainType: type, comptime VectorType: type, name: []const u8) !void {
     const allocator = std.testing.allocator;
+
+    const file_path = try std.fmt.allocPrint(allocator, "src/tests/vectors/codec/codec/data/{s}.json", .{name});
+    defer allocator.free(file_path);
 
     const vector = try codec_test.CodecTestVector(VectorType).build_from(allocator, file_path);
     defer vector.deinit();
@@ -38,62 +41,33 @@ fn testDecodeAndCompare(comptime DomainType: type, comptime VectorType: type, fi
     try std.testing.expectEqualDeep(expected, decoded.value);
 }
 
-test "codec: decode header-0" {
-    try testDecodeAndCompare(types.Header, codec_test.types.Header, "src/tests/vectors/codec/codec/data/header_0.json");
-}
+const test_cases = [_]struct {
+    name: []const u8,
+    domain_type: type,
+    vector_type: type,
+}{
+    .{ .name = "header_0", .domain_type = types.Header, .vector_type = codec_test.types.Header },
+    .{ .name = "header_1", .domain_type = types.Header, .vector_type = codec_test.types.Header },
+    .{ .name = "extrinsic", .domain_type = types.Extrinsic, .vector_type = codec_test.types.Extrinsic },
+    .{ .name = "block", .domain_type = types.Block, .vector_type = codec_test.types.Block },
+    .{ .name = "assurances_extrinsic", .domain_type = types.AssurancesExtrinsic, .vector_type = codec_test.types.AssurancesExtrinsic },
+    .{ .name = "disputes_extrinsic", .domain_type = types.DisputesExtrinsic, .vector_type = codec_test.types.DisputesExtrinsic },
+    .{ .name = "guarantees_extrinsic", .domain_type = types.GuaranteesExtrinsic, .vector_type = codec_test.types.GuaranteesExtrinsic },
+    .{ .name = "preimages_extrinsic", .domain_type = types.PreimagesExtrinsic, .vector_type = codec_test.types.PreimagesExtrinsic },
+    .{ .name = "refine_context", .domain_type = types.RefineContext, .vector_type = codec_test.types.RefineContext },
+    .{ .name = "tickets_extrinsic", .domain_type = types.TicketsExtrinsic, .vector_type = codec_test.types.TicketsExtrinsic },
+    .{ .name = "work_item", .domain_type = types.WorkItem, .vector_type = codec_test.types.WorkItem },
+    .{ .name = "work_package", .domain_type = types.WorkPackage, .vector_type = codec_test.types.WorkPackage },
+    .{ .name = "work_report", .domain_type = types.WorkReport, .vector_type = codec_test.types.WorkReport },
+    .{ .name = "work_result_0", .domain_type = types.WorkResult, .vector_type = codec_test.types.WorkResult },
+    .{ .name = "work_result_1", .domain_type = types.WorkResult, .vector_type = codec_test.types.WorkResult },
+};
 
-test "codec: decode header-1" {
-    try testDecodeAndCompare(types.Header, codec_test.types.Header, "src/tests/vectors/codec/codec/data/header_1.json");
-}
+test "codec: decode" {
+    inline for (test_cases) |test_case| {
+        const test_name = "codec: decode " ++ test_case.name;
+        std.debug.print("{s}\n", .{test_name});
 
-test "codec: decode extrinsic" {
-    try testDecodeAndCompare(types.Extrinsic, codec_test.types.Extrinsic, "src/tests/vectors/codec/codec/data/extrinsic.json");
-}
-
-test "codec: decode block" {
-    try testDecodeAndCompare(types.Block, codec_test.types.Block, "src/tests/vectors/codec/codec/data/block.json");
-}
-
-test "codec: decode assurances_extrinsic" {
-    try testDecodeAndCompare(types.AssurancesExtrinsic, codec_test.types.AssurancesExtrinsic, "src/tests/vectors/codec/codec/data/assurances_extrinsic.json");
-}
-
-test "codec: decode disputes_extrinsic" {
-    try testDecodeAndCompare(types.DisputesExtrinsic, codec_test.types.DisputesExtrinsic, "src/tests/vectors/codec/codec/data/disputes_extrinsic.json");
-}
-
-test "codec: decode guarantees_extrinsic" {
-    try testDecodeAndCompare(types.GuaranteesExtrinsic, codec_test.types.GuaranteesExtrinsic, "src/tests/vectors/codec/codec/data/guarantees_extrinsic.json");
-}
-
-test "codec: decode preimages_extrinsic" {
-    try testDecodeAndCompare(types.PreimagesExtrinsic, codec_test.types.PreimagesExtrinsic, "src/tests/vectors/codec/codec/data/preimages_extrinsic.json");
-}
-
-test "codec: decode refine_context" {
-    try testDecodeAndCompare(types.RefineContext, codec_test.types.RefineContext, "src/tests/vectors/codec/codec/data/refine_context.json");
-}
-
-test "codec: decode tickets_extrinsic" {
-    try testDecodeAndCompare(types.TicketsExtrinsic, codec_test.types.TicketsExtrinsic, "src/tests/vectors/codec/codec/data/tickets_extrinsic.json");
-}
-
-test "codec: decode work_item" {
-    try testDecodeAndCompare(types.WorkItem, codec_test.types.WorkItem, "src/tests/vectors/codec/codec/data/work_item.json");
-}
-
-test "codec: decode work_package" {
-    try testDecodeAndCompare(types.WorkPackage, codec_test.types.WorkPackage, "src/tests/vectors/codec/codec/data/work_package.json");
-}
-
-test "codec: decode work_report" {
-    try testDecodeAndCompare(types.WorkReport, codec_test.types.WorkReport, "src/tests/vectors/codec/codec/data/work_report.json");
-}
-
-test "codec: decode work_result_0" {
-    try testDecodeAndCompare(types.WorkResult, codec_test.types.WorkResult, "src/tests/vectors/codec/codec/data/work_result_0.json");
-}
-
-test "codec: decode work_result_1" {
-    try testDecodeAndCompare(types.WorkResult, codec_test.types.WorkResult, "src/tests/vectors/codec/codec/data/work_result_1.json");
+        try testDecodeAndCompare(test_case.domain_type, test_case.vector_type, test_case.name);
+    }
 }
