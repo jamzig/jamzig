@@ -14,7 +14,7 @@ pub const ServiceId = U32;
 pub const Gas = U64;
 pub const ValidatorIndex = U16;
 pub const CoreIndex = U16;
-pub const TicketAttempt = u1; // as the range is 0..1
+pub const TicketAttempt = u8; // as the range is 0..1
 
 pub const BandersnatchKey = ByteArray32;
 pub const Ed25519Key = ByteArray32;
@@ -61,15 +61,16 @@ pub const WorkPackage = struct {
     auth_code_host: ServiceId,
     authorizer: Authorizer,
     context: RefineContext,
+    // TODO: check this
     items: []WorkItem, // max 4 workitems allowed
 };
 
-pub const WorkExecResult = union(enum) {
-    ok: []u8,
-    out_of_gas: void,
-    panic: void,
-    bad_code: void,
-    code_oversize: void,
+pub const WorkExecResult = union(enum(u8)) {
+    ok: []u8 = 0,
+    out_of_gas: void = 1,
+    panic: void = 2,
+    bad_code: void = 3,
+    code_oversize: void = 4,
 };
 
 pub const WorkResult = struct {
@@ -93,12 +94,18 @@ pub const WorkReport = struct {
     core_index: CoreIndex,
     authorizer_hash: OpaqueHash,
     auth_output: []u8,
+    // TODO: check this
     results: []WorkResult, // max 4 allowed
 };
 
 pub const EpochMark = struct {
     entropy: OpaqueHash,
     validators: []BandersnatchKey, // validators-count size
+
+    // validator size is defined at runtime
+    pub fn validators_size(params: CodecParams) usize {
+        return params.validators;
+    }
 };
 
 pub const TicketBody = struct {
@@ -106,7 +113,14 @@ pub const TicketBody = struct {
     attempt: TicketAttempt,
 };
 
-const TicketsMark = []TicketBody; // epoch-length
+pub const TicketsMark = struct {
+    tickets: []TicketBody, // epoch-length
+
+    // epoch length is defined at runtime
+    pub fn tickets_size(params: CodecParams) usize {
+        return params.epoch_length;
+    }
+};
 
 pub const Header = struct {
     parent: OpaqueHash,
@@ -119,6 +133,10 @@ pub const Header = struct {
     author_index: ValidatorIndex,
     entropy_source: BandersnatchVrfSignature,
     seal: BandersnatchVrfSignature,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try @import("types/format.zig").formatHeader(self, writer);
+    }
 };
 
 pub const TicketEnvelope = struct {
@@ -126,7 +144,7 @@ pub const TicketEnvelope = struct {
     signature: BandersnatchRingSignature,
 };
 
-const TicketsExtrinsic = []TicketEnvelope;
+pub const TicketsExtrinsic = []TicketEnvelope;
 
 pub const Judgement = struct {
     vote: bool,
@@ -138,6 +156,11 @@ pub const Verdict = struct {
     target: OpaqueHash,
     age: U32,
     votes: []Judgement, // validators_super_majority
+
+    // validators_super_majority size is defined at runtime
+    pub fn votes_size(params: CodecParams) usize {
+        return params.validators_super_majority;
+    }
 };
 
 pub const Culprit = struct {
@@ -164,16 +187,20 @@ pub const Preimage = struct {
     blob: []u8,
 };
 
-const PreimagesExtrinsic = []Preimage;
+pub const PreimagesExtrinsic = []Preimage;
 
 pub const AvailAssurance = struct {
     anchor: OpaqueHash,
     bitfield: []u8, // avail_bitfield_bytes
     validator_index: ValidatorIndex,
     signature: Ed25519Signature,
+
+    pub fn bitfield_size(params: CodecParams) usize {
+        return params.avail_bitfield_bytes;
+    }
 };
 
-const AssurancesExtrinsic = []AvailAssurance; // validators_count
+pub const AssurancesExtrinsic = []AvailAssurance; // validators_count
 
 pub const ValidatorSignature = struct {
     validator_index: ValidatorIndex,
@@ -186,7 +213,7 @@ pub const ReportGuarantee = struct {
     signatures: []ValidatorSignature,
 };
 
-const GuaranteesExtrinsic = []ReportGuarantee; // cores_count
+pub const GuaranteesExtrinsic = []ReportGuarantee; // cores_count
 
 pub const Extrinsic = struct {
     tickets: TicketsExtrinsic,
@@ -199,4 +226,15 @@ pub const Extrinsic = struct {
 pub const Block = struct {
     header: Header,
     extrinsic: Extrinsic,
+};
+
+pub const CodecParams = struct {
+    validators: usize,
+    epoch_length: usize,
+    cores_count: usize,
+
+    // -- (validators-count * 2/3 + 1)
+    validators_super_majority: usize,
+    // -- (cores-count + 7) / 8
+    avail_bitfield_bytes: usize,
 };

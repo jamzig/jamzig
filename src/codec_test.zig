@@ -4,12 +4,73 @@ const testing = std.testing;
 const codec = @import("codec.zig");
 const codec_test = @import("tests/vectors/codec.zig");
 
+const convert = @import("tests/convert/codec.zig");
+
 const types = @import("types.zig");
 
-test "codec: deserialize block from supplied test vector" {
-    const allocator = std.heap.page_allocator;
-    const vector = try codec_test.BlockTestVector.build_from(allocator, "src/tests/vectors/codec/codec/data/block.json");
+/// The Tiny PARAMS as they are defined in the ASN
+const TINY_PARAMS = types.CodecParams{
+    .validators = 6,
+    .epoch_length = 12,
+    .cores_count = 2,
+    .validators_super_majority = 5,
+    .avail_bitfield_bytes = 1,
+};
+
+const TestCase = struct {
+    name: []const u8,
+    domain_type: []const u8,
+};
+
+const test_cases = [_]TestCase{
+    .{ .name = "header_0", .domain_type = "Header" },
+    .{ .name = "header_1", .domain_type = "Header" },
+    .{ .name = "extrinsic", .domain_type = "Extrinsic" },
+    .{ .name = "block", .domain_type = "Block" },
+    .{ .name = "assurances_extrinsic", .domain_type = "AssurancesExtrinsic" },
+    .{ .name = "disputes_extrinsic", .domain_type = "DisputesExtrinsic" },
+    .{ .name = "guarantees_extrinsic", .domain_type = "GuaranteesExtrinsic" },
+    .{ .name = "preimages_extrinsic", .domain_type = "PreimagesExtrinsic" },
+    .{ .name = "refine_context", .domain_type = "RefineContext" },
+    .{ .name = "tickets_extrinsic", .domain_type = "TicketsExtrinsic" },
+    .{ .name = "work_item", .domain_type = "WorkItem" },
+    .{ .name = "work_package", .domain_type = "WorkPackage" },
+    .{ .name = "work_report", .domain_type = "WorkReport" },
+    .{ .name = "work_result_0", .domain_type = "WorkResult" },
+    .{ .name = "work_result_1", .domain_type = "WorkResult" },
+};
+
+test "codec: decode" {
+    inline for (test_cases) |test_case| {
+        const test_name = "codec: decode " ++ test_case.name;
+        std.debug.print("{s}\n", .{test_name});
+
+        try testDecodeAndCompare(test_case);
+    }
+}
+
+/// Helper function to decode and compare test vectors
+fn testDecodeAndCompare(comptime test_case: TestCase) !void {
+    const allocator = std.testing.allocator;
+
+    const file_path = try std.fmt.allocPrint(allocator, "src/tests/vectors/codec/codec/data/{s}.json", .{test_case.name});
+    defer allocator.free(file_path);
+
+    const DomainType = @field(types, test_case.domain_type);
+    const VectorType = @field(codec_test.types, test_case.domain_type);
+    const vector = try codec_test.CodecTestVector(VectorType).build_from(allocator, file_path);
     defer vector.deinit();
 
-    _ = codec.deserialize(types.Block, vector.binary) catch {};
+    var decoded = try codec.deserialize(
+        DomainType,
+        TINY_PARAMS,
+        allocator,
+        vector.binary,
+    );
+    defer decoded.deinit();
+
+    const expected: DomainType = try convert.convert(VectorType, DomainType, allocator, vector.expected.value);
+    defer convert.generic.free(allocator, expected);
+
+    try std.testing.expectEqualDeep(expected, decoded.value);
 }

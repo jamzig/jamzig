@@ -67,12 +67,12 @@ pub const WorkPackage = struct {
     items: []WorkItem, // max 4 workitems allowed
 };
 
-pub const WorkExecResult = union(enum) {
-    ok: HexBytes,
-    out_of_gas: void,
-    panic: void,
-    bad_code: void,
-    code_oversize: void,
+pub const WorkExecResult = union(enum(u8)) {
+    ok: HexBytes = 0,
+    out_of_gas: void = 1,
+    panic: void = 2,
+    bad_code: void = 3,
+    code_oversize: void = 4,
 
     pub fn jsonParse(
         allocator: std.mem.Allocator,
@@ -155,7 +155,7 @@ pub const TicketBody = struct {
     attempt: TicketAttempt,
 };
 
-const TicketsMark = []TicketBody; // epoch-length
+pub const TicketsMark = []TicketBody; // epoch-length
 
 pub const Header = struct {
     parent: OpaqueHash,
@@ -175,7 +175,7 @@ pub const TicketEnvelope = struct {
     signature: BandersnatchRingSignature,
 };
 
-const TicketsExtrinsic = []TicketEnvelope;
+pub const TicketsExtrinsic = []TicketEnvelope;
 
 pub const Judgement = struct {
     vote: bool,
@@ -213,7 +213,7 @@ pub const Preimage = struct {
     blob: HexBytes,
 };
 
-const PreimagesExtrinsic = []Preimage;
+pub const PreimagesExtrinsic = []Preimage;
 
 pub const AvailAssurance = struct {
     anchor: OpaqueHash,
@@ -222,7 +222,7 @@ pub const AvailAssurance = struct {
     signature: Ed25519Signature,
 };
 
-const AssurancesExtrinsic = []AvailAssurance; // validators_count
+pub const AssurancesExtrinsic = []AvailAssurance; // validators_count
 
 pub const ValidatorSignature = struct {
     validator_index: ValidatorIndex,
@@ -235,7 +235,7 @@ pub const ReportGuarantee = struct {
     signatures: []ValidatorSignature,
 };
 
-const GuaranteesExtrinsic = []ReportGuarantee; // cores_count
+pub const GuaranteesExtrinsic = []ReportGuarantee; // cores_count
 
 pub const Extrinsic = struct {
     tickets: TicketsExtrinsic,

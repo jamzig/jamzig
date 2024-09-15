@@ -1,4 +1,5 @@
 const std = @import("std");
+const tracing = @import("tracing.zig");
 
 pub extern fn is_whitespace(c: u8) bool;
 
@@ -8,6 +9,8 @@ pub fn main() !void {
     for (chars, 0..) |char, idx| {
         std.debug.print("{}: is '{c}' whitespace?: {}\n", .{ idx, char, is_whitespace(char) });
     }
+
+    tracing.src(@src(), "Hello, World!  \n", .{});
 }
 
 test "simple test" {
