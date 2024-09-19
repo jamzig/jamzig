@@ -1,36 +1,24 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-// TODO: use the project wide types from ../types.zig
-pub const BlsKey = [144]u8;
-pub const Ed25519Key = [32]u8;
-pub const BandersnatchKey = [32]u8;
-pub const BandersnatchPrivateKey = [32]u8;
-pub const OpaqueHash = [32]u8;
-pub const BandersnatchRingSignature = [784]u8;
-pub const BandersnatchVrfOutput = [32]u8;
+// Import system wide types
+const types = @import("../types.zig");
 
-pub const BandersnatchKeyPair = struct {
-    private_key: BandersnatchPrivateKey,
-    public_key: BandersnatchKey,
-};
+pub const BlsKey = types.BlsKey;
+pub const Ed25519Key = types.Ed25519Key;
+pub const OpaqueHash = types.OpaqueHash;
 
-pub const EpochMark = struct {
-    entropy: OpaqueHash,
-    validators: []BandersnatchKey,
-};
+pub const BandersnatchKey = types.BandersnatchKey;
+pub const BandersnatchPrivateKey = types.BandersnatchPrivateKey;
+pub const BandersnatchRingSignature = types.BandersnatchRingSignature;
+pub const BandersnatchVrfOutput = types.BandersnatchVrfOutput;
+pub const BandersnatchKeyPair = types.BandersnatchKeyPair;
 
-pub const TicketMark = []TicketBody;
+pub const EpochMark = types.EpochMark;
+pub const TicketMark = []types.TicketBody;
 
-pub const TicketBody = struct {
-    id: OpaqueHash,
-    attempt: u8,
-};
-
-pub const TicketEnvelope = struct {
-    attempt: u8,
-    signature: [784]u8,
-};
+pub const TicketBody = types.TicketBody;
+pub const TicketEnvelope = types.TicketEnvelope;
 
 pub const ValidatorData = struct {
     bandersnatch: BandersnatchKey,
@@ -58,11 +46,11 @@ pub const GammaZ = [144]u8; // types.hex.HexBytesFixed(144);
 pub const State = struct {
     /// τ: The most recent block's timeslot, crucial for maintaining the temporal
     /// context in block production.
-    tau: u32,
+    tau: types.TimeSlot,
 
     /// η: The entropy accumulator, which contributes to the system's randomness
     /// and is updated with each block.
-    eta: [4]OpaqueHash,
+    eta: [4]types.OpaqueHash,
 
     /// λ: Validator keys and metadata from the previous epoch, essential for
     /// ensuring continuity and validating current operations.
