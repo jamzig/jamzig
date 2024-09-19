@@ -5,6 +5,7 @@ pub use bandersnatch::{IetfProof, Input, Output, Public, RingProof, Secret};
 
 // NOTE: for tiny test vecors RING_SIZE should be 6
 //       and ffull test vectors RING_SIZE should be 1023
+//       Thu Sep 19 17:58:22 CEST 2024
 const RING_SIZE: usize = 6;
 
 // This is the IETF `Prove` procedure output as described in section 2.2
@@ -86,8 +87,9 @@ impl Prover {
 
     /// Non-Anonymous VRF signature.
     ///
-    /// Used for ticket claiming during block production.
+    // Used for ticket claiming during block production.
     /// Not used with Safrole test vectors.
+    #[allow(dead_code)]
     pub fn ietf_vrf_sign(&self, vrf_input_data: &[u8], aux_data: &[u8]) -> Vec<u8> {
         use ark_ec_vrfs::ietf::Prover as _;
 
@@ -109,6 +111,7 @@ type RingCommitment = ark_ec_vrfs::ring::RingCommitment<bandersnatch::Bandersnat
 // Verifier actor.
 pub struct Verifier {
     pub commitment: RingCommitment,
+    #[allow(dead_code)]
     pub ring: Vec<Public>,
 }
 
@@ -163,6 +166,7 @@ impl Verifier {
     /// Not used with Safrole test vectors.
     ///
     /// On success returns the VRF output hash.
+    #[allow(dead_code)]
     pub fn ietf_vrf_verify(
         &self,
         vrf_input_data: &[u8],
