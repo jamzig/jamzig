@@ -130,7 +130,7 @@ pub fn transition(
             // fallback
             .keys => |keys| {
                 // We are in fallback mode
-                post_state.gamma_s.keys = try gammaS_Fallback(allocator, post_state.eta[2], keys);
+                post_state.gamma_s.keys = try gammaS_Fallback(allocator, post_state.eta[2], params.epoch_length, post_state.kappa);
                 allocator.free(keys);
             },
         }
@@ -161,17 +161,22 @@ pub fn transition(
 // O: See section 3.8 and appendix G
 // O(⟦HB⟧) ∈ Yr ≡ KZG_commitment(⟦HB⟧)
 fn bandersnatchRingRoot(allocator: std.mem.Allocator, gamma_k: types.GammaK) !types.GammaZ {
-    const keys = try allocator.alloc(types.BandersnatchKey, gamma_k.len);
+    const keys = try extractBandersnatchKeys(allocator, gamma_k);
     defer allocator.free(keys);
-
-    for (gamma_k, 0..) |validator, i| {
-        keys[i] = validator.bandersnatch;
-
-        std.debug.print("Key {}: {x}\n", .{ i, std.fmt.fmtSliceHexLower(&keys[i]) });
-    }
 
     const commitment = try crypto.getVerifierCommitment(keys);
     return commitment;
+}
+
+fn extractBandersnatchKeys(allocator: std.mem.Allocator, gamma_k: types.GammaK) ![]types.BandersnatchKey {
+    const keys = try allocator.alloc(types.BandersnatchKey, gamma_k.len);
+    errdefer allocator.free(keys);
+
+    for (gamma_k, 0..) |validator, i| {
+        keys[i] = validator.bandersnatch;
+    }
+
+    return keys;
 }
 
 // 58. PHI: Zero out any offenders on post_state.iota
@@ -181,16 +186,22 @@ fn phiZeroOutOffenders(data: []types.ValidatorData) []types.ValidatorData {
     return data;
 }
 
+/// Fallback function selects an epoch’s worth of validator Bandersnatch keys
+/// from the validator key set k using the entropy collected on chain
 fn gammaS_Fallback(
     allocator: std.mem.Allocator,
     r: types.OpaqueHash,
-    keys: []types.BandersnatchKey,
+    epoch_length: u32,
+    kappa: types.Kappa,
 ) ![]types.BandersnatchKey {
+    const keys = try extractBandersnatchKeys(allocator, kappa);
+    defer allocator.free(keys);
+
     // Allocate memory of the same length as keys to return
-    var result = try allocator.alloc(types.BandersnatchKey, keys.len);
+    var result = try allocator.alloc(types.BandersnatchKey, epoch_length);
     errdefer allocator.free(result);
 
-    for (keys, 0..) |_, i| {
+    for (0..epoch_length) |i| {
         // Step 1: Encode the index i into 4 bytes (u32)
         var encoded_index: [4]u8 = undefined;
         std.mem.writeInt(u32, &encoded_index, @intCast(i), .little);
@@ -207,8 +218,6 @@ fn gammaS_Fallback(
 
         // Step 5: Take the modulus over the length of the keys
         const index = decoded % keys.len;
-
-        std.debug.print("Index: {}\n", .{index});
 
         // Step 6: Use this index to add that key to the result
         result[i] = keys[index];

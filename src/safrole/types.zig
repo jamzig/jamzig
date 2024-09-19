@@ -27,6 +27,8 @@ pub const ValidatorData = struct {
     metadata: [128]u8,
 };
 
+pub const Lambda = []ValidatorData;
+pub const Kappa = []ValidatorData;
 pub const GammaK = []ValidatorData;
 
 // γₛ ∈ ⟦C⟧E ∪ ⟦HB⟧E
@@ -54,11 +56,11 @@ pub const State = struct {
 
     /// λ: Validator keys and metadata from the previous epoch, essential for
     /// ensuring continuity and validating current operations.
-    lambda: []ValidatorData,
+    lambda: Lambda,
 
     /// κ: Validator keys and metadata that are currently active, representing the
     /// validators responsible for the current epoch.
-    kappa: []ValidatorData,
+    kappa: Kappa,
 
     /// γₖ: The keys for the validators of the next epoch, which help in planning
     /// the upcoming validation process.
