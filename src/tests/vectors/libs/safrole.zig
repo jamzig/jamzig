@@ -4,31 +4,31 @@ const Allocator = std.mem.Allocator;
 
 const types = @import("types.zig");
 
-const HexBytes = types.hex.HexBytes;
-const Ed25519Key = types.hex.HexBytesFixed(32);
-const BandersnatchKey = types.hex.HexBytesFixed(32);
-const OpaqueHash = types.hex.HexBytesFixed(32);
+pub const HexBytes = types.hex.HexBytes;
+pub const Ed25519Key = types.hex.HexBytesFixed(32);
+pub const BandersnatchKey = types.hex.HexBytesFixed(32);
+pub const OpaqueHash = types.hex.HexBytesFixed(32);
 
-const TicketOrKey = union { tickets: []TicketBody, keys: []BandersnatchKey };
+pub const TicketOrKey = union(enum) { tickets: []TicketBody, keys: []BandersnatchKey };
 
-const EpochMark = struct {
+pub const EpochMark = struct {
     entropy: OpaqueHash,
     validators: []BandersnatchKey,
 };
 
-const TicketMark = []TicketBody;
+pub const TicketMark = []TicketBody;
 
-const TicketBody = struct {
+pub const TicketBody = struct {
     id: OpaqueHash,
     attempt: u8,
 };
 
-const TicketEnvelope = struct {
+pub const TicketEnvelope = struct {
     attempt: u8,
     signature: HexBytes,
 };
 
-const ValidatorData = struct {
+pub const ValidatorData = struct {
     bandersnatch: HexBytes,
     ed25519: HexBytes,
     bls: HexBytes,
@@ -37,14 +37,12 @@ const ValidatorData = struct {
 
 // TODO: Make a custom type to handle TicketOrKey
 // see mark-5
-const GammaS = struct {
-    // keys: []BandersnatchKey,
-};
+pub const GammaS = TicketOrKey;
 
-const GammaZ = types.hex.HexBytesFixed(144);
+pub const GammaZ = types.hex.HexBytesFixed(144);
 
 /// Represents a Safrole state of the system as referenced in the GP γ.
-const State = struct {
+pub const State = struct {
     /// τ: The most recent block's timeslot, crucial for maintaining the temporal
     /// context in block production.
     tau: u32,
@@ -83,13 +81,13 @@ const State = struct {
     gamma_z: GammaZ,
 };
 
-const Input = struct {
+pub const Input = struct {
     slot: u32,
     entropy: OpaqueHash,
     extrinsic: []TicketEnvelope,
 };
 
-const Output = union(enum) {
+pub const Output = union(enum) {
     err: ?[]u8,
     ok: OutputMarks,
 

@@ -25,6 +25,10 @@ pub fn HexBytesFixed(comptime size: u16) type {
             }
             return HexBytesFixed(size){ .bytes = bytes, .size = size };
         }
+
+        pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+            try writer.print("0x{}", .{std.fmt.fmtSliceHexLower(self.bytes)});
+        }
     };
 }
 
@@ -40,8 +44,8 @@ pub const HexBytes = struct {
         return HexBytes{ .bytes = bytes };
     }
 
-    pub fn format(self: *HexBytes, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("{x}", .{self.bytes});
+    pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("0x{}", .{std.fmt.fmtSliceHexLower(self.bytes)});
     }
 };
 
