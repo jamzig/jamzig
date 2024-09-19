@@ -1,11 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+// TODO: use the project wide types from ../types.zig
 pub const BlsKey = [144]u8;
 pub const Ed25519Key = [32]u8;
 pub const BandersnatchKey = [32]u8;
 pub const BandersnatchPrivateKey = [32]u8;
 pub const OpaqueHash = [32]u8;
+pub const BandersnatchRingSignature = [784]u8;
+pub const BandersnatchVrfOutput = [32]u8;
 
 pub const BandersnatchKeyPair = struct {
     private_key: BandersnatchPrivateKey,

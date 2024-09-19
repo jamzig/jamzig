@@ -7,6 +7,8 @@ const safrole_fixtures = @import("fixtures.zig");
 // https://github.com/w3f/jamtestvectors/blob/master/safrole/README.md
 //
 // Tiny tests with reduced validators (6) and a shorter epoch duration (12)
+//
+// NOTE: RING_SIZE = 6 in ffi/rust/crypto/ring_vrf.rs
 
 const TINY_PARAMS = safrole.Params{ .epoch_length = 12 };
 
