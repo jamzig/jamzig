@@ -142,12 +142,7 @@ test "tiny/publish-tickets-no-mark-1.json" {
     );
     defer result.deinit(allocator);
 
-    try fixtures.printInput();
-    // try fixtures.printPreState();
-    try fixtures.diffAgainstPostStateAndPrint(&result.state.?);
-
     // NOTE: this should produce a bad ticket attempt
-
-    // Compare the fixture poststate with the result state
-    try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
+    try std.testing.expect(result.output == .err);
+    try std.testing.expectEqual(.bad_ticket_attempt, result.output.err);
 }
