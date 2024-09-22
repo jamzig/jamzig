@@ -139,7 +139,7 @@ pub fn transition(
         }
 
         // Check if we have an entry in the ordered ticket accumulator
-        // gamma_a. If this is the case we have a duplicat ticket
+        // gamma_a. If this is the case, we have a duplicate ticket.
         const position = std.sort.binarySearch(types.TicketBody, pre_state.gamma_a, current_ticket, struct {
             fn order(context: types.TicketBody, item: types.TicketBody) std.math.Order {
                 return std.mem.order(u8, &item.id, &context.id);
@@ -163,9 +163,6 @@ pub fn transition(
             }
         }
     }
-
-    // Verify the order of the extrinisc
-    // Double check if there are no doubles
 
     var post_state = try pre_state.deepClone(allocator);
     errdefer post_state.deinit(allocator);
@@ -223,14 +220,15 @@ pub fn transition(
         // block’s slot was within the closing period of the previous epoch,
         // then it takes the value of the prior ticket accumulator γa.
 
-        // TODO: determine if this is the first block in the new epoch
+        // Gamma_S
+        // Free memory here since we are sure we are going to
+        // update the value following.
         post_state.gamma_s.deinit(allocator);
 
-        // NOTE: the use of prev_epoch_slot ensures the ticket contest was closed
         // (68) e′ = e + 1 ∧ m ≥ Y ∧ ∣γa∣ = E
         if (prev_epoch_slot >= params.ticket_submission_end_epoch_slot and
             post_state.gamma_a.len == params.epoch_length and
-            // (68) important that the e' = e + 1
+            // only if e' = e + 1
             current_epoch == prev_epoch + 1)
         {
             post_state.gamma_s = .{
@@ -241,10 +239,8 @@ pub fn transition(
                 .keys = try gammaS_Fallback(allocator, post_state.eta[2], params.epoch_length, post_state.kappa),
             };
         }
-        // We are in the new epoch
 
-        // On an new epoch gamma_a will be reset to 0, other ticketing
-        // will happen in the next epoch
+        // On an new epoch gamma_a will be reset to 0
         allocator.free(post_state.gamma_a);
         post_state.gamma_a = try allocator.alloc(types.TicketBody, 0);
     }
@@ -259,7 +255,12 @@ pub fn transition(
     if (epoch_slot < params.ticket_submission_end_epoch_slot) {
 
         // Merge the tickets into the ticket accumulator
-        const merged_gamma_a = try mergeTicketsIntoTicketAccumulatorGammaA(allocator, post_state.gamma_a, verified_extrinsic, params.epoch_length);
+        const merged_gamma_a = try mergeTicketsIntoTicketAccumulatorGammaA(
+            allocator,
+            post_state.gamma_a,
+            verified_extrinsic,
+            params.epoch_length,
+        );
         allocator.free(post_state.gamma_a);
         post_state.gamma_a = merged_gamma_a;
     }
