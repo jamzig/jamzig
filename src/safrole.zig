@@ -227,7 +227,12 @@ pub fn transition(
         post_state.gamma_s.deinit(allocator);
 
         // NOTE: the use of prev_epoch_slot ensures the ticket contest was closed
-        if (prev_epoch_slot >= params.ticket_submission_end_epoch_slot and post_state.gamma_a.len == params.epoch_length) {
+        // (68) e′ = e + 1 ∧ m ≥ Y ∧ ∣γa∣ = E
+        if (prev_epoch_slot >= params.ticket_submission_end_epoch_slot and
+            post_state.gamma_a.len == params.epoch_length and
+            // (68) important that the e' = e + 1
+            current_epoch == prev_epoch + 1)
+        {
             post_state.gamma_s = .{
                 .tickets = try Z_outsideInOrdering(types.TicketBody, allocator, post_state.gamma_a),
             };
