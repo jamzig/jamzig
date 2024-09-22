@@ -26,6 +26,7 @@ test "tiny/skip-epochs-1.json" {
 
     try fixtures.diffAgainstPostStateAndPrint(&result.state.?);
     try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
+    try fixtures.expectOutput(result.output);
 }
 
 test "tiny/skip-epoch-tail-1.json" {
@@ -50,4 +51,5 @@ test "tiny/skip-epoch-tail-1.json" {
 
     try fixtures.diffAgainstPostStateAndPrint(&result.state.?);
     try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
+    try fixtures.expectOutput(result.output);
 }
