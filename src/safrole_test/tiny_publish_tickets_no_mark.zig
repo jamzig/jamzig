@@ -43,6 +43,7 @@ test "tiny/publish-tickets-no-mark-2.json" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
+    try fixtures.expectOutput(result.output);
 }
 
 test "tiny/publish-tickets-no-mark-3.json" {
@@ -127,6 +128,7 @@ test "tiny/publish-tickets-no-mark-6.json" {
 
     try std.testing.expect(result.output == .ok);
     try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
+    try fixtures.expectOutput(result.output);
 }
 
 test "tiny/publish-tickets-no-mark-7.json" {
@@ -169,6 +171,7 @@ test "tiny/publish-tickets-no-mark-8.json" {
 
     try std.testing.expect(result.output == .ok);
     try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
+    try fixtures.expectOutput(result.output);
 }
 
 test "tiny/publish-tickets-no-mark-9.json" {
@@ -190,4 +193,5 @@ test "tiny/publish-tickets-no-mark-9.json" {
 
     try std.testing.expect(result.output == .ok);
     try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
+    try fixtures.expectOutput(result.output);
 }
