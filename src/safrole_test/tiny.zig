@@ -21,4 +21,5 @@ comptime {
     _ = @import("./tiny_enact_epoch_change.zig");
     _ = @import("./tiny_publish_tickets_no_mark.zig");
     _ = @import("./tiny_publish_tickets_with_mark.zig");
+    _ = @import("./tiny_skip_epoch.zig");
 }
