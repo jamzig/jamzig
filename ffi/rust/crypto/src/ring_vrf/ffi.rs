@@ -1,8 +1,8 @@
-pub use super::prover::Prover;
-pub use super::verifier::Verifier;
-pub use crate::ring_vrf::commitment::Commitment;
+use super::prover::Prover;
+use super::verifier::Verifier;
+use crate::ring_vrf::commitment::Commitment;
 use crate::ring_vrf::context::ring_context;
-pub use crate::ring_vrf::types::*;
+use crate::ring_vrf::types::*;
 
 // Function to generate a ring signature
 /// # Safety

@@ -1,7 +1,7 @@
 use ark_ec_vrfs::prelude::ark_serialize;
 use ark_ec_vrfs::suites::bandersnatch::edwards as bandersnatch;
-pub use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-pub use bandersnatch::{IetfProof, Input, Output, Public, RingProof, Secret};
+use ark_serialize::CanonicalDeserialize;
+use bandersnatch::Public;
 use thiserror::Error;
 
 use super::{
