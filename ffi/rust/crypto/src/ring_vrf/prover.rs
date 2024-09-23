@@ -20,6 +20,8 @@ pub enum ProverError {
     InvalidProverIndex,
     #[error(transparent)]
     RingContextError(#[from] RingContextError),
+    #[error("Invalid VRF input point")]
+    VrfInputPointError,
 }
 
 // Prover actor.
@@ -48,7 +50,7 @@ impl Prover {
     ) -> Result<Vec<u8>, ProverError> {
         use ark_ec_vrfs::ring::Prover as _;
 
-        let input = vrf_input_point(vrf_input_data);
+        let input = vrf_input_point(vrf_input_data).ok_or(ProverError::VrfInputPointError)?;
         let output = self.secret.output(input);
 
         // Backend currently requires the wrapped type (plain affine points)
@@ -80,7 +82,7 @@ impl Prover {
     ) -> Result<Vec<u8>, ProverError> {
         use ark_ec_vrfs::ietf::Prover as _;
 
-        let input = vrf_input_point(vrf_input_data);
+        let input = vrf_input_point(vrf_input_data).ok_or(ProverError::VrfInputPointError)?;
         let output = self.secret.output(input);
 
         let proof = self.secret.prove(input, output, aux_data);

@@ -33,7 +33,8 @@ pub fn ring_context(ring_size: usize) -> Result<RingContext, RingContextError> {
 
     let cache = RING_CONTEXT_CACHE.get_or_init(|| {
         Mutex::new(LruCache::new(
-            NonZeroUsize::new(RING_CONTEXT_CACHE_CAPACITY).unwrap(),
+            NonZeroUsize::new(RING_CONTEXT_CACHE_CAPACITY)
+                .expect("RING_CONTEXT_CACHE_CAPACITY must be non-zero"),
         ))
     });
     let mut cache = cache.lock().map_err(|_| RingContextError::CacheLockError)?;

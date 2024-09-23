@@ -21,6 +21,8 @@ pub enum VerifierError {
     InvalidSignerKeyIndex,
     #[error(transparent)]
     RingContextError(#[from] RingContextError),
+    #[error("Invalid VRF input point")]
+    VrfInputPointError,
 }
 
 // Verifier actor.
@@ -54,7 +56,7 @@ impl Verifier {
         let signature = RingVrfSignature::deserialize_compressed(signature)
             .map_err(|_| VerifierError::DeserializationError)?;
 
-        let input = vrf_input_point(vrf_input_data);
+        let input = vrf_input_point(vrf_input_data).ok_or(VerifierError::VrfInputPointError)?;
         let output = signature.output;
 
         let ring_ctx = ring_context(self.ring.len())?;
@@ -70,7 +72,9 @@ impl Verifier {
             .map_err(|_| VerifierError::VerificationFailed)?;
 
         // This truncated hash is the actual value used as ticket-id/score in JAM
-        let vrf_output_hash: [u8; 32] = output.hash()[..32].try_into().unwrap();
+        let vrf_output_hash: [u8; 32] = output.hash()[..32]
+            .try_into()
+            .expect("VRF output hash should be 32 bytes");
         Ok(vrf_output_hash)
     }
 
@@ -93,7 +97,7 @@ impl Verifier {
         let signature = IetfVrfSignature::deserialize_compressed(signature)
             .map_err(|_| VerifierError::DeserializationError)?;
 
-        let input = vrf_input_point(vrf_input_data);
+        let input = vrf_input_point(vrf_input_data).ok_or(VerifierError::VrfInputPointError)?;
         let output = signature.output;
 
         let public = self
@@ -109,8 +113,10 @@ impl Verifier {
         // This is the actual value used as ticket-id/score
         // NOTE: as far as vrf_input_data is the same, this matches the one produced
         // using the ring-vrf (regardless of aux_data).
-        let vrf_output_hash: [u8; 32] = output.hash()[..32].try_into().unwrap();
-        println!(" vrf-output-hash: {}", hex::encode(vrf_output_hash));
+        let vrf_output_hash: [u8; 32] = output.hash()[..32]
+            .try_into()
+            .expect("VRF output hash should be 32 bytes");
+        // println!(" vrf-output-hash: {}", hex::encode(vrf_output_hash));
         Ok(vrf_output_hash)
     }
 }

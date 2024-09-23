@@ -4,8 +4,8 @@ pub use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use bandersnatch::{IetfProof, Input, Output, Public, RingProof, Secret};
 
 // Construct VRF Input Point from arbitrary data (section 1.2)
-pub fn vrf_input_point(vrf_input_data: &[u8]) -> Input {
-    Input::new(vrf_input_data).unwrap()
+pub fn vrf_input_point(vrf_input_data: &[u8]) -> Option<Input> {
+    Input::new(vrf_input_data)
 }
 
 pub type RingCommitment = ark_ec_vrfs::ring::RingCommitment<bandersnatch::BandersnatchSha512Ell2>;
