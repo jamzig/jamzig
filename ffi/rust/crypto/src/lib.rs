@@ -1,2 +1,2 @@
-mod ring_vrf;
-mod ring_vrf_ffi;
+pub mod ring_vrf;
+

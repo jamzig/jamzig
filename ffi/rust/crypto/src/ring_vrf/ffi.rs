@@ -1,4 +1,8 @@
-use crate::ring_vrf::*;
+use super::prover::Prover;
+use super::verifier::Verifier;
+use crate::ring_vrf::commitment::Commitment;
+use crate::ring_vrf::context::ring_context;
+use crate::ring_vrf::types::*;
 
 // Function to generate a ring signature
 /// # Safety
@@ -23,25 +27,34 @@ pub unsafe extern "C" fn generate_ring_signature(
 ) -> bool {
     let public_keys_slice = std::slice::from_raw_parts(public_keys, public_keys_len * 32);
 
-    let ring: Vec<Public> = public_keys_slice
+    let ring: Vec<Public> = match public_keys_slice
         .chunks(32)
-        .map(|chunk| Public::deserialize_compressed(chunk).unwrap())
-        .collect();
+        .map(Public::deserialize_compressed)
+        .collect()
+    {
+        Ok(ring) => ring,
+        Err(_) => return false,
+    };
 
     let prover_key_slice = std::slice::from_raw_parts(prover_key, 64);
 
-    let prover_secret = Secret::deserialize_compressed(prover_key_slice).unwrap();
+    let prover_secret = match Secret::deserialize_compressed(prover_key_slice) {
+        Ok(secret) => secret,
+        Err(_) => return false,
+    };
     let prover = Prover::new(ring.clone(), prover_secret, prover_idx);
 
     let vrf_input = std::slice::from_raw_parts(vrf_input_data, vrf_input_len);
     let aux = std::slice::from_raw_parts(aux_data, aux_data_len);
 
-    let signature = prover.ring_vrf_sign(vrf_input, aux);
-    assert!(signature.len() == 784);
-
-    std::ptr::copy_nonoverlapping(signature.as_ptr(), output, 784);
-
-    true
+    match prover.ring_vrf_sign(vrf_input, aux) {
+        Ok(signature) => {
+            assert!(signature.len() == 784);
+            std::ptr::copy_nonoverlapping(signature.as_ptr(), output, 784);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 // Function to verify a ring signature
@@ -66,12 +79,20 @@ pub unsafe extern "C" fn verify_ring_signature(
     vrf_output: *mut u8,
 ) -> bool {
     let public_keys_slice = std::slice::from_raw_parts(public_keys, public_keys_len * 32);
-    let ring: Vec<Public> = public_keys_slice
+    let ring: Vec<Public> = match public_keys_slice
         .chunks(32)
-        .map(|chunk| Public::deserialize_compressed(chunk).unwrap())
-        .collect();
+        .map(Public::deserialize_compressed)
+        .collect()
+    {
+        Ok(ring) => ring,
+        Err(_) => return false,
+    };
 
-    let verifier = Verifier::new(ring);
+    let verifier = if let Ok(verifier) = Verifier::new(ring) {
+        verifier
+    } else {
+        return false;
+    };
 
     let vrf_input = std::slice::from_raw_parts(vrf_input_data, vrf_input_len);
     let aux = std::slice::from_raw_parts(aux_data, aux_data_len);
@@ -111,9 +132,11 @@ pub unsafe extern "C" fn verify_ring_signature_against_commitment(
     let aux = std::slice::from_raw_parts(aux_data, aux_data_len);
     let sig = std::slice::from_raw_parts(signature, 784);
 
-    // TODO: Clean this up, remove unwraps, and implement more fine-grained error handling.
-    let verifier = CommitmentVerifier::new(
-        RingCommitment::deserialize_compressed(commitment_slice).unwrap(),
+    let verifier = Commitment::new(
+        match RingCommitment::deserialize_compressed(commitment_slice) {
+            Ok(commitment) => commitment,
+            Err(_) => return false,
+        },
         ring_size,
     );
 
@@ -163,7 +186,10 @@ pub unsafe extern "C" fn create_key_pair_from_seed(
 /// # Safety
 #[no_mangle]
 pub unsafe extern "C" fn get_padding_point(ring_size: usize, output: *mut u8) -> bool {
-    let padding_point = Public::from(ring_context(ring_size).padding_point());
+    let padding_point = match ring_context(ring_size) {
+        Ok(ctx) => Public::from(ctx.padding_point()),
+        Err(_) => return false,
+    };
     let mut serialized = Vec::new();
     if padding_point.serialize_compressed(&mut serialized).is_err() {
         return false;
@@ -189,19 +215,30 @@ pub unsafe extern "C" fn get_verifier_commitment(
     output: *mut u8,
 ) -> bool {
     let public_keys_slice = std::slice::from_raw_parts(public_keys, public_keys_len * 32);
-    let ring: Vec<Public> = public_keys_slice
+    let ring: Vec<Public> = match public_keys_slice
         .chunks(32)
-        .map(|chunk| Public::deserialize_compressed(chunk).unwrap())
-        .collect();
+        .map(Public::deserialize_compressed)
+        .collect()
+    {
+        Ok(ring) => ring,
+        Err(_) => return false,
+    };
 
-    let verifier = Verifier::new(ring);
+    let verifier = if let Ok(verifier) = Verifier::new(ring) {
+        verifier
+    } else {
+        return false;
+    };
     let commitment = verifier.commitment;
 
     // Serialize and print the commitment as a hexstring
     let mut commitment_bytes = Vec::new();
-    commitment
+    if commitment
         .serialize_compressed(&mut commitment_bytes)
-        .unwrap();
+        .is_err()
+    {
+        return false;
+    }
 
     std::ptr::copy_nonoverlapping(commitment_bytes.as_ptr(), output, 144);
     true
@@ -212,6 +249,6 @@ pub unsafe extern "C" fn get_verifier_commitment(
 /// This function is unsafe because it triggers the initialization of the ring context.
 /// It should be called before any other operations that require the ring context.
 #[no_mangle]
-pub unsafe extern "C" fn initialize_ring_context(ring_size: usize) {
-    ring_context(ring_size);
+pub unsafe extern "C" fn initialize_ring_context(ring_size: usize) -> bool {
+    ring_context(ring_size).is_ok()
 }
