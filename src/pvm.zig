@@ -74,7 +74,8 @@ pub const PVM = struct {
     pub fn run(self: *PVM) !void {
         const decoder = Decoder.init(self.program.code, self.program.mask);
         var n: usize = 0;
-        while (self.pc < self.program.code.len and n < MAX_ITERATIONS) : (n += 1) {
+        while (n < MAX_ITERATIONS) : (n += 1) {
+            self.gas -= 1;
             const i = try decoder.decodeInstruction(self.pc);
 
             std.debug.print("{d:0>4}: {any}\n", .{ self.pc, i });

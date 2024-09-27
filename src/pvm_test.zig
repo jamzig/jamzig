@@ -27,3 +27,16 @@ test "pvm:inst_add" {
     const test_result = try fixtures.runTestFixtureFromPath(allocator, "src/tests/vectors/pvm/pvm/pvm/programs/inst_add.json");
     try std.testing.expect(test_result);
 }
+
+test "pvm:test_vectors" {
+    const TEST_VECTORS = @import("./pvm_test/vectors.zig").TEST_VECTORS;
+    const allocator = std.testing.allocator;
+
+    for (TEST_VECTORS) |test_vector| {
+        std.debug.print("Running test vector: {s}\n", .{test_vector});
+        const path = try std.fmt.allocPrint(allocator, "src/tests/vectors/pvm/pvm/pvm/programs/{s}", .{test_vector});
+        defer allocator.free(path);
+        const test_result = try fixtures.runTestFixtureFromPath(allocator, path);
+        try std.testing.expect(test_result);
+    }
+}
