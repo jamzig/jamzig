@@ -36,8 +36,8 @@ pub const Decoder = struct {
     }
 
     pub fn decodeInstruction(self: *const Decoder, pc: usize) !InstructionWithArgs {
-        const instruction = std.meta.intToEnum(Instruction, self.code[pc]) catch |err| {
-            std.debug.print("Error decoding instruction at pc {}: code 0x{X:0>2} ({d})\n", .{ pc, self.code[pc], self.code[pc] });
+        const instruction = std.meta.intToEnum(Instruction, self.getCodeAt(pc)) catch |err| {
+            std.debug.print("Error decoding instruction at pc {}: code 0x{X:0>2} ({d})\n", .{ pc, self.getCodeAt(pc), self.getCodeAt(pc) });
             return err;
         };
         const args_type = ArgumentType.lookup(instruction);
@@ -210,7 +210,7 @@ pub const Decoder = struct {
         const l = self.skip_l(pc + 1);
         const r_a = @min(12, self.decodeLowNibble(pc + 1));
         const r_b = @min(12, self.decodeHighNibble(pc + 1));
-        const r_d = @min(12, self.code[pc + 2]);
+        const r_d = @min(12, self.getCodeAt(pc + 2));
         return .{
             .three_registers = .{
                 .no_of_bytes_to_skip = l,
@@ -239,15 +239,24 @@ pub const Decoder = struct {
         return count;
     }
 
+    /// (216) ζ ≡ c ⌢[0, 0, . . .]
+    pub fn getCodeAt(self: *const @This(), pc: usize) u8 {
+        if (pc < self.code.len) {
+            return self.code[pc];
+        }
+
+        return 0;
+    }
+
     inline fn decodeImmediate(self: *const Decoder, pc: usize, length: usize) !i32 {
         return Immediate.decodeSigned(self.code[pc..][0..length]);
     }
 
     inline fn decodeHighNibble(self: *const Decoder, pc: usize) u4 {
-        return Nibble.getHighNibble(self.code[pc]);
+        return Nibble.getHighNibble(self.getCodeAt(pc));
     }
     inline fn decodeLowNibble(self: *const Decoder, pc: usize) u4 {
-        return Nibble.getLowNibble(self.code[pc]);
+        return Nibble.getLowNibble(self.getCodeAt(pc));
     }
 };
 
