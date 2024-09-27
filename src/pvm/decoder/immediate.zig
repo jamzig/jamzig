@@ -19,13 +19,13 @@ fn buildBuffer(bytes: []const u8) [MAX_SIZE_IN_BYTES]u8 {
 
 // Rest of the code remains the same...
 
-fn getUnsigned(bytes: []const u8) u32 {
+pub fn decodeUnsigned(bytes: []const u8) u32 {
     const buffer = buildBuffer(bytes);
     return std.mem.readInt(u32, &buffer, .little);
 }
 
-fn getSigned(bytes: []const u8) i32 {
-    return @bitCast(getUnsigned(bytes));
+pub fn decodeSigned(bytes: []const u8) i32 {
+    return @bitCast(decodeUnsigned(bytes));
 }
 
 test "pvm:args:immediate - edge cases and conversions" {
@@ -124,8 +124,8 @@ test "pvm:args:immediate - edge cases and conversions" {
 
     for (testCases) |tc| {
         const buffer = buildBuffer(tc.input);
-        try testing.expectEqual(tc.expectedSigned, getSigned(&buffer));
-        try testing.expectEqual(tc.expectedUnsigned, getUnsigned(&buffer));
+        try testing.expectEqual(tc.expectedSigned, decodeSigned(&buffer));
+        try testing.expectEqual(tc.expectedUnsigned, decodeUnsigned(&buffer));
         try testing.expectEqualSlices(u8, &tc.expectedBytes, &buffer);
     }
 }
