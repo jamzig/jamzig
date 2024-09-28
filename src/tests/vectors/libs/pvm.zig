@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 pub const PageMap = struct {
     address: u32,
     length: u32,
-    is_writable: bool,
+    @"is-writable": bool,
 };
 
 pub const MemoryChunk = struct {

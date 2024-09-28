@@ -251,30 +251,43 @@ pub const PVM = struct {
             .div_u => {
                 const args = i.args.three_registers;
                 if (self.registers[args.second_register_index] == 0) {
-                    return error.DIVISION_BY_ZERO;
+                    self.registers[args.third_register_index] = 0xFFFFFFFF;
+                } else {
+                    self.registers[args.third_register_index] = @divTrunc(self.registers[args.first_register_index], self.registers[args.second_register_index]);
                 }
-                self.registers[args.third_register_index] = self.registers[args.first_register_index] / self.registers[args.second_register_index];
             },
             .div_s => {
                 const args = i.args.three_registers;
                 if (self.registers[args.second_register_index] == 0) {
-                    return error.DIVISION_BY_ZERO;
+                    self.registers[args.third_register_index] = 0xFFFFFFFF;
+                } else if (self.registers[args.first_register_index] == 0x80000000 and
+                    self.registers[args.second_register_index] == 0xFFFFFFFF)
+                {
+                    self.registers[args.third_register_index] = 0x80000000;
+                } else {
+                    self.registers[args.third_register_index] = @as(u32, @bitCast(@divTrunc(@as(i32, @bitCast(self.registers[args.first_register_index])), @as(i32, @bitCast(self.registers[args.second_register_index])))));
                 }
-                self.registers[args.third_register_index] = @as(u32, @bitCast(@divTrunc(@as(i32, @bitCast(self.registers[args.first_register_index])), @as(i32, @bitCast(self.registers[args.second_register_index])))));
             },
             .rem_u => {
                 const args = i.args.three_registers;
                 if (self.registers[args.second_register_index] == 0) {
-                    return error.DIVISION_BY_ZERO;
+                    self.registers[args.third_register_index] = self.registers[args.first_register_index];
+                } else if (self.registers[args.first_register_index] == 0x80000000 and
+                    self.registers[args.second_register_index] == 0xFFFFFFFF)
+                {
+                    self.registers[args.third_register_index] = 0x80000000;
+                } else {
+                    self.registers[args.third_register_index] = self.registers[args.first_register_index] % self.registers[args.second_register_index];
                 }
-                self.registers[args.third_register_index] = self.registers[args.first_register_index] % self.registers[args.second_register_index];
             },
             .rem_s => {
                 const args = i.args.three_registers;
+
                 if (self.registers[args.second_register_index] == 0) {
-                    return error.DIVISION_BY_ZERO;
+                    self.registers[args.third_register_index] = self.registers[args.first_register_index];
+                } else {
+                    self.registers[args.third_register_index] = @as(u32, @bitCast(@rem(@as(i32, @bitCast(self.registers[args.first_register_index])), @as(i32, @bitCast(self.registers[args.second_register_index])))));
                 }
-                self.registers[args.third_register_index] = @as(u32, @bitCast(@rem(@as(i32, @bitCast(self.registers[args.first_register_index])), @as(i32, @bitCast(self.registers[args.second_register_index])))));
             },
             .set_lt_u => {
                 const args = i.args.three_registers;

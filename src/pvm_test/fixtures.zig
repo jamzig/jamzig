@@ -54,7 +54,7 @@ pub const PVMFixture = struct {
             fixture.initial_page_map[i] = .{
                 .address = page.address,
                 .length = page.length,
-                .is_writable = page.is_writable,
+                .is_writable = page.@"is-writable",
             };
         }
 
@@ -128,7 +128,6 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
         status_matches = switch (err) {
             error.PANIC => test_vector.expected_status == .trap,
             error.OUT_OF_GAS => test_vector.expected_status == .trap,
-            error.DIVISION_BY_ZERO => test_vector.expected_status == .trap,
             error.MAX_ITERATIONS_REACHED => false,
             else => false,
         };
