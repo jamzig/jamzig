@@ -117,16 +117,18 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
 
     const result = pvm.run();
 
+    std.debug.print("Result: {any}\n", .{result});
+    std.debug.print("Expected status: {any}\n", .{test_vector.expected_status});
+
     // Check if the execution status matches the expected status
     var status_matches: bool = undefined;
     if (result) {
-        std.debug.print("Result: {any}\n", .{result});
-        std.debug.print("Expected status: {any}\n", .{test_vector.expected_status});
         status_matches = test_vector.expected_status == .halt;
     } else |err| {
         status_matches = switch (err) {
             error.PANIC => test_vector.expected_status == .trap,
             error.OUT_OF_GAS => test_vector.expected_status == .trap,
+            error.DIVISION_BY_ZERO => test_vector.expected_status == .trap,
             error.MAX_ITERATIONS_REACHED => false,
             else => false,
         };
@@ -141,8 +143,14 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
     }
 
     // Check if registers match
+    // Check if registers match (General Purpose Registers R0-R12)
     if (!std.mem.eql(u32, &pvm.registers, &test_vector.expected_regs)) {
-        std.debug.print("Register mismatch\n", .{});
+        std.debug.print("Register mismatch (General Purpose Registers R0-R12):\n", .{});
+        std.debug.print("        Input   |    Actual  |   Expected | Diff?\n", .{});
+        for (test_vector.initial_regs, pvm.registers, test_vector.expected_regs, 0..) |input, actual, expected, i| {
+            const mismatch = if (actual != expected) "*" else " ";
+            std.debug.print("R{d:2}: {d:10} | {d:10} | {d:10} | {s}\n", .{ i, input, actual, expected, mismatch });
+        }
         return false;
     }
 

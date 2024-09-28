@@ -91,7 +91,6 @@ pub const PVM = struct {
             self.gas -= 1;
             const i = try decoder.decodeInstruction(self.pc);
 
-            std.debug.print("{d:0>4}: {any}\n", .{ self.pc, i });
             self.pc = try updatePc(self.pc, try self.executeInstruction(i));
 
             if (self.gas <= 0) {
@@ -252,28 +251,28 @@ pub const PVM = struct {
             .div_u => {
                 const args = i.args.three_registers;
                 if (self.registers[args.second_register_index] == 0) {
-                    return error.DivisionByZero;
+                    return error.DIVISION_BY_ZERO;
                 }
                 self.registers[args.third_register_index] = self.registers[args.first_register_index] / self.registers[args.second_register_index];
             },
             .div_s => {
                 const args = i.args.three_registers;
                 if (self.registers[args.second_register_index] == 0) {
-                    return error.DivisionByZero;
+                    return error.DIVISION_BY_ZERO;
                 }
                 self.registers[args.third_register_index] = @as(u32, @bitCast(@divTrunc(@as(i32, @bitCast(self.registers[args.first_register_index])), @as(i32, @bitCast(self.registers[args.second_register_index])))));
             },
             .rem_u => {
                 const args = i.args.three_registers;
                 if (self.registers[args.second_register_index] == 0) {
-                    return error.DivisionByZero;
+                    return error.DIVISION_BY_ZERO;
                 }
                 self.registers[args.third_register_index] = self.registers[args.first_register_index] % self.registers[args.second_register_index];
             },
             .rem_s => {
                 const args = i.args.three_registers;
                 if (self.registers[args.second_register_index] == 0) {
-                    return error.DivisionByZero;
+                    return error.DIVISION_BY_ZERO;
                 }
                 self.registers[args.third_register_index] = @as(u32, @bitCast(@rem(@as(i32, @bitCast(self.registers[args.first_register_index])), @as(i32, @bitCast(self.registers[args.second_register_index])))));
             },

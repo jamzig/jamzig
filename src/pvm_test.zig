@@ -40,13 +40,11 @@ test "pvm:test_vectors" {
         try printProgramDecompilation(allocator, path);
         const test_result = fixtures.runTestFixtureFromPath(allocator, path) catch |err| {
             std.debug.print("Test failed with error: {}\n", .{err});
-            try printProgramDecompilation(allocator, path);
             return err;
         };
 
         if (!test_result) {
             std.debug.print("Test failed for vector: {s}\n", .{test_vector});
-            try printProgramDecompilation(allocator, path);
             return error.TestFailed;
         }
     }
