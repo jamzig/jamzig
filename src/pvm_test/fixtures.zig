@@ -129,6 +129,7 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
             error.PANIC => test_vector.expected_status == .trap,
             error.OUT_OF_GAS => test_vector.expected_status == .trap,
             error.MAX_ITERATIONS_REACHED => false,
+            error.MemoryAccessOutOfBounds => test_vector.expected_status == .trap,
             else => false,
         };
     }
@@ -156,15 +157,35 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
     // Check if PC matches
     if (pvm.pc != test_vector.expected_pc) {
         std.debug.print("PC mismatch: expected {}, got {}\n", .{ test_vector.expected_pc, pvm.pc });
+        std.debug.print("{any}", .{test_vector});
         return false;
     }
 
     // Check if memory matches
-    for (test_vector.expected_memory) |_| {
-        // we need to match if we have the same chunk
-        // in the pvm
-
-        // we neeed to see
+    for (test_vector.expected_memory) |expected_chunk| {
+        var found = false;
+        for (pvm.memory) |actual_chunk| {
+            if (actual_chunk.address == expected_chunk.address) {
+                found = true;
+                if (!std.mem.eql(u8, actual_chunk.contents, expected_chunk.contents)) {
+                    std.debug.print("Memory mismatch at address 0x{X:0>8}:\n", .{expected_chunk.address});
+                    std.debug.print("        Expected  |    Actual   | Diff?\n", .{});
+                    const max_len = @max(expected_chunk.contents.len, actual_chunk.contents.len);
+                    for (0..max_len) |i| {
+                        const expected = if (i < expected_chunk.contents.len) expected_chunk.contents[i] else 0;
+                        const actual = if (i < actual_chunk.contents.len) actual_chunk.contents[i] else 0;
+                        const mismatch = if (expected != actual) "*" else " ";
+                        std.debug.print("0x{X:0>2}: {X:0>2}         | {X:0>2}         | {s}\n", .{ i, expected, actual, mismatch });
+                    }
+                    return false;
+                }
+                break;
+            }
+        }
+        if (!found) {
+            std.debug.print("Expected memory chunk at address 0x{X:0>8} not found\n", .{expected_chunk.address});
+            return false;
+        }
     }
 
     // Check if gas matches
