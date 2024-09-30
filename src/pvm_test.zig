@@ -4,17 +4,25 @@ const pvmlib = @import("pvm.zig");
 const fixtures = @import("pvm_test/fixtures.zig");
 
 test "pvm:simple" {
-    var allocator = std.testing.allocator;
+    const allocator = std.testing.allocator;
 
     // -----------------------[0, 0, 33, 4, 8, 1, 4, 9, 1, 5, 3, 0, 2, 119, 255, 7, 7, 12, 82, 138, 8, 152, 8, 82, 169, 5, 243, 82, 135, 4, 8, 4, 9, 17, 19, 0, 73, 147, 82, 213, 254]
     const raw_program = [_]u8{ 0, 0, 33, 4, 8, 1, 4, 9, 1, 5, 3, 0, 2, 119, 255, 7, 7, 12, 82, 138, 8, 152, 8, 82, 169, 5, 243, 82, 135, 4, 8, 4, 9, 17, 19, 0, 73, 147, 82, 213, 254 };
 
-    var pvm = try pvmlib.PVM.init(&allocator, &raw_program);
+    var pvm = try pvmlib.PVM.init(allocator, &raw_program, std.math.maxInt(u32));
     defer pvm.deinit();
 
-    std.debug.print("program: {any}\n", .{pvm.program});
+    pvm.registers[0] = 4294901760;
+    pvm.registers[7] = 9;
 
-    try pvm.run();
+    std.debug.print("Program: {any}\n", .{pvm.program});
+
+    const result = pvm.run();
+
+    if (result != error.JumpAddressHalt) {
+        std.debug.print("Result: {any}\n", .{result});
+        return error.TestFailed;
+    }
 
     std.debug.print("Final register values:\n", .{});
     for (pvm.registers, 0..) |reg, i| {

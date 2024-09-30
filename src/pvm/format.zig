@@ -1,17 +1,12 @@
 const Program = @import("program.zig").Program;
 
 pub fn formatProgram(self: *const Program, writer: anytype) !void {
-    try writer.print("Jump Table (length: {}, item length: {} bytes):\n", .{
-        self.jump_table.len,
-        self.jump_table_item_length,
+    try writer.print("Jump Table (length: {}):\n", .{
+        self.jump_table.len(),
     });
-    var i: usize = 0;
-    while (i < self.jump_table.len) : (i += self.jump_table_item_length) {
-        try writer.print("  {}: ", .{i / self.jump_table_item_length});
-        for (self.jump_table[i..][0..self.jump_table_item_length]) |byte| {
-            try writer.print("{X:0>2}", .{byte});
-        }
-        try writer.writeByte('\n');
+    for (0..self.jump_table.len()) |index| {
+        const jump_target = self.jump_table.getDestination(index);
+        try writer.print("  {}: {}\n", .{ index, jump_target });
     }
 
     try writer.print("\nCode (length: {} bytes):\n", .{self.code.len});

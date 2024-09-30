@@ -53,6 +53,9 @@ pub const PVM = struct {
 
     pub fn deinit(self: *PVM) void {
         self.program.deinit(self.allocator);
+        for (self.page_map) |page| {
+            self.allocator.free(page.data);
+        }
         self.allocator.free(self.page_map);
     }
 
