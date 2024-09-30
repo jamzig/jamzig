@@ -1,5 +1,6 @@
 const std = @import("std");
 const codec = @import("../codec.zig");
+const JumpTable = @import("decoder/jumptable.zig").JumpTable;
 
 const Allocator = std.mem.Allocator;
 
@@ -7,8 +8,7 @@ pub const Program = struct {
     code: []const u8,
     mask: []const u8,
     basic_blocks: []u32,
-    jump_table: []const u8,
-    jump_table_item_length: u8,
+    jump_table: JumpTable,
 
     pub fn decode(allocator: Allocator, raw_program: []const u8) !Program {
         var program = Program{
@@ -16,19 +16,22 @@ pub const Program = struct {
             .mask = undefined,
             .basic_blocks = undefined,
             .jump_table = undefined,
-            .jump_table_item_length = undefined,
         };
 
         var index: usize = 0;
         const jump_table_length = try parseIntAndUpdateIndex(raw_program, &index);
-        program.jump_table_item_length = raw_program[index];
+        const jump_table_item_length = raw_program[index];
         index += 1;
 
         const code_length = try parseIntAndUpdateIndex(raw_program[index..], &index);
 
         const jump_table_first_byte_index = index;
-        const jump_table_length_in_bytes = jump_table_length * program.jump_table_item_length;
-        program.jump_table = try allocator.dupe(u8, raw_program[jump_table_first_byte_index..][0..jump_table_length_in_bytes]);
+        const jump_table_length_in_bytes = jump_table_length * jump_table_item_length;
+        program.jump_table = try JumpTable.init(
+            allocator,
+            jump_table_item_length,
+            raw_program[jump_table_first_byte_index..][0..jump_table_length_in_bytes],
+        );
 
         const code_first_index = jump_table_first_byte_index + jump_table_length_in_bytes;
         program.code = try allocator.dupe(u8, raw_program[code_first_index..][0..code_length]);
@@ -67,8 +70,8 @@ pub const Program = struct {
     pub fn deinit(self: *Program, allocator: Allocator) void {
         allocator.free(self.code);
         allocator.free(self.mask);
-        allocator.free(self.jump_table);
         allocator.free(self.basic_blocks);
+        self.jump_table.deinit(allocator);
     }
 
     pub fn format(

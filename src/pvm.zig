@@ -106,7 +106,11 @@ pub const PVM = struct {
 
             self.gas -= gas_cost;
             self.pc = try updatePc(self.pc, self.executeInstruction(i) catch |err| {
-                self.gas -= 1; // Charge one extra gas for error handling
+                self.gas -= switch (err) {
+                    error.JumpAddressHalt => 0,
+                    error.JumpAddressZero => 0,
+                    else => 1,
+                }; // Charge one extra gas for error handling
                 return err;
             });
         }
@@ -366,7 +370,7 @@ pub const PVM = struct {
             },
             .jump_ind => {
                 const args = i.args.one_register_one_immediate;
-                return @intCast(self.registers[args.register_index] +% @as(u32, @bitCast(args.immediate)));
+                return self.djump(self.registers[args.register_index] +% args.immediate);
             },
             .load_u8 => {
                 const args = i.args.one_register_one_immediate;
@@ -577,6 +581,41 @@ pub const PVM = struct {
         std.debug.print("branching to {}\n", .{b});
         std.debug.print("branching to offset {}\n", .{offset});
         return offset;
+    }
+
+    pub fn djump(
+        self: *PVM,
+        a: u32,
+    ) !PcOffset {
+        // const halt_pc = 2 ** 32 - 2 ** 16;
+        const halt_pc = 0xFFFF0000;
+        const ZA = 2;
+
+        // 1. Check if a is equal to the special halt value
+        if (a == halt_pc) {
+            return error.JumpAddressHalt;
+        }
+
+        // 2. Check if the value of `a` is invalid
+        if (a == 0) {
+            return error.JumpAddressZero;
+        }
+        if (a > self.program.jump_table.len() * ZA) {
+            return error.JumpAddressOutOfRange;
+        }
+        if (a % ZA != 0) {
+            return error.JumpAddressNotAligned;
+        }
+
+        // 3. Compute the jump index and check if it is in the valid destinations set
+        const index = (a / ZA) - 1;
+        const jump_dest = self.program.jump_table.getDestination(index);
+        if (std.mem.indexOfScalar(u32, self.program.basic_blocks, jump_dest) == null) {
+            return error.JumpAddressInvalid;
+        }
+
+        // 4. Jump to the destination by calculating the offset
+        return @as(i32, @intCast(@as(i32, @bitCast(jump_dest)) - @as(i32, @bitCast(self.pc))));
     }
 
     fn isBasicBlockStart(self: *PVM, address: u32) bool {
