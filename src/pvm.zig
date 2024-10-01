@@ -10,6 +10,7 @@ const updatePc = @import("./pvm/utils.zig").updatePc;
 pub const PVM = struct {
     allocator: Allocator,
     program: Program,
+    decoder: Decoder,
     registers: [13]u32,
     pc: u32,
     page_map: []PageMap,
@@ -34,8 +35,13 @@ pub const PVM = struct {
     };
 
     pub const Status = enum {
-        trap,
-        halt,
+        play, // The program is still running ready for next instruction execution
+        trap, // Trap is likely used to represent a special kind of control flow change
+        panic, // An exceptional condition or error occurred, causing an immediate halt.
+        halt, // The program terminated normally.
+        out_of_gas, // The program consumed its allocated gas, and further execution is halted
+        page_fault, // The program tried to access a memory address that was not available or permitted.
+        host_call, // The program made a request to interact with a host environment
     };
 
     pub fn init(allocator: Allocator, raw_program: []const u8, initial_gas: i64) !PVM {
@@ -44,6 +50,7 @@ pub const PVM = struct {
         return PVM{
             .allocator = allocator,
             .program = program,
+            .decoder = Decoder.init(program.code, program.mask),
             .registers = [_]u32{0} ** 13,
             .pc = 0,
             .page_map = &[_]PageMap{},
@@ -90,8 +97,6 @@ pub const PVM = struct {
         }
     }
 
-    const MAX_ITERATIONS = 1024;
-
     fn getGasCost(instruction: InstructionWithArgs) u32 {
         return switch (instruction.instruction) {
             .trap => 0,
@@ -100,30 +105,71 @@ pub const PVM = struct {
         };
     }
 
-    pub fn run(self: *PVM) !void {
-        const decoder = Decoder.init(self.program.code, self.program.mask);
-        var n: usize = 0;
-        while (n < MAX_ITERATIONS) : (n += 1) {
-            const i = try decoder.decodeInstruction(self.pc);
+    pub fn innerRunStep(self: *PVM) !void {
+        const i = try self.decoder.decodeInstruction(self.pc);
 
-            const gas_cost = getGasCost(i);
-            if (self.gas < gas_cost) {
-                return error.OUT_OF_GAS;
-            }
-
-            self.gas -= gas_cost;
-            self.pc = try updatePc(self.pc, self.executeInstruction(i) catch |err| {
-                self.gas -= switch (err) {
-                    error.JumpAddressHalt => 0,
-                    error.JumpAddressZero => 0,
-                    else => 1,
-                }; // Charge one extra gas for error handling
-                return err;
-            });
+        const gas_cost = getGasCost(i);
+        if (self.gas < gas_cost) {
+            return error.OutOfGas;
         }
 
-        if (n == MAX_ITERATIONS) {
-            return error.MAX_ITERATIONS_REACHED;
+        self.gas -= gas_cost;
+        self.pc = try updatePc(self.pc, self.executeInstruction(i) catch |err| {
+            // Charge one extra gas for error handling
+            self.gas -= switch (err) {
+                error.JumpAddressHalt => 0,
+                error.JumpAddressZero => 0,
+                else => 1,
+            };
+            return err;
+        });
+    }
+
+    /// Run as single step
+    /// Regular halt (∎): The program terminated normally.
+    /// Panic (☇): An exceptional condition or error occurred, causing an immediate halt.
+    /// Out-of-gas (∞): The program consumed its allocated gas, and further execution is halted.
+    /// Host-call (h): The program made a request to interact with a host environment, such as making a call to an external service or interacting with the blockchain state.
+    /// Page-fault (F): The program tried to access a memory address that was not available or permitted.
+    pub fn runStep(self: *PVM) Status {
+        const result = self.innerRunStep();
+
+        if (result) {
+            return .play;
+        } else |err| {
+            return switch (err) {
+                error.Trap => .trap,
+
+                error.OutOfGas => .out_of_gas,
+
+                // Memory errors
+                error.MemoryWriteProtected => .page_fault,
+                error.MemoryPageFault => .page_fault,
+                error.MemoryAccessOutOfBounds => .page_fault,
+
+                // Jump Halt
+                error.JumpAddressHalt => .halt,
+                // Jump errors
+                error.JumpAddressZero => .panic,
+                error.JumpAddressOutOfRange => .panic,
+                error.JumpAddressNotAligned => .panic,
+                error.JumpAddressNotInBasicBlock => .panic,
+
+                // Other
+                error.InvalidInstruction => .panic,
+                error.PcUnderflow => .panic,
+            };
+        }
+    }
+
+    /// Run a program until it halts or traps
+    pub fn run(self: *PVM) Status {
+        while (true) {
+            const status = self.runStep();
+            if (status == .play) {
+                continue;
+            }
+            return status;
         }
     }
 
@@ -134,7 +180,7 @@ pub const PVM = struct {
         switch (i.instruction) {
             .trap => {
                 // Halt the program
-                return error.PANIC;
+                return error.Trap;
             },
             .load_imm => {
                 // Load immediate value into register
@@ -673,7 +719,7 @@ pub const PVM = struct {
     fn branch(self: *PVM, b: u32) !PcOffset {
         // Check if the target address is the start of a basic block
         if (!self.isBasicBlockStart(b)) {
-            return error.PANIC; // Panic if not jumping to a basic block start
+            return error.JumpAddressNotInBasicBlock; // Panic if not jumping to a basic block start
         }
 
         // Calculate the offset to the target address
@@ -709,7 +755,7 @@ pub const PVM = struct {
         const index = (a / ZA) - 1;
         const jump_dest = self.program.jump_table.getDestination(index);
         if (std.mem.indexOfScalar(u32, self.program.basic_blocks, jump_dest) == null) {
-            return error.JumpAddressInvalid;
+            return error.JumpAddressNotInBasicBlock;
         }
 
         // 4. Jump to the destination by calculating the offset

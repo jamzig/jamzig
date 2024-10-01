@@ -118,33 +118,29 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
     const result = pvm.run();
 
     // Check if the execution status matches the expected status
-    var status_matches: bool = undefined;
-    if (result) {
-        status_matches = test_vector.expected_status == .halt;
-    } else |err| {
-        status_matches = switch (err) {
-            error.PANIC => test_vector.expected_status == .trap,
-            error.OUT_OF_GAS => test_vector.expected_status == .trap,
-            error.MAX_ITERATIONS_REACHED => false,
+    const status_matches: bool = switch (result) {
+        // Program executed successfully
+        .halt => test_vector.expected_status == PVMFixture.Status.halt,
+        // Something happened
+        .trap => test_vector.expected_status == PVMFixture.Status.trap,
 
-            error.MemoryWriteProtected => test_vector.expected_status == .trap,
-            error.MemoryPageFault => test_vector.expected_status == .trap,
-            error.MemoryAccessOutOfBounds => test_vector.expected_status == .trap,
-            error.JumpAddressHalt => test_vector.expected_status == .halt,
-            error.JumpAddressZero => test_vector.expected_status == .trap,
-            else => false,
-        };
-    }
+        // Here we have some mappings that are not present in the
 
+        // NOTE: In the graypaper this is a seperate status which should include the
+        // lowest address which caused the page_fault. In the test vectors these are
+        // represented as traps.
+        .page_fault => test_vector.expected_status == PVMFixture.Status.trap,
+        // NOTE: In the graypaper this is a seperate status which should include the
+        .panic => test_vector.expected_status == PVMFixture.Status.trap,
+        else => false,
+    };
+
+    var test_passed = true;
     if (!status_matches) {
-        std.debug.print("Status mismatch: expected {any}, got {any}\n", .{
-            test_vector.expected_status,
-            result,
-        });
-        return false;
+        std.debug.print("Status mismatch: expected {}, got {}\n", .{ test_vector.expected_status, result });
+        test_passed = false;
     }
 
-    // Check if registers match
     // Check if registers match (General Purpose Registers R0-R12)
     if (!std.mem.eql(u32, &pvm.registers, &test_vector.expected_regs)) {
         std.debug.print("Register mismatch (General Purpose Registers R0-R12):\n", .{});
@@ -153,14 +149,14 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
             const mismatch = if (actual != expected) "*" else " ";
             std.debug.print("R{d:2}: {d:10} | {d:10} | {d:10} | {s}\n", .{ i, input, actual, expected, mismatch });
         }
-        return false;
+        test_passed = false;
     }
 
     // Check if PC matches
     if (pvm.pc != test_vector.expected_pc) {
         std.debug.print("PC mismatch: expected {}, got {}\n", .{ test_vector.expected_pc, pvm.pc });
         std.debug.print("{any}", .{test_vector});
-        return false;
+        test_passed = false;
     }
 
     // Check if memory matches
@@ -177,17 +173,17 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
                 std.debug.print("{X:0>2} ", .{byte});
             }
             std.debug.print("\n", .{});
-            return false;
+            test_passed = false;
         }
     }
 
     // Check if gas matches
     if (pvm.gas != test_vector.expected_gas) {
         std.debug.print("Gas mismatch: expected {}, got {}\n", .{ test_vector.expected_gas, pvm.gas });
-        return false;
+        test_passed = false;
     }
 
-    return true;
+    return test_passed;
 }
 
 pub fn runTestFixtureFromPath(allocator: Allocator, path: []const u8) !bool {

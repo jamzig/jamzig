@@ -15,18 +15,23 @@ test "pvm:simple" {
     pvm.registers[0] = 4294901760;
     pvm.registers[7] = 9;
 
-    std.debug.print("Program: {any}\n", .{pvm.program});
+    // std.debug.print("Program: {any}\n", .{pvm.program});
 
     const result = pvm.run();
 
-    if (result != error.JumpAddressHalt) {
-        std.debug.print("Result: {any}\n", .{result});
+    if (result != .halt) {
+        std.debug.print("Expected .halt got {any}\n", .{result});
         return error.TestFailed;
     }
 
-    std.debug.print("Final register values:\n", .{});
-    for (pvm.registers, 0..) |reg, i| {
-        std.debug.print("r{}: {}\n", .{ i, reg });
+    // Check final register values
+    const expected_registers = [_]u32{ 4294901760, 0, 0, 0, 0, 0, 0, 55, 0, 0, 34, 0, 0 };
+
+    for (expected_registers, 0..) |expected, i| {
+        if (pvm.registers[i] != expected) {
+            std.debug.print("Register r{} mismatch. Expected: {}, Got: {}\n", .{ i, expected, pvm.registers[i] });
+            return error.TestFailed;
+        }
     }
 }
 
@@ -47,7 +52,7 @@ test "pvm:test_vectors" {
 
         // try printProgramDecompilation(allocator, path);
         const test_result = fixtures.runTestFixtureFromPath(allocator, path) catch |err| {
-            std.debug.print("Test failed with error: {}\n", .{err});
+            std.debug.print("Test {s} failed with error: {}\n", .{ test_vector, err });
             return err;
         };
 

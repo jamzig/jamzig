@@ -38,9 +38,9 @@ pub const Decoder = struct {
     }
 
     pub fn decodeInstruction(self: *const Decoder, pc: u32) !InstructionWithArgs {
-        const instruction = std.meta.intToEnum(Instruction, self.getCodeAt(pc)) catch |err| {
+        const instruction = std.meta.intToEnum(Instruction, self.getCodeAt(pc)) catch {
             std.debug.print("Error decoding instruction at pc {}: code 0x{X:0>2} ({d})\n", .{ pc, self.getCodeAt(pc), self.getCodeAt(pc) });
-            return err;
+            return error.InvalidInstruction;
         };
         const args_type = ArgumentType.lookup(instruction);
 
