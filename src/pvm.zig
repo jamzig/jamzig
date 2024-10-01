@@ -7,6 +7,11 @@ const InstructionWithArgs = @import("./pvm/decoder.zig").InstructionWithArgs;
 
 const updatePc = @import("./pvm/utils.zig").updatePc;
 
+pub const PVMErrorData = union {
+    // when a page fault occurs we whould return the lowest address which caused the fault
+    page_fault: u32,
+};
+
 pub const PVM = struct {
     allocator: Allocator,
     program: Program,
@@ -15,6 +20,8 @@ pub const PVM = struct {
     pc: u32,
     page_map: []PageMap,
     gas: i64,
+
+    error_data: ?PVMErrorData,
 
     pub const PageMap = struct {
         address: u32,
@@ -50,6 +57,7 @@ pub const PVM = struct {
         return PVM{
             .allocator = allocator,
             .program = program,
+            .error_data = null,
             .decoder = Decoder.init(program.code, program.mask),
             .registers = [_]u32{0} ** 13,
             .pc = 0,
@@ -138,7 +146,7 @@ pub const PVM = struct {
             return .play;
         } else |err| {
             return switch (err) {
-                error.Trap => .trap,
+                error.Trap => .panic,
 
                 error.OutOfGas => .out_of_gas,
 
@@ -162,7 +170,7 @@ pub const PVM = struct {
         }
     }
 
-    /// Run a program until it halts or traps
+    /// Run a program until it halts or an error state is reached
     pub fn run(self: *PVM) Status {
         while (true) {
             const status = self.runStep();
@@ -781,6 +789,7 @@ pub const PVM = struct {
         for (self.page_map) |page| {
             if (address >= page.address and address < page.address + page.length) {
                 if (address + size > page.address + page.length) {
+                    self.error_data = .{ .page_fault = page.address + page.length };
                     return error.MemoryAccessOutOfBounds;
                 }
 
@@ -788,6 +797,8 @@ pub const PVM = struct {
                 return page.data[offset .. offset + size];
             }
         }
+
+        self.error_data = .{ .page_fault = address };
         return error.MemoryPageFault;
     }
 
@@ -795,9 +806,11 @@ pub const PVM = struct {
         for (self.page_map) |page| {
             if (address >= page.address and address < page.address + page.length) {
                 if (!page.is_writable) {
+                    self.error_data = .{ .page_fault = address };
                     return error.MemoryWriteProtected;
                 }
                 if (address + data.len > page.address + page.length) {
+                    self.error_data = .{ .page_fault = page.address + page.length };
                     return error.MemoryAccessOutOfBounds;
                 }
 
@@ -806,6 +819,8 @@ pub const PVM = struct {
                 return;
             }
         }
+
+        self.error_data = .{ .page_fault = address };
         return error.MemoryPageFault;
     }
 
@@ -813,9 +828,11 @@ pub const PVM = struct {
         for (self.page_map) |page| {
             if (address >= page.address and address < page.address + page.length) {
                 if (!page.is_writable) {
+                    self.error_data = .{ .page_fault = address };
                     return error.MemoryWriteProtected;
                 }
                 if (address + size > page.address + page.length) {
+                    self.error_data = .{ .page_fault = page.address + page.length };
                     return error.MemoryAccessOutOfBounds;
                 }
 
@@ -831,6 +848,8 @@ pub const PVM = struct {
                 return;
             }
         }
+
+        self.error_data = .{ .page_fault = address };
         return error.MemoryPageFault;
     }
 };
