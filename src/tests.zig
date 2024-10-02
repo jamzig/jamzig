@@ -8,6 +8,9 @@ comptime {
     _ = @import("safrole_test/diffz.zig");
 
     _ = @import("crypto.zig");
+
+    _ = @import("pvm_test.zig");
+    _ = @import("pvm/decoder/immediate.zig");
 }
 
 pub const tv_types = @import("tests/vectors/libs/types.zig");

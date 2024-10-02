@@ -1,6 +1,6 @@
 const std = @import("std");
 const ArenaAllocator = std.heap.ArenaAllocator;
-const decoder = @import("codec/decoder.zig");
+pub const decoder = @import("codec/decoder.zig");
 const Scanner = @import("codec/scanner.zig").Scanner;
 const trace = @import("tracing.zig").src;
 
