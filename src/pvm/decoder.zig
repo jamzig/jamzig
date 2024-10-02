@@ -70,7 +70,7 @@ pub const Decoder = struct {
         const l = @min(4, self.skip_l(pc + 1));
         return .{
             .one_immediate = .{
-                .no_of_bytes_to_skip = 1 + l,
+                .no_of_bytes_to_skip = l,
                 .immediate = try self.decodeImmediate(pc + 1, l),
             },
         };

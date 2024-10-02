@@ -7,7 +7,14 @@ test "pvm:simple" {
     const allocator = std.testing.allocator;
 
     // -----------------------[0, 0, 33, 4, 8, 1, 4, 9, 1, 5, 3, 0, 2, 119, 255, 7, 7, 12, 82, 138, 8, 152, 8, 82, 169, 5, 243, 82, 135, 4, 8, 4, 9, 17, 19, 0, 73, 147, 82, 213, 254]
-    const raw_program = [_]u8{ 0, 0, 33, 4, 8, 1, 4, 9, 1, 5, 3, 0, 2, 119, 255, 7, 7, 12, 82, 138, 8, 152, 8, 82, 169, 5, 243, 82, 135, 4, 8, 4, 9, 17, 19, 0, 73, 147, 82, 213, 254 };
+    // const raw_program = [_]u8{ 0, 0, 33, 4, 8, 1, 4, 9, 1, 5, 3, 0, 2, 119, 255, 7, 7, 12, 82, 138, 8, 152, 8, 82, 169, 5, 243, 82, 135, 4, 8, 4, 9, 17, 19, 0, 73, 147, 82, 213, 254 };
+
+    const raw_program = [_]u8{
+        0x00, 0x00, 0x21, 0x04, 0x08, 0x01, 0x04, 0x09, 0x01, 0x05, 0x03, 0x00, //
+        0x02, 0x77, 0xff, 0x07, 0x07, 0x0c, 0x52, 0x8a, 0x08, 0x98, 0x08, 0x52, //
+        0xa9, 0x05, 0xf3, 0x52, 0x87, 0x04, 0x08, 0x04, 0x09, 0x11, 0x13, 0x00, //
+        0x49, 0x93, 0x52, 0xd5, 0xfe,
+    };
 
     var pvm = try pvmlib.PVM.init(allocator, &raw_program, std.math.maxInt(u32));
     defer pvm.deinit();
@@ -33,6 +40,68 @@ test "pvm:simple" {
             return error.TestFailed;
         }
     }
+}
+
+fn testHostCall(gas: *i64, registers: *[13]u32, page_map: []pvmlib.PVM.PageMap) pvmlib.PMVHostCallResult {
+    _ = page_map;
+    _ = gas;
+    // std.debug.print("Host call\n", .{});
+    // Simple host call that adds 1 to the first register
+    registers[0] += 1;
+    return .play;
+}
+
+test "pvm:ecalli:host_call" {
+    const allocator = std.testing.allocator;
+
+    // Create a simple program that makes a host call
+    const ecalli: []const u8 = @embedFile("pvm_test/fixtures/jampvm/ecalli.jampvm");
+
+    var pvm = try pvmlib.PVM.init(allocator, ecalli, 1000);
+    defer pvm.deinit();
+
+    // See the program
+    // try pvm.decompilePrint();
+
+    // Register the host call
+    try pvm.registerHostCall(0, testHostCall);
+
+    // Set up initial register value
+    pvm.registers[0] = 42;
+
+    // Run the program
+    const status = pvm.run();
+
+    // Check the results
+    try std.testing.expectEqual(pvmlib.PVM.Status.panic, status);
+    try std.testing.expectEqual(@as(u32, 43), pvm.registers[0]);
+}
+
+test "pvm:ecalli:host_call:add" {
+    const allocator = std.testing.allocator;
+
+    // Create a simple program that makes a host call
+    // and afterwards updates the register some more to test continuation
+    const ecalli_and_add: []const u8 = @embedFile("pvm_test/fixtures/jampvm/ecalli_and_add.jampvm");
+
+    var pvm = try pvmlib.PVM.init(allocator, ecalli_and_add, 1000);
+    defer pvm.deinit();
+
+    // See the program
+    // try pvm.decompilePrint();
+
+    // Register the host call
+    try pvm.registerHostCall(0, testHostCall);
+
+    // Set up initial register value
+    pvm.registers[0] = 42;
+
+    // Run the program, this does the hostcall and then adds 1 to the register
+    const status = pvm.run();
+
+    // Check the results
+    try std.testing.expectEqual(pvmlib.PVM.Status.panic, status);
+    try std.testing.expectEqual(@as(u32, 44), pvm.registers[0]);
 }
 
 test "pvm:inst_add" {

@@ -7,10 +7,17 @@ const InstructionWithArgs = @import("./pvm/decoder.zig").InstructionWithArgs;
 
 const updatePc = @import("./pvm/utils.zig").updatePc;
 
-pub const PVMErrorData = union {
+pub const PVMErrorData = union(enum) {
     // when a page fault occurs we whould return the lowest address which caused the fault
     page_fault: u32,
+    host_call: u32,
 };
+
+pub const PMVHostCallResult = union(enum) {
+    play,
+    page_fault: u32,
+};
+const PMVHostCallFn = fn (*i64, *[13]u32, []PVM.PageMap) PMVHostCallResult;
 
 pub const PVM = struct {
     allocator: Allocator,
@@ -20,8 +27,39 @@ pub const PVM = struct {
     pc: u32,
     page_map: []PageMap,
     gas: i64,
-
     error_data: ?PVMErrorData,
+    host_call_map: std.AutoHashMap(u32, *const PMVHostCallFn),
+
+    pub fn hostCall(self: *PVM, host_call_idx: u32) !void {
+        if (self.host_call_map.get(host_call_idx)) |host_func| {
+            var gas_c = self.gas;
+            var registers_c = self.registers;
+            const page_map_c = try self.clonePageMap();
+
+            switch (host_func(&gas_c, &registers_c, page_map_c)) {
+                .play => {},
+                .page_fault => |address| {
+                    self.freePageMap(page_map_c);
+                    self.error_data = .{ .page_fault = address };
+                    return error.MemoryPageFault;
+                },
+            }
+
+            // If the function returns successfully, update the original values
+            self.gas = gas_c;
+            self.registers = registers_c;
+
+            // Update our page map
+            self.freePageMap(self.page_map);
+            self.page_map = page_map_c;
+        } else {
+            return error.NonExistentHostCall;
+        }
+    }
+
+    pub fn registerHostCall(self: *PVM, host_call_idx: u32, host_func: PMVHostCallFn) !void {
+        try self.host_call_map.put(host_call_idx, host_func);
+    }
 
     pub const PageMap = struct {
         address: u32,
@@ -63,6 +101,7 @@ pub const PVM = struct {
             .pc = 0,
             .page_map = &[_]PageMap{},
             .gas = initial_gas,
+            .host_call_map = std.AutoHashMap(u32, *const PMVHostCallFn).init(allocator),
         };
     }
 
@@ -72,6 +111,7 @@ pub const PVM = struct {
             self.allocator.free(page.data);
         }
         self.allocator.free(self.page_map);
+        self.host_call_map.deinit();
     }
 
     pub fn setPageMap(self: *PVM, new_page_map: []const PageMapConfig) !void {
@@ -101,7 +141,6 @@ pub const PVM = struct {
 
             std.debug.print("{d:0>4}: {any}\n", .{ pc, i });
             pc += i.skip_l() + 1;
-            break;
         }
     }
 
@@ -147,10 +186,14 @@ pub const PVM = struct {
         } else |err| {
             return switch (err) {
                 error.Trap => .panic,
-
                 error.OutOfGas => .out_of_gas,
 
+                // Host call
+                error.NonExistentHostCall => .panic,
+
                 // Memory errors
+                error.OutOfMemory => .panic, // Allocator out of memory
+
                 error.MemoryWriteProtected => .page_fault,
                 error.MemoryPageFault => .page_fault,
                 error.MemoryAccessOutOfBounds => .page_fault,
@@ -174,10 +217,10 @@ pub const PVM = struct {
     pub fn run(self: *PVM) Status {
         while (true) {
             const status = self.runStep();
-            if (status == .play) {
-                continue;
+            switch (status) {
+                .play => continue,
+                else => return status,
             }
-            return status;
         }
     }
 
@@ -435,9 +478,7 @@ pub const PVM = struct {
             },
             .ecalli => {
                 const args = i.args.one_immediate;
-                // Implement ecalli behavior here
-                // For now, we'll just print the immediate value
-                std.debug.print("ECALL with immediate: {}\n", .{args.immediate});
+                try self.hostCall(args.immediate);
             },
             .store_imm_u8 => {
                 const args = i.args.two_immediates;
@@ -851,5 +892,29 @@ pub const PVM = struct {
 
         self.error_data = .{ .page_fault = address };
         return error.MemoryPageFault;
+    }
+
+    pub fn clonePageMap(self: *PVM) ![]PageMap {
+        var cloned_page_map = try self.allocator.alloc(PageMap, self.page_map.len);
+        errdefer self.allocator.free(cloned_page_map);
+
+        for (self.page_map, 0..) |page, i| {
+            cloned_page_map[i] = PageMap{
+                .address = page.address,
+                .length = page.length,
+                .is_writable = page.is_writable,
+                .data = try self.allocator.alignedAlloc(u8, 8, page.data.len),
+            };
+            @memcpy(cloned_page_map[i].data, page.data);
+        }
+
+        return cloned_page_map;
+    }
+
+    pub fn freePageMap(self: *PVM, page_map: []PageMap) void {
+        for (page_map) |page| {
+            self.allocator.free(page.data);
+        }
+        self.allocator.free(page_map);
     }
 };
