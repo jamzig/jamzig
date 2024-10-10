@@ -5,6 +5,11 @@ const crypto = @import("crypto");
 const ZERO_HASH: [32]u8 = [_]u8{0} ** 32;
 const EMPTY_BLOB: []const u8 = &[_]u8{};
 
+/// Prefix used for leaf hashes.
+const LEAF_PREFIX: [4]u8 = [_]u8{ 'l', 'e', 'a', 'f' };
+/// Prefix used for Node hashes.
+const NODE_PREFIX = [_]u8{ 'n', 'o', 'd', 'e' };
+
 const Blob = []const u8;
 const Blobs = []const []const u8;
 
@@ -66,12 +71,11 @@ pub fn N(blobs: Blobs, comptime hasher: type) Result {
         return .{ .Blob = blobs[0] };
     } else {
         const mid = (blobs.len + 1) / 2; // Round up division
-        const prefix = [_]u8{ 'n', 'o', 'd', 'e' };
         const left = N(blobs[0..mid], hasher);
         const right = N(blobs[mid..], hasher);
 
         var h = hasher.init(.{});
-        h.update(&prefix);
+        h.update(&NODE_PREFIX);
         h.update(left.getSlice());
         h.update(right.getSlice());
 
@@ -234,9 +238,6 @@ test "M_b_function_multiple_blobs" {
     try testing.expectEqualSlices(u8, expected, &result);
 }
 
-/// Prefix used for leaf hashes.
-const LEAF_PREFIX: [4]u8 = [_]u8{ 'l', 'e', 'a', 'f' };
-
 /// Applies the constancy preprocessor `C` on a given sequence of items `v`.
 /// This function hashes all data items with a fixed prefix, and then pads
 /// the resulting hashes to the next power of two with a zero hash.
@@ -246,10 +247,7 @@ const LEAF_PREFIX: [4]u8 = [_]u8{ 'l', 'e', 'a', 'f' };
 fn constancyPreprocessor(allocator: std.mem.Allocator, v: []const Blob, hasher: type) ![]Hash {
     const len = v.len;
     const nextPowerOfTwo = @as(usize, 1) <<
-        @as(
-        u6,
-        @intFromFloat(@ceil(std.math.log2(@as(f32, @floatFromInt(@max(1, len)))))),
-    );
+        std.math.log2_int_ceil(usize, @max(1, len));
 
     // Allocate the resulting array with the required length
     var v_prime = try allocator.alloc(Hash, nextPowerOfTwo);
@@ -306,4 +304,85 @@ test "constancyPreprocessor" {
 
     // Check if the last hash is the zero hash
     try testing.expectEqualSlices(u8, &ZERO_HASH, &processed_data[3]);
+}
+
+/// Computes the Merkle root of a constant-depth binary Merkle tree.
+///
+/// This function applies the constancy preprocessor to the input data
+/// and then computes the root hash of the resulting tree.
+///
+/// Parameters:
+///   allocator: Memory allocator for dynamic allocations
+///   v: Slice of data items to be included in the Merkle tree
+///   H: Hash function to be used (must output 32 bytes)
+///
+/// Returns:
+///   The 32-byte Merkle root hash
+///
+/// Error: Returns any allocation errors that may occur
+pub fn M(allocator: std.mem.Allocator, v: []const Blob, H: type) !Hash {
+    const preprocessed = try constancyPreprocessor(allocator, v, H);
+    defer allocator.free(preprocessed);
+    return try N(allocator, preprocessed, H);
+}
+
+/// Generates a Merkle proof (justification) for a specific item in the tree.
+///
+/// This function creates a proof that can be used to verify the inclusion
+/// of the item at index 'i' in the Merkle tree without having the entire tree.
+///
+/// Parameters:
+///   allocator: Memory allocator for dynamic allocations
+///   v: Slice of data items in the Merkle tree
+///   i: Index of the item for which to generate the proof
+///   H: Hash function to be used (must output 32 bytes)
+///
+/// Returns:
+///   A slice of 32-byte hashes forming the Merkle proof
+///
+/// Error: Returns any allocation errors that may occur
+///
+pub fn J(allocator: std.mem.Allocator, v: []const Blob, i: usize, H: type) ![]Hash {
+    const preprocessed = try constancyPreprocessor(allocator, v, H);
+    defer allocator.free(preprocessed);
+    return try T(allocator, preprocessed, i, H);
+}
+
+/// Generates a partial Merkle proof for a well-aligned subtree.
+///
+/// This function is similar to J, but it limits the proof to only those
+/// nodes required to justify inclusion of a well-aligned subtree of
+/// (maximum) size 2^x. This can reduce the size of the proof when the
+/// verifier already knows part of the tree.
+///
+/// Parameters:
+///   allocator: Memory allocator for dynamic allocations
+///   v: Slice of data items in the Merkle tree
+///   i: Index of the item for which to generate the proof
+///   x: Limits the proof to a subtree of maximum size 2^x
+///   H: Hash function to be used (must output 32 bytes)
+///
+/// Returns:
+///   A slice of 32-byte hashes forming the partial Merkle proof
+///
+/// Error: Returns any allocation errors that may occur
+pub fn J_x(allocator: std.mem.Allocator, v: []const Blob, i: usize, x: usize, H: type) ![]Hash {
+    var proof = try J(allocator, v, i, H);
+    const max_depth: usize = @max(
+        0,
+        std.math.ceil(
+            // log2(max(1,|v|)) - x
+            std.math.log2(@max(1.0, @as(f32, @floatFromInt(v.len)))) - @as(f32, x),
+        ),
+    );
+
+    // Truncate prrof if it exceeds the maximum depth
+    if (proof.len > max_depth) {
+        const truncated = try allocator.alloc(Hash, @intCast(max_depth));
+        @memcpy(truncated, proof[0..max_depth]);
+        allocator.free(proof);
+        return truncated;
+    }
+
+    return proof;
 }
