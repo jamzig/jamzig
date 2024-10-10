@@ -156,6 +156,26 @@ pub fn T(
     return .{ .results = results };
 }
 
+pub fn P_i(blobs: Blobs, index: usize) usize {
+    const mid = (blobs.len + 1) / 2; // Round up division
+    if (index < mid) {
+        return 0;
+    } else {
+        return mid;
+    }
+}
+
+pub fn P_s(s: bool, blobs: Blobs, index: usize) Blobs {
+    const mid = (blobs.len + 1) / 2; // Round up division
+    if ((index < mid) == s) {
+        return blobs[0..mid];
+    } else {
+        return blobs[mid..];
+    }
+}
+
+/// Hash based variant of T where we can make the assumption the only return value
+/// will be hashes
 pub fn T_hash(
     allocator: std.mem.Allocator,
     hashes: []const Hash,
@@ -169,6 +189,7 @@ pub fn T_hash(
     const b = try T_hash(allocator, P_s_hash(true, hashes, index), index - P_i_hash(hashes, index), hasher);
     defer allocator.free(b);
 
+    // TODO: optimize this
     var results = try allocator.alloc(Hash, b.len + 1);
     results[0] = a;
     @memcpy(results[1..], b);
@@ -191,24 +212,6 @@ fn P_s_hash(s: bool, hashes: []const Hash, index: usize) []const Hash {
         return hashes[0..mid];
     } else {
         return hashes[mid..];
-    }
-}
-
-pub fn P_i(blobs: Blobs, index: usize) usize {
-    const mid = (blobs.len + 1) / 2; // Round up division
-    if (index < mid) {
-        return 0;
-    } else {
-        return mid;
-    }
-}
-
-pub fn P_s(s: bool, blobs: Blobs, index: usize) Blobs {
-    const mid = (blobs.len + 1) / 2; // Round up division
-    if ((index < mid) == s) {
-        return blobs[0..mid];
-    } else {
-        return blobs[mid..];
     }
 }
 
