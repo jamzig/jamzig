@@ -14,6 +14,9 @@ comptime {
 
     _ = @import("merkle.zig");
     _ = @import("merkle_test.zig");
+
+    _ = @import("merkle_binary.zig");
+    _ = @import("merkle_mountain_ranges.zig");
 }
 
 pub const tv_types = @import("tests/vectors/libs/types.zig");
