@@ -200,12 +200,22 @@ pub const Delta = struct {
     accounts: std.AutoHashMap(ServiceIndex, ServiceAccount),
     allocator: Allocator,
 
-    // TODO: Service Privileges 9.4
+    // Service Privileges as described in 9.4
+    manager: ServiceIndex,
+    assign: ServiceIndex,
+    designate: ServiceIndex,
+    always_accumulate: std.AutoHashMap(ServiceIndex, GasLimit),
 
     pub fn init(allocator: Allocator) Delta {
         return .{
             .accounts = std.AutoHashMap(ServiceIndex, ServiceAccount).init(allocator),
             .allocator = allocator,
+
+            // Initialize with a default value or pass it as a parameter
+            .manager = 0,
+            .assign = 0,
+            .designate = 0,
+            .always_accumulate = std.AutoHashMap(ServiceIndex, GasLimit).init(allocator),
         };
     }
 
@@ -215,6 +225,35 @@ pub const Delta = struct {
             entry.value_ptr.deinit();
         }
         self.accounts.deinit();
+        self.always_accumulate.deinit();
+    }
+
+    pub fn setManager(self: *Delta, index: ServiceIndex) void {
+        self.manager = index;
+    }
+
+    pub fn setAssign(self: *Delta, index: ServiceIndex) void {
+        self.assign = index;
+    }
+
+    pub fn setDesignate(self: *Delta, index: ServiceIndex) void {
+        self.designate = index;
+    }
+
+    pub fn addAlwaysAccumulate(self: *Delta, index: ServiceIndex, gas_limit: GasLimit) !void {
+        try self.always_accumulate.put(index, gas_limit);
+    }
+
+    pub fn removeAlwaysAccumulate(self: *Delta, index: ServiceIndex) void {
+        _ = self.always_accumulate.remove(index);
+    }
+
+    pub fn getAlwaysAccumulateGasLimit(self: *Delta, index: ServiceIndex) ?GasLimit {
+        return self.always_accumulate.get(index);
+    }
+
+    pub fn isPrivilegedService(self: *Delta, index: ServiceIndex) bool {
+        return index == self.manager or index == self.assign or index == self.designate or self.always_accumulate.contains(index);
     }
 
     pub fn createAccount(self: *Delta, index: ServiceIndex) !void {
@@ -272,19 +311,6 @@ pub const Delta = struct {
 // Tests validate the behavior of these structures as described in Section 4.2 and 4.9.
 const testing = std.testing;
 
-test "ServiceAccount initialization and deinitialization" {
-    const allocator = testing.allocator;
-    var account = ServiceAccount.init(allocator);
-    defer account.deinit();
-
-    try testing.expect(account.storage.count() == 0);
-    try testing.expect(account.preimages.count() == 0);
-    try testing.expect(account.preimage_lookups.count() == 0);
-    try testing.expect(account.balance == 0);
-    try testing.expect(account.min_gas_accumulate == 0);
-    try testing.expect(account.min_gas_on_transfer == 0);
-}
-
 test "Delta initialization, account creation, and retrieval" {
     const allocator = testing.allocator;
     var delta = Delta.init(allocator);
@@ -298,6 +324,34 @@ test "Delta initialization, account creation, and retrieval" {
     try testing.expect(account.?.balance == 0);
 
     try testing.expectError(error.AccountAlreadyExists, delta.createAccount(index));
+}
+
+test "Delta service privileges" {
+    const allocator = testing.allocator;
+    var delta = Delta.init(allocator);
+    defer delta.deinit();
+
+    const manager_index: ServiceIndex = 1;
+    const assign_index: ServiceIndex = 2;
+    const designate_index: ServiceIndex = 3;
+    const always_accumulate_index: ServiceIndex = 4;
+
+    delta.setManager(manager_index);
+    delta.setAssign(assign_index);
+    delta.setDesignate(designate_index);
+    try delta.addAlwaysAccumulate(always_accumulate_index, 1000);
+
+    try testing.expect(delta.isPrivilegedService(manager_index));
+    try testing.expect(delta.isPrivilegedService(assign_index));
+    try testing.expect(delta.isPrivilegedService(designate_index));
+    try testing.expect(delta.isPrivilegedService(always_accumulate_index));
+    try testing.expect(!delta.isPrivilegedService(5));
+
+    try testing.expectEqual(@as(?GasLimit, 1000), delta.getAlwaysAccumulateGasLimit(always_accumulate_index));
+    try testing.expectEqual(@as(?GasLimit, null), delta.getAlwaysAccumulateGasLimit(5));
+
+    delta.removeAlwaysAccumulate(always_accumulate_index);
+    try testing.expect(!delta.isPrivilegedService(always_accumulate_index));
 }
 
 test "Delta balance update" {
@@ -317,6 +371,49 @@ test "Delta balance update" {
 
     const non_existent_index: ServiceIndex = 2;
     try testing.expectError(error.AccountNotFound, delta.updateBalance(non_existent_index, new_balance));
+}
+
+test "Delta postAccumulation with always_accumulate" {
+    const allocator = testing.allocator;
+    var delta = Delta.init(allocator);
+    defer delta.deinit();
+
+    const normal_index: ServiceIndex = 1;
+    const always_accumulate_index: ServiceIndex = 2;
+
+    try delta.createAccount(normal_index);
+    try delta.createAccount(always_accumulate_index);
+
+    try delta.addAlwaysAccumulate(always_accumulate_index, 2000);
+
+    const updates = [_]AccountUpdate{
+        .{ .index = normal_index, .new_balance = 100, .new_gas_limit = 1000 },
+        .{ .index = always_accumulate_index, .new_balance = 200, .new_gas_limit = 1500 },
+    };
+
+    try delta.postAccumulation(&updates);
+
+    const normal_account = delta.getAccount(normal_index).?;
+    const always_account = delta.getAccount(always_accumulate_index).?;
+
+    try testing.expectEqual(@as(Balance, 100), normal_account.balance);
+    try testing.expectEqual(@as(GasLimit, 1000), normal_account.min_gas_accumulate);
+
+    try testing.expectEqual(@as(Balance, 200), always_account.balance);
+    try testing.expectEqual(@as(GasLimit, 1500), always_account.min_gas_accumulate);
+}
+
+test "ServiceAccount initialization and deinitialization" {
+    const allocator = testing.allocator;
+    var account = ServiceAccount.init(allocator);
+    defer account.deinit();
+
+    try testing.expect(account.storage.count() == 0);
+    try testing.expect(account.preimages.count() == 0);
+    try testing.expect(account.preimage_lookups.count() == 0);
+    try testing.expect(account.balance == 0);
+    try testing.expect(account.min_gas_accumulate == 0);
+    try testing.expect(account.min_gas_on_transfer == 0);
 }
 
 test "ServiceAccount historicalLookup" {
