@@ -1,5 +1,4 @@
 const std = @import("std");
-
 const types = @import("types.zig");
 
 // Constants
@@ -42,7 +41,7 @@ pub const Alpha = struct {
     // NOTE: that we utilize the guarantees extrinsic EG to remove the oldest
     // authorizer which has been used to justify a guaranteed work-package in the
     // current block. This is further defined in equation (137)
-    pub fn transitionState(self: *Alpha, E_g: []const types.GuaranteesExtrinsic, H_t: types.TimeSlot) !void {
+    pub fn transitionState(self: *Alpha, E_g: types.GuaranteesExtrinsic, H_t: types.TimeSlot) !void {
         // Remove used authorizers from the pool
         for (E_g) |guarantee| {
             const core = guarantee.report.core_index;
@@ -115,3 +114,74 @@ pub const Alpha = struct {
         });
     }
 };
+
+const testing = std.testing;
+
+test "Alpha initialization" {
+    const alpha = Alpha.init();
+    try testing.expectEqual(@as(usize, 341), alpha.pools.len);
+    try testing.expectEqual(@as(usize, 341), alpha.queues.len);
+
+    for (alpha.pools) |pool| {
+        try testing.expectEqual(@as(usize, 0), pool.len);
+    }
+    for (alpha.queues) |queue| {
+        try testing.expectEqual(@as(usize, 0), queue.len);
+    }
+}
+
+test "Alpha addToQueue and isAuthorized" {
+    var alpha = Alpha.init();
+    const core: usize = 0;
+    const auth: [32]u8 = [_]u8{1} ** 32;
+
+    try alpha.addToQueue(core, auth);
+    try testing.expectEqual(@as(usize, 1), alpha.queues[core].len);
+    try testing.expect(!alpha.isAuthorized(core, auth));
+
+    // Test invalid core
+    try testing.expectError(error.InvalidCore, alpha.addToQueue(341, auth));
+    try testing.expect(!alpha.isAuthorized(341, auth));
+}
+
+test "Alpha transitionState" {
+    var alpha = Alpha.init();
+    const core: usize = 0;
+    const auth1: [32]u8 = [_]u8{1} ** 32;
+    const auth2: [32]u8 = [_]u8{2} ** 32;
+
+    try alpha.addToQueue(core, auth1);
+    try alpha.addToQueue(core, auth2);
+
+    var guarantees = [_]types.ReportGuarantee{.{
+        .report = .{
+            .package_spec = .{
+                .hash = [_]u8{0} ** 32,
+                .len = 0,
+                .root = [_]u8{0} ** 32,
+                .segments = [_]u8{0} ** 32,
+            },
+            .context = .{
+                .anchor = [_]u8{0} ** 32,
+                .state_root = [_]u8{0} ** 32,
+                .beefy_root = [_]u8{0} ** 32,
+                .lookup_anchor = [_]u8{0} ** 32,
+                .lookup_anchor_slot = 0,
+                .prerequisite = null,
+            },
+            .core_index = core,
+            .authorizer_hash = auth1,
+            .auth_output = &[_]u8{},
+            .results = &[_]types.WorkResult{},
+        },
+        .slot = 0,
+        .signatures = &[_]types.ValidatorSignature{},
+    }};
+
+    try alpha.transitionState(&guarantees, 0);
+
+    try testing.expectEqual(1, alpha.pools[core].len);
+    try testing.expectEqual(2, alpha.queues[core].len);
+    try testing.expect(alpha.isAuthorized(core, auth1));
+    try testing.expect(!alpha.isAuthorized(core, auth2));
+}
