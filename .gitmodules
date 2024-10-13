@@ -10,3 +10,6 @@
 [submodule "src/tests/vectors/trie"]
 	path = src/tests/vectors/trie
 	url = https://github.com/w3f/jamtestvectors.git
+[submodule "src/tests/vectors/judgements"]
+	path = src/tests/vectors/judgements
+	url = https://github.com/w3f/jamtestvectors.git
