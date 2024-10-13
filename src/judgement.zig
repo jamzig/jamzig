@@ -1,18 +1,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-// Constants
-const VALIDATOR_COUNT: usize = 1023; // Assuming 1023 validators as per the protocol
-
 // Types
 const Hash = [32]u8;
 const Signature = [64]u8;
 const PublicKey = [32]u8;
-
-const JudgmentType = enum {
-    Valid,
-    Invalid,
-};
 
 const types = @import("types.zig");
 
@@ -66,7 +58,7 @@ const State = struct {
 
 // The disputes extrinsic, ED , may contain one or more verdicts v as a
 // compilation of judgments coming from exactly two-thirds plus one of either
-// the ac- tive validator set or the previous epoch’s validator set, i.e. the
+// the active validator set or the previous epoch’s validator set, i.e. the
 // Ed25519 keys of κ or λ.
 fn processDisputesExtrinsic(state: *State, extrinsic: DisputesExtrinsic, validator_count: usize) !void {
     // Process verdicts: V Gp0.4.1 (107) (108)
