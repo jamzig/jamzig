@@ -11,5 +11,5 @@
 	path = src/tests/vectors/trie
 	url = https://github.com/w3f/jamtestvectors.git
 [submodule "src/tests/vectors/judgements"]
-	path = src/tests/vectors/judgements
+	path = src/tests/vectors/disputes
 	url = https://github.com/w3f/jamtestvectors.git
