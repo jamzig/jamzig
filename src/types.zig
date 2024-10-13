@@ -166,7 +166,7 @@ pub const Judgement = struct {
 pub const Verdict = struct {
     target: OpaqueHash,
     age: U32,
-    votes: []Judgement, // validators_super_majority
+    votes: []const Judgement, // validators_super_majority
 
     // validators_super_majority size is defined at runtime
     pub fn votes_size(params: CodecParams) usize {
@@ -188,7 +188,7 @@ pub const Fault = struct {
 };
 
 pub const DisputesExtrinsic = struct {
-    verdicts: []Verdict,
+    verdicts: []const Verdict,
     culprits: []Culprit,
     faults: []Fault,
 };

@@ -24,6 +24,8 @@ comptime {
     _ = @import("recent_blocks.zig");
 
     _ = @import("authorization.zig");
+
+    _ = @import("judgement.zig");
 }
 
 pub const tv_types = @import("tests/vectors/libs/types.zig");
