@@ -1,9 +1,13 @@
 const std = @import("std");
+const allocator = std.testing.allocator;
 const tvector = @import("tests/vectors/libs/disputes.zig");
 
 const diffz = @import("disputes_test/diffz.zig");
+const converters = @import("disputes_test/converters.zig");
 
-const allocator = std.testing.allocator;
+const disputes = @import("disputes.zig");
+
+const stf = @import("stf.zig");
 
 fn printStateDiff(alloc: std.mem.Allocator, pre_state: *const tvector.State, post_state: *const tvector.State) !void {
     const state_diff = try diffz.diffStates(alloc, pre_state, post_state);
@@ -16,11 +20,20 @@ test "tiny/progress_with_no_verdicts-1.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
+
+    const current_psi = try converters.convertPsi(allocator, test_vector.value.pre_state.psi);
+    const expected_psi = try converters.convertPsi(allocator, test_vector.value.post_state.psi);
+    const extrinsic_disputes = try converters.convertDisputesExtrinsic(allocator, test_vector.value.input.disputes);
+
+    var transitioned_psi = try stf.transitionDisputes(allocator, 6, &current_psi, extrinsic_disputes);
+    defer transitioned_psi.deinit();
+
+    try std.testing.expectEqualDeep(expected_psi, transitioned_psi);
 }
 
 // This test is the only one which will change the rho, the rest is Phi.only

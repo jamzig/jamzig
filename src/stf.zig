@@ -38,7 +38,9 @@ const types = @import("types.zig");
 const Block = types.Block;
 const Header = types.Header;
 
-pub fn stateTransition(allocator: Allocator, current_state: *const JamState, new_block: Block) !JamState {
+const Params = @import("jam_params.zig").Params;
+
+pub fn stateTransition(allocator: Allocator, params: Params, current_state: *const JamState, new_block: Block) !JamState {
     var new_state: JamState = undefined;
 
     // Step 1: Time Transition (τ')
@@ -98,6 +100,7 @@ pub fn stateTransition(allocator: Allocator, current_state: *const JamState, new
     // It's crucial for maintaining the integrity and security of the network.
     new_state.psi = try transitionDisputes(
         allocator,
+        params.validators_count,
         &current_state.psi,
         new_block.extrinsic.disputes,
     );
@@ -185,7 +188,7 @@ pub fn stateTransition(allocator: Allocator, current_state: *const JamState, new
     return new_state;
 }
 
-fn transitionTime(
+pub fn transitionTime(
     allocator: Allocator,
     current_tau: *const state.Tau,
     header: Header,
@@ -196,7 +199,7 @@ fn transitionTime(
     // Transition τ based on the new block's header
 }
 
-fn transitionRecentHistory(
+pub fn transitionRecentHistory(
     allocator: Allocator,
     current_beta: *const state.Beta,
     new_block: Block,
@@ -207,7 +210,7 @@ fn transitionRecentHistory(
     // Transition β with information from the new block
 }
 
-fn transitionSafrole(
+pub fn transitionSafrole(
     allocator: Allocator,
     current_gamma: *const state.Gamma,
     current_eta: *const state.Eta,
@@ -228,18 +231,18 @@ fn transitionSafrole(
     // Transition γ, η, ι, κ, and λ based on Safrole consensus rules
 }
 
-fn transitionDisputes(
+pub fn transitionDisputes(
     allocator: Allocator,
+    validator_count: usize,
     current_psi: *const state.Psi,
     xtdisputes: types.DisputesExtrinsic,
 ) !state.Psi {
     _ = allocator;
-    _ = current_psi;
-    _ = xtdisputes;
     // Transition ψ based on new disputes
+    return try @import("disputes.zig").processDisputesExtrinsic(current_psi, xtdisputes, validator_count);
 }
 
-fn transitionServiceAccounts(
+pub fn transitionServiceAccounts(
     allocator: Allocator,
     current_delta: *const state.Delta,
     xtpreimages: types.PreimagesExtrinsic,
@@ -250,7 +253,7 @@ fn transitionServiceAccounts(
     // Transition δ with new preimages
 }
 
-fn transitionCoreAllocations(
+pub fn transitionCoreAllocations(
     allocator: Allocator,
     current_rho: *const state.Rho,
     xtassurances: types.AssurancesExtrinsic,
@@ -263,7 +266,7 @@ fn transitionCoreAllocations(
     // Transition ρ based on new assurances and guarantees
 }
 
-fn accumulateWorkReports(
+pub fn accumulateWorkReports(
     allocator: Allocator,
     current_delta: *const state.Delta,
     current_chi: *const state.Chi,
@@ -280,7 +283,7 @@ fn accumulateWorkReports(
     // Process work reports and transition δ, χ, ι, and φ
 }
 
-fn transitionAuthorizations(
+pub fn transitionAuthorizations(
     allocator: Allocator,
     current_alpha: *const state.Alpha,
     updated_phi: *const state.Phi,
@@ -293,7 +296,7 @@ fn transitionAuthorizations(
     // Transition α based on new authorizations
 }
 
-fn transitionValidatorStatistics(
+pub fn transitionValidatorStatistics(
     allocator: Allocator,
     current_pi: *const state.Pi,
     new_block: Block,

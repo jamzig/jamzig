@@ -63,22 +63,22 @@ pub const JamState = struct {
     pi: Pi,
 };
 
-const Alpha = @import("authorization.zig").Alpha;
-const Beta = @import("recent_blocks.zig").RecentHistory;
-const Gamma = struct {
+pub const Alpha = @import("authorization.zig").Alpha;
+pub const Beta = @import("recent_blocks.zig").RecentHistory;
+pub const Gamma = struct {
     k: safrole_types.GammaK,
     z: safrole_types.GammaZ,
     s: safrole_types.GammaS,
     a: safrole_types.GammaA,
 };
-const Delta = @import("services.zig").Delta;
-const Eta = safrole_types.Eta;
-const Iota = []safrole_types.ValidatorData;
-const Kappa = safrole_types.Kappa;
-const Lambda = safrole_types.Lambda;
-const Rho = struct {};
-const Tau = types.TimeSlot;
-const Phi = struct {};
-const Chi = struct {};
-const Psi = @import("disputes.zig").Psi;
-const Pi = struct {};
+pub const Delta = @import("services.zig").Delta;
+pub const Eta = safrole_types.Eta;
+pub const Iota = []safrole_types.ValidatorData;
+pub const Kappa = safrole_types.Kappa;
+pub const Lambda = safrole_types.Lambda;
+pub const Rho = struct {};
+pub const Tau = types.TimeSlot;
+pub const Phi = struct {};
+pub const Chi = struct {};
+pub const Psi = @import("disputes.zig").Psi;
+pub const Pi = struct {};

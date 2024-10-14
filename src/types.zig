@@ -189,8 +189,8 @@ pub const Fault = struct {
 
 pub const DisputesExtrinsic = struct {
     verdicts: []const Verdict,
-    culprits: []Culprit,
-    faults: []Fault,
+    culprits: []const Culprit,
+    faults: []const Fault,
 };
 
 pub const Preimage = struct {

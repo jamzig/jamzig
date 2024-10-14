@@ -47,7 +47,7 @@ pub const AvailabilityAssignment = struct {
     timeout: u32,
 
     pub fn format(self: @This(), comptime _: []const u8, _: fmt.FormatOptions, writer: anytype) !void {
-        try fmt.format(writer, "{{ dummy_work_report: 0x{}, timeout: {} }}", .{ fmt.fmtSliceHexLower(self.dummy_work_report.bytes), self.timeout });
+        try fmt.format(writer, "{{ dummy_work_report: 0x{}, timeout: {} }}", .{ fmt.fmtSliceHexLower(&self.dummy_work_report.bytes), self.timeout });
     }
 };
 
@@ -187,7 +187,7 @@ pub const ValidatorData = struct {
     metadata: HexBytesFixed(128),
 
     pub fn format(self: @This(), comptime _: []const u8, _: fmt.FormatOptions, writer: anytype) !void {
-        try fmt.format(writer, "{{ bandersnatch: {}, ed25519: {}, bls: {}, metadata: 0x{} }}", .{ self.bandersnatch, self.ed25519, self.bls, fmt.fmtSliceHexLower(self.metadata.bytes) });
+        try fmt.format(writer, "{{ bandersnatch: {}, ed25519: {}, bls: {}, metadata: 0x{} }}", .{ self.bandersnatch, self.ed25519, self.bls, fmt.fmtSliceHexLower(&self.metadata.bytes) });
     }
 };
 

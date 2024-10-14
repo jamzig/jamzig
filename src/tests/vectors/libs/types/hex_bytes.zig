@@ -11,7 +11,7 @@ const Error = error{
 
 pub fn HexBytesFixed(comptime size: u16) type {
     return struct {
-        bytes: []u8,
+        bytes: [size]u8,
         size: u16,
 
         pub fn jsonParse(
@@ -23,11 +23,14 @@ pub fn HexBytesFixed(comptime size: u16) type {
             if (bytes.len != size) {
                 return error.LengthMismatch;
             }
-            return HexBytesFixed(size){ .bytes = bytes, .size = size };
+
+            var buffer: [size]u8 = [_]u8{0} ** size;
+            std.mem.copyForwards(u8, &buffer, bytes);
+            return HexBytesFixed(size){ .bytes = buffer, .size = size };
         }
 
         pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-            try writer.print("0x{}", .{std.fmt.fmtSliceHexLower(self.bytes)});
+            try writer.print("0x{}", .{std.fmt.fmtSliceHexLower(&self.bytes)});
         }
     };
 }

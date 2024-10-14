@@ -2,25 +2,25 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 // Types
-const Hash = [32]u8;
-const Signature = [64]u8;
-const PublicKey = [32]u8;
+pub const Hash = [32]u8;
+pub const Signature = [64]u8;
+pub const PublicKey = [32]u8;
 
 const types = @import("types.zig");
 
-const Judgment = types.Judgement;
-const Verdict = types.Verdict;
-const Culprit = types.Culprit;
-const Fault = types.Fault;
-const DisputesExtrinsic = types.DisputesExtrinsic;
+pub const Judgment = types.Judgement;
+pub const Verdict = types.Verdict;
+pub const Culprit = types.Culprit;
+pub const Fault = types.Fault;
+pub const DisputesExtrinsic = types.DisputesExtrinsic;
 
-const Psi = struct {
+pub const Psi = struct {
     good_set: std.AutoHashMap(Hash, void),
     bad_set: std.AutoHashMap(Hash, void),
     wonky_set: std.AutoHashMap(Hash, void),
     punish_set: std.AutoHashMap(PublicKey, void),
 
-    fn init(allocator: Allocator) Psi {
+    pub fn init(allocator: Allocator) Psi {
         return Psi{
             .good_set = std.AutoHashMap(Hash, void).init(allocator),
             .bad_set = std.AutoHashMap(Hash, void).init(allocator),
@@ -29,7 +29,16 @@ const Psi = struct {
         };
     }
 
-    fn deinit(self: *Psi) void {
+    pub fn clone(self: *const Psi) !Psi {
+        return Psi{
+            .good_set = try self.good_set.clone(),
+            .bad_set = try self.bad_set.clone(),
+            .wonky_set = try self.wonky_set.clone(),
+            .punish_set = try self.punish_set.clone(),
+        };
+    }
+
+    pub fn deinit(self: *Psi) void {
         self.good_set.deinit();
         self.bad_set.deinit();
         self.wonky_set.deinit();
@@ -60,7 +69,9 @@ const Psi = struct {
 // compilation of judgments coming from exactly two-thirds plus one of either
 // the active validator set or the previous epoch’s validator set, i.e. the
 // Ed25519 keys of κ or λ.
-pub fn processDisputesExtrinsic(state: *Psi, extrinsic: DisputesExtrinsic, validator_count: usize) !void {
+pub fn processDisputesExtrinsic(current_state: *const Psi, extrinsic: DisputesExtrinsic, validator_count: usize) !Psi {
+    var state = try current_state.clone();
+
     // Process verdicts: V Gp0.4.1 (107) (108)
     for (extrinsic.verdicts) |verdict| {
         const positive_judgments = countPositiveJudgments(verdict);
@@ -90,6 +101,8 @@ pub fn processDisputesExtrinsic(state: *Psi, extrinsic: DisputesExtrinsic, valid
             try state.punish_set.put(fault.key, {});
         }
     }
+
+    return state;
 }
 
 fn countPositiveJudgments(verdict: Verdict) usize {
@@ -106,8 +119,8 @@ const testing = std.testing;
 
 test "processDisputesExtrinsic - good set" {
     const allocator = std.testing.allocator;
-    var state = Psi.init(allocator);
-    defer state.deinit();
+    var current_state = Psi.init(allocator);
+    defer current_state.deinit();
 
     const validator_count: usize = 3; // Simplified for testing
     const target_hash: Hash = [_]u8{1} ** 32;
@@ -126,7 +139,8 @@ test "processDisputesExtrinsic - good set" {
         .faults = &[_]types.Fault{},
     };
 
-    try processDisputesExtrinsic(&state, extrinsic, validator_count);
+    var state = try processDisputesExtrinsic(&current_state, extrinsic, validator_count);
+    defer state.deinit();
 
     try testing.expect(state.good_set.contains(target_hash));
     try testing.expect(!state.bad_set.contains(target_hash));
@@ -135,8 +149,8 @@ test "processDisputesExtrinsic - good set" {
 
 test "processDisputesExtrinsic - bad set" {
     const allocator = std.testing.allocator;
-    var state = Psi.init(allocator);
-    defer state.deinit();
+    var current_state = Psi.init(allocator);
+    defer current_state.deinit();
 
     const validator_count: usize = 3; // Simplified for testing
     const target_hash: Hash = [_]u8{2} ** 32;
@@ -155,7 +169,8 @@ test "processDisputesExtrinsic - bad set" {
         .faults = &[_]types.Fault{},
     };
 
-    try processDisputesExtrinsic(&state, extrinsic, validator_count);
+    var state = try processDisputesExtrinsic(&current_state, extrinsic, validator_count);
+    defer state.deinit();
 
     try testing.expect(!state.good_set.contains(target_hash));
     try testing.expect(state.bad_set.contains(target_hash));
@@ -164,8 +179,8 @@ test "processDisputesExtrinsic - bad set" {
 
 test "processDisputesExtrinsic - wonky set" {
     const allocator = std.testing.allocator;
-    var state = Psi.init(allocator);
-    defer state.deinit();
+    var current_state = Psi.init(allocator);
+    defer current_state.deinit();
 
     const validator_count: usize = 3; // Simplified for testing
     const target_hash: Hash = [_]u8{3} ** 32;
@@ -184,7 +199,8 @@ test "processDisputesExtrinsic - wonky set" {
         .faults = &[_]types.Fault{},
     };
 
-    try processDisputesExtrinsic(&state, extrinsic, validator_count);
+    var state = try processDisputesExtrinsic(&current_state, extrinsic, validator_count);
+    defer state.deinit();
 
     try testing.expect(!state.good_set.contains(target_hash));
     try testing.expect(!state.bad_set.contains(target_hash));
