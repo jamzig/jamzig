@@ -25,7 +25,7 @@ comptime {
 
     _ = @import("authorization.zig");
 
-    _ = @import("judgement.zig");
+    _ = @import("disputes.zig");
 
     _ = @import("tests/vectors/disputes.zig");
 }

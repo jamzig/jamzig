@@ -14,14 +14,14 @@ const Culprit = types.Culprit;
 const Fault = types.Fault;
 const DisputesExtrinsic = types.DisputesExtrinsic;
 
-const State = struct {
+const Psi = struct {
     good_set: std.AutoHashMap(Hash, void),
     bad_set: std.AutoHashMap(Hash, void),
     wonky_set: std.AutoHashMap(Hash, void),
     punish_set: std.AutoHashMap(PublicKey, void),
 
-    fn init(allocator: Allocator) State {
-        return State{
+    fn init(allocator: Allocator) Psi {
+        return Psi{
             .good_set = std.AutoHashMap(Hash, void).init(allocator),
             .bad_set = std.AutoHashMap(Hash, void).init(allocator),
             .wonky_set = std.AutoHashMap(Hash, void).init(allocator),
@@ -29,7 +29,7 @@ const State = struct {
         };
     }
 
-    fn deinit(self: *State) void {
+    fn deinit(self: *Psi) void {
         self.good_set.deinit();
         self.bad_set.deinit();
         self.wonky_set.deinit();
@@ -60,7 +60,7 @@ const State = struct {
 // compilation of judgments coming from exactly two-thirds plus one of either
 // the active validator set or the previous epoch’s validator set, i.e. the
 // Ed25519 keys of κ or λ.
-fn processDisputesExtrinsic(state: *State, extrinsic: DisputesExtrinsic, validator_count: usize) !void {
+pub fn processDisputesExtrinsic(state: *Psi, extrinsic: DisputesExtrinsic, validator_count: usize) !void {
     // Process verdicts: V Gp0.4.1 (107) (108)
     for (extrinsic.verdicts) |verdict| {
         const positive_judgments = countPositiveJudgments(verdict);
@@ -106,7 +106,7 @@ const testing = std.testing;
 
 test "processDisputesExtrinsic - good set" {
     const allocator = std.testing.allocator;
-    var state = State.init(allocator);
+    var state = Psi.init(allocator);
     defer state.deinit();
 
     const validator_count: usize = 3; // Simplified for testing
@@ -135,7 +135,7 @@ test "processDisputesExtrinsic - good set" {
 
 test "processDisputesExtrinsic - bad set" {
     const allocator = std.testing.allocator;
-    var state = State.init(allocator);
+    var state = Psi.init(allocator);
     defer state.deinit();
 
     const validator_count: usize = 3; // Simplified for testing
@@ -164,7 +164,7 @@ test "processDisputesExtrinsic - bad set" {
 
 test "processDisputesExtrinsic - wonky set" {
     const allocator = std.testing.allocator;
-    var state = State.init(allocator);
+    var state = Psi.init(allocator);
     defer state.deinit();
 
     const validator_count: usize = 3; // Simplified for testing

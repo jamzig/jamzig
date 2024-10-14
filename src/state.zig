@@ -80,5 +80,5 @@ const Rho = struct {};
 const Tau = types.TimeSlot;
 const Phi = struct {};
 const Chi = struct {};
-const Psi = struct {};
+const Psi = @import("disputes.zig").Psi;
 const Pi = struct {};
