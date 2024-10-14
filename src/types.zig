@@ -191,6 +191,18 @@ pub const DisputesExtrinsic = struct {
     verdicts: []const Verdict,
     culprits: []const Culprit,
     faults: []const Fault,
+
+    pub fn deinit(
+        self: *DisputesExtrinsic,
+        allocator: std.mem.Allocator,
+    ) void {
+        for (self.verdicts) |verdict| {
+            allocator.free(verdict.votes);
+        }
+        allocator.free(self.verdicts);
+        allocator.free(self.culprits);
+        allocator.free(self.faults);
+    }
 };
 
 pub const Preimage = struct {
