@@ -31,6 +31,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const utils = @import("utils.zig");
+
 const state = @import("state.zig");
 const JamState = state.JamState;
 
@@ -102,6 +104,8 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
         allocator,
         params.validators_count,
         &current_state.psi,
+        &current_state.kappa,
+        &current_state.lambda,
         new_block.extrinsic.disputes,
     );
 
@@ -231,13 +235,47 @@ pub fn transitionSafrole(
     // Transition γ, η, ι, κ, and λ based on Safrole consensus rules
 }
 
+fn validator_key(validator: types.ValidatorData) types.Ed25519Key {
+    return validator.ed25519;
+}
+
 pub fn transitionDisputes(
     allocator: Allocator,
     validator_count: usize,
     current_psi: *const state.Psi,
+    current_kappa: state.Kappa,
+    current_lambda: state.Lambda,
+    current_epoch: types.Epoch,
     xtdisputes: types.DisputesExtrinsic,
-) anyerror!state.Psi {
-    _ = allocator;
+) !state.Psi {
+    // Map current_kappa to extract Edwards public keys
+    const current_kappa_keys = try utils.mapAlloc(
+        types.ValidatorData,
+        types.Ed25519Key,
+        allocator,
+        current_kappa,
+        validator_key,
+    );
+    defer allocator.free(current_kappa_keys);
+
+    const current_lambda_keys = try utils.mapAlloc(
+        types.ValidatorData,
+        types.Ed25519Key,
+        allocator,
+        current_lambda,
+        validator_key,
+    );
+    defer allocator.free(current_lambda_keys);
+
+    // Verify correctness of the disputes extrinsic
+    try @import("disputes.zig").verifyDisputesExtrinsic(
+        xtdisputes,
+        current_psi,
+        current_kappa_keys,
+        current_lambda_keys,
+        validator_count,
+        current_epoch,
+    );
     // Transition ψ based on new disputes
     return try @import("disputes.zig").processDisputesExtrinsic(current_psi, xtdisputes, validator_count);
 }

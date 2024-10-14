@@ -5,6 +5,22 @@ const types = @import("../types.zig");
 
 const disputes = @import("../disputes.zig");
 
+pub fn convertValidatorData(allocator: std.mem.Allocator, test_data: []tvector.ValidatorData) ![]types.ValidatorData {
+    var result = try allocator.alloc(types.ValidatorData, test_data.len);
+    errdefer allocator.free(result);
+
+    for (test_data, 0..) |data, i| {
+        result[i] = .{
+            .bandersnatch = data.bandersnatch.bytes,
+            .ed25519 = data.ed25519.bytes,
+            .bls = data.bls.bytes,
+            .metadata = data.metadata.bytes,
+        };
+    }
+
+    return result;
+}
+
 pub fn convertPsi(allocator: std.mem.Allocator, test_psi: tvector.DisputesRecords) !state.Psi {
     var good_set = std.AutoHashMap(disputes.Hash, void).init(allocator);
     for (test_psi.psi_g) |hash| {

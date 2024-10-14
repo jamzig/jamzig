@@ -14,6 +14,16 @@ fn printStateDiff(allocator: std.mem.Allocator, pre_state: *const tvector.State,
     std.debug.print("\nState Diff: {s}\n", .{state_diff});
 }
 
+pub const TINY_PARAMS = @import("jam_params.zig").Params{
+    .epoch_length = 12,
+    // TODO: what value of Y (ticket_submission_end_slot) should we use for the tiny vectors, now set to
+    // same ratio. Production values is 500 of and epohc length of 600 which
+    // would suggest 10
+    .ticket_submission_end_epoch_slot = 10,
+    .max_ticket_entries_per_validator = 2,
+    .validators_count = 6,
+};
+
 fn runDisputeTest(allocator: std.mem.Allocator, test_vector: tvector.TestVector) !void {
     var current_psi = try converters.convertPsi(allocator, test_vector.pre_state.psi);
     defer current_psi.deinit();
@@ -22,7 +32,15 @@ fn runDisputeTest(allocator: std.mem.Allocator, test_vector: tvector.TestVector)
     var extrinsic_disputes = try converters.convertDisputesExtrinsic(allocator, test_vector.input.disputes);
     defer extrinsic_disputes.deinit(allocator);
 
-    const transition_result = stf.transitionDisputes(allocator, 6, &current_psi, extrinsic_disputes);
+    const kappa = try converters.convertValidatorData(allocator, test_vector.pre_state.kappa);
+    defer allocator.free(kappa);
+
+    const lambda = try converters.convertValidatorData(allocator, test_vector.pre_state.lambda);
+    defer allocator.free(lambda);
+
+    const current_epoch = test_vector.pre_state.tau / TINY_PARAMS.epoch_length;
+    const transition_result = stf.transitionDisputes(allocator, 6, &current_psi, kappa, lambda, current_epoch, extrinsic_disputes);
+
     defer {
         if (transition_result) |psi| {
             defer @constCast(&psi).deinit();
@@ -32,9 +50,27 @@ fn runDisputeTest(allocator: std.mem.Allocator, test_vector: tvector.TestVector)
     switch (test_vector.output) {
         .err => |expected_error| {
             if (transition_result) |_| {
+                std.debug.print("\nGot a success, expected error: {any}\n", .{expected_error});
                 return error.UnexpectedSuccess;
             } else |actual_error| {
-                try std.testing.expectEqual(expected_error, actual_error);
+                const mapped_expected_error = switch (expected_error) {
+                    .already_judged => error.AlreadyJudged,
+                    .bad_vote_split => error.BadVoteSplit,
+                    .verdicts_not_sorted_unique => error.VerdictsNotSortedUnique,
+                    .judgements_not_sorted_unique => error.JudgementsNotSortedUnique,
+                    .culprits_not_sorted_unique => error.CulpritsNotSortedUnique,
+                    .faults_not_sorted_unique => error.FaultsNotSortedUnique,
+                    .not_enough_culprits => error.NotEnoughCulprits,
+                    .not_enough_faults => error.NotEnoughFaults,
+                    .culprits_verdict_not_bad => error.CulpritsVerdictNotBad,
+                    .fault_verdict_wrong => error.FaultVerdictWrong,
+                    .offender_already_reported => error.OffenderAlreadyReported,
+                    .bad_judgement_age => error.BadJudgementAge,
+                    .bad_validator_index => error.BadValidatorIndex,
+                    .bad_signature => error.BadSignature,
+                };
+                std.debug.print("\nExpected error: {any}\n", .{expected_error});
+                try std.testing.expectEqual(mapped_expected_error, actual_error);
             }
         },
         .ok => |expected_marks| {
@@ -74,20 +110,6 @@ test "tiny/progress_with_no_verdicts-1.json" {
     // );
 
     try runDisputeTest(allocator, test_vector.value);
-}
-
-// This test is the only one which will change the rho, the rest is Phi.only
-test "tiny/progress_invalidates_avail_assignments-1.json" {
-    const allocator = std.testing.allocator;
-    const test_json = "src/tests/vectors/disputes/disputes/tiny/progress_invalidates_avail_assignments-1.json";
-    const test_vector = try tvector.TestVector.build_from(allocator, test_json);
-    defer test_vector.deinit();
-
-    // try printStateDiff(
-    //     allocator,
-    //     &test_vector.value.pre_state,
-    //     &test_vector.value.post_state,
-    // );
 }
 
 test "tiny/progress_with_bad_signatures-1.json" {
@@ -397,6 +419,22 @@ test "tiny/progress_with_verdicts-6.json" {
     const test_json = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdicts-6.json";
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
+
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
+}
+
+// This test is the only one which will change the rho, the rest is Phi.only
+test "tiny/progress_invalidates_avail_assignments-1.json" {
+    const allocator = std.testing.allocator;
+    const test_json = "src/tests/vectors/disputes/disputes/tiny/progress_invalidates_avail_assignments-1.json";
+    const test_vector = try tvector.TestVector.build_from(allocator, test_json);
+    defer test_vector.deinit();
+
+    return error.NotImplementedYet;
 
     // try printStateDiff(
     //     allocator,

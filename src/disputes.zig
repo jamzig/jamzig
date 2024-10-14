@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const crypto = std.crypto;
 
 // Types
 pub const Hash = [32]u8;
@@ -223,3 +224,197 @@ test "processDisputesExtrinsic - wonky set" {
     try testing.expect(!state.bad_set.contains(target_hash));
     try testing.expect(state.wonky_set.contains(target_hash));
 }
+
+pub const VerificationError = error{
+    AlreadyJudged,
+    BadVoteSplit,
+    VerdictsNotSortedUnique,
+    JudgementsNotSortedUnique,
+    CulpritsNotSortedUnique,
+    FaultsNotSortedUnique,
+    NotEnoughCulprits,
+    NotEnoughFaults,
+    CulpritsVerdictNotBad,
+    FaultVerdictWrong,
+    OffenderAlreadyReported,
+    BadJudgementAge,
+    BadValidatorIndex,
+    BadValidatorPubKey,
+    BadSignature,
+};
+
+fn verdictTargetHash(verdict: *const Verdict) Hash {
+    return verdict.target;
+}
+
+fn culpritsKey(culprit: *const Culprit) types.Ed25519Key {
+    return culprit.key;
+}
+
+fn faultKey(fault: *const Fault) types.Ed25519Key {
+    return fault.key;
+}
+
+fn judgmentValidatorIndex(judgment: *const Judgment) u16 {
+    return judgment.index;
+}
+
+pub fn verifyDisputesExtrinsic(
+    extrinsic: DisputesExtrinsic,
+    current_state: *const Psi,
+    kappa: []const PublicKey,
+    lambda: []const PublicKey,
+    validator_count: usize,
+    current_epoch: u32,
+) VerificationError!void {
+    // Check if verdicts are sorted and unique
+    try verifyOrderedUnique(
+        extrinsic.verdicts,
+        Verdict,
+        Hash,
+        verdictTargetHash,
+        lessThanHash,
+        VerificationError.VerdictsNotSortedUnique,
+    );
+
+    // Check if culprits are sorted and unique
+    try verifyOrderedUnique(
+        extrinsic.culprits,
+        Culprit,
+        types.Ed25519Key,
+        culpritsKey,
+        lessThanPublicKey,
+        VerificationError.CulpritsNotSortedUnique,
+    );
+
+    // Check if faults are sorted and unique
+    try verifyOrderedUnique(
+        extrinsic.faults,
+        Fault,
+        types.Ed25519Key,
+        faultKey,
+        lessThanPublicKey,
+        VerificationError.FaultsNotSortedUnique,
+    );
+
+    for (extrinsic.verdicts) |verdict| {
+        // Check if the verdict has already been judged
+        if (current_state.good_set.contains(verdict.target) or
+            current_state.bad_set.contains(verdict.target) or
+            current_state.wonky_set.contains(verdict.target))
+        {
+            return VerificationError.AlreadyJudged;
+        }
+
+        // Check if judgements are sorted and unique
+        try verifyOrderedUnique(
+            verdict.votes,
+            Judgment,
+            u16,
+            judgmentValidatorIndex,
+            lessThanU16,
+            VerificationError.JudgementsNotSortedUnique,
+        );
+
+        // Verify vote split
+        const positive_votes = countPositiveJudgments(verdict);
+        if (positive_votes != validator_count * 2 / 3 + 1 and
+            positive_votes != 0 and
+            positive_votes != validator_count / 3)
+        {
+            return VerificationError.BadVoteSplit;
+        }
+
+        // Verify signatures
+        for (verdict.votes) |judgment| {
+            if (judgment.index >= validator_count) {
+                return VerificationError.BadValidatorIndex;
+            }
+
+            const public_key = crypto.sign.Ed25519.PublicKey.fromBytes(if (verdict.age == current_epoch)
+                kappa[judgment.index]
+            else if (verdict.age == current_epoch - 1)
+                lambda[judgment.index]
+            else
+                return VerificationError.BadJudgementAge) catch {
+                return VerificationError.BadValidatorPubKey;
+            };
+
+            const message = if (judgment.vote)
+                "jam_valid" ++ verdict.target
+            else
+                "jam_invalid" ++ verdict.target;
+
+            const signature = crypto.sign.Ed25519.Signature.fromBytes(judgment.signature);
+
+            signature.verify(message, public_key) catch {
+                return VerificationError.BadSignature;
+            };
+        }
+    }
+
+    // Verify culprits
+    var culprit_count: usize = 0;
+    for (extrinsic.culprits) |culprit| {
+        if (current_state.punish_set.contains(culprit.key)) {
+            return VerificationError.OffenderAlreadyReported;
+        }
+        if (!current_state.bad_set.contains(culprit.target)) {
+            return VerificationError.CulpritsVerdictNotBad;
+        }
+        culprit_count += 1;
+    }
+
+    // Verify faults
+    var fault_count: usize = 0;
+    for (extrinsic.faults) |fault| {
+        if (current_state.punish_set.contains(fault.key)) {
+            return VerificationError.OffenderAlreadyReported;
+        }
+        const in_good_set = current_state.good_set.contains(fault.target);
+        const in_bad_set = current_state.bad_set.contains(fault.target);
+        if ((fault.vote and !in_bad_set) or (!fault.vote and !in_good_set)) {
+            return VerificationError.FaultVerdictWrong;
+        }
+        fault_count += 1;
+    }
+
+    // Check for enough culprits and faults
+    for (extrinsic.verdicts) |verdict| {
+        const positive_votes = countPositiveJudgments(verdict);
+        if (positive_votes == 0 and culprit_count < 2) {
+            return VerificationError.NotEnoughCulprits;
+        }
+        if (positive_votes == validator_count * 2 / 3 + 1 and fault_count == 0) {
+            return VerificationError.NotEnoughFaults;
+        }
+    }
+}
+
+fn verifyOrderedUnique(items: anytype, comptime T: type, comptime U: type, mapFn: fn (*const T) U, compareFn: fn (U, U) std.math.Order, errortype: VerificationError) !void {
+    if (items.len == 0) return;
+    var prev = mapFn(&items[0]);
+    for (items[1..]) |*item| {
+        const map_item = mapFn(item);
+        switch (compareFn(prev, map_item)) {
+            .lt => {},
+            .eq => return errortype,
+            .gt => return errortype,
+        }
+        prev = map_item;
+    }
+}
+
+fn lessThanHash(a: Hash, b: Hash) std.math.Order {
+    return std.mem.order(u8, &a, &b);
+}
+
+fn lessThanPublicKey(a: PublicKey, b: PublicKey) std.math.Order {
+    return std.mem.order(u8, &a, &b);
+}
+
+fn lessThanU16(a: u16, b: u16) std.math.Order {
+    return std.math.order(a, b);
+}
+
+// ... (rest of the code remains the same)

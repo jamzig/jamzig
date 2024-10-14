@@ -23,16 +23,11 @@ pub const TicketMark = []types.TicketBody;
 pub const TicketBody = types.TicketBody;
 pub const TicketEnvelope = types.TicketEnvelope;
 
-pub const ValidatorData = struct {
-    bandersnatch: BandersnatchKey,
-    ed25519: Ed25519Key,
-    bls: BlsKey,
-    metadata: [128]u8,
-};
+pub const ValidatorData = types.ValidatorData;
 
-pub const Lambda = []ValidatorData;
-pub const Kappa = []ValidatorData;
-pub const GammaK = []ValidatorData;
+pub const Lambda = []const ValidatorData;
+pub const Kappa = []const ValidatorData;
+pub const GammaK = []const ValidatorData;
 
 pub const Eta = [4]Entropy;
 
