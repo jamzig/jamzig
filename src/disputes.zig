@@ -65,6 +65,23 @@ pub const Psi = struct {
 //
 // NOTE: The sizes need to be either two-
 
+// TODO: Add a verify function for the DisputesExtrinsic which can report
+// on an error as descibied in the test vectors:
+// already_judged = 0,
+// bad_vote_split = 1,
+// verdicts_not_sorted_unique = 2,
+// judgements_not_sorted_unique = 3,
+// culprits_not_sorted_unique = 4,
+// faults_not_sorted_unique = 5,
+// not_enough_culprits = 6,
+// not_enough_faults = 7,
+// culprits_verdict_not_bad = 8,
+// fault_verdict_wrong = 9,
+// offender_already_reported = 10,
+// bad_judgement_age = 11,
+// bad_validator_index = 12,
+// bad_signature = 13,
+
 // The disputes extrinsic, ED , may contain one or more verdicts v as a
 // compilation of judgments coming from exactly two-thirds plus one of either
 // the active validator set or the previous epoch’s validator set, i.e. the

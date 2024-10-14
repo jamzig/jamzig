@@ -30,10 +30,43 @@ test "tiny/progress_with_no_verdicts-1.json" {
     const expected_psi = try converters.convertPsi(allocator, test_vector.value.post_state.psi);
     const extrinsic_disputes = try converters.convertDisputesExtrinsic(allocator, test_vector.value.input.disputes);
 
-    var transitioned_psi = try stf.transitionDisputes(allocator, 6, &current_psi, extrinsic_disputes);
-    defer transitioned_psi.deinit();
+    const transition_result = stf.transitionDisputes(allocator, 6, &current_psi, extrinsic_disputes);
+    defer {
+        if (transition_result) |psi| {
+            defer @constCast(&psi).deinit();
+        } else |_| {} // this needs to be here to satisfy the compiler
+    }
 
-    try std.testing.expectEqualDeep(expected_psi, transitioned_psi);
+    switch (test_vector.value.output) {
+        .err => |expected_error| {
+            if (transition_result) |_| {
+                return error.UnexpectedSuccess;
+            } else |actual_error| {
+                try std.testing.expectEqual(expected_error, actual_error);
+            }
+        },
+        .ok => |expected_marks| {
+            if (transition_result) |transitioned_psi| {
+                // push all expected marks in an AutoHashMap
+                var expected_marks_map = std.AutoHashMap(disputes.PublicKey, void).init(allocator);
+                defer expected_marks_map.deinit();
+
+                for (expected_marks.offenders_mark) |mark| {
+                    try expected_marks_map.put(mark.bytes, {});
+                }
+
+                try std.testing.expectEqualDeep(expected_marks_map, transitioned_psi.punish_set);
+
+                // Compare the rest of the fields
+                try std.testing.expectEqualDeep(expected_psi.good_set, transitioned_psi.good_set);
+                try std.testing.expectEqualDeep(expected_psi.bad_set, transitioned_psi.bad_set);
+                try std.testing.expectEqualDeep(expected_psi.wonky_set, transitioned_psi.wonky_set);
+            } else |err| {
+                std.debug.print("UnexpectedError: {any}\n", .{err});
+                return error.UnexpectedError;
+            }
+        },
+    }
 }
 
 // This test is the only one which will change the rho, the rest is Phi.only
@@ -42,11 +75,11 @@ test "tiny/progress_invalidates_avail_assignments-1.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_bad_signatures-1.json" {
@@ -54,11 +87,11 @@ test "tiny/progress_with_bad_signatures-1.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_bad_signatures-2.json" {
@@ -66,11 +99,11 @@ test "tiny/progress_with_bad_signatures-2.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_culprits-1.json" {
@@ -78,11 +111,11 @@ test "tiny/progress_with_culprits-1.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_culprits-2.json" {
@@ -90,11 +123,11 @@ test "tiny/progress_with_culprits-2.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_culprits-3.json" {
@@ -102,11 +135,11 @@ test "tiny/progress_with_culprits-3.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_culprits-4.json" {
@@ -114,11 +147,11 @@ test "tiny/progress_with_culprits-4.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_culprits-5.json" {
@@ -126,11 +159,11 @@ test "tiny/progress_with_culprits-5.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_culprits-6.json" {
@@ -138,11 +171,11 @@ test "tiny/progress_with_culprits-6.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_culprits-7.json" {
@@ -150,11 +183,11 @@ test "tiny/progress_with_culprits-7.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_faults-1.json" {
@@ -162,11 +195,11 @@ test "tiny/progress_with_faults-1.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_faults-2.json" {
@@ -174,11 +207,11 @@ test "tiny/progress_with_faults-2.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_faults-3.json" {
@@ -186,11 +219,11 @@ test "tiny/progress_with_faults-3.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_faults-4.json" {
@@ -198,11 +231,11 @@ test "tiny/progress_with_faults-4.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_faults-5.json" {
@@ -210,11 +243,11 @@ test "tiny/progress_with_faults-5.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_faults-6.json" {
@@ -222,11 +255,11 @@ test "tiny/progress_with_faults-6.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_faults-7.json" {
@@ -234,11 +267,11 @@ test "tiny/progress_with_faults-7.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_verdict_signatures_from_previous_set-1.json" {
@@ -246,11 +279,11 @@ test "tiny/progress_with_verdict_signatures_from_previous_set-1.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_verdict_signatures_from_previous_set-2.json" {
@@ -258,11 +291,11 @@ test "tiny/progress_with_verdict_signatures_from_previous_set-2.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_verdicts-1.json" {
@@ -270,11 +303,11 @@ test "tiny/progress_with_verdicts-1.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_verdicts-2.json" {
@@ -282,11 +315,11 @@ test "tiny/progress_with_verdicts-2.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_verdicts-3.json" {
@@ -294,11 +327,11 @@ test "tiny/progress_with_verdicts-3.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_verdicts-4.json" {
@@ -306,11 +339,11 @@ test "tiny/progress_with_verdicts-4.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_verdicts-5.json" {
@@ -318,11 +351,11 @@ test "tiny/progress_with_verdicts-5.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }
 
 test "tiny/progress_with_verdicts-6.json" {
@@ -330,9 +363,9 @@ test "tiny/progress_with_verdicts-6.json" {
     const test_vector = try tvector.TestVector.build_from(allocator, test_json);
     defer test_vector.deinit();
 
-    try printStateDiff(
-        allocator,
-        &test_vector.value.pre_state,
-        &test_vector.value.post_state,
-    );
+    // try printStateDiff(
+    //     allocator,
+    //     &test_vector.value.pre_state,
+    //     &test_vector.value.post_state,
+    // );
 }

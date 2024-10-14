@@ -236,7 +236,7 @@ pub fn transitionDisputes(
     validator_count: usize,
     current_psi: *const state.Psi,
     xtdisputes: types.DisputesExtrinsic,
-) !state.Psi {
+) anyerror!state.Psi {
     _ = allocator;
     // Transition ψ based on new disputes
     return try @import("disputes.zig").processDisputesExtrinsic(current_psi, xtdisputes, validator_count);
