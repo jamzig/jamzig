@@ -28,6 +28,9 @@ pub const BandersnatchVrfRoot = [144]u8;
 pub const BandersnatchRingSignature = [784]u8;
 pub const Ed25519Signature = [64]u8;
 
+pub const Tau = u32;
+pub const Epoch = u32;
+
 pub const BandersnatchKeyPair = struct {
     private_key: BandersnatchPrivateKey,
     public_key: BandersnatchKey,
@@ -55,6 +58,13 @@ pub const ExtrinsicSpec = struct {
 pub const Authorizer = struct {
     code_hash: OpaqueHash,
     params: []u8,
+};
+
+pub const ValidatorData = struct {
+    bandersnatch: BandersnatchKey,
+    ed25519: Ed25519Key,
+    bls: BlsKey,
+    metadata: [128]u8,
 };
 
 pub const WorkItem = struct {
@@ -166,7 +176,7 @@ pub const Judgement = struct {
 pub const Verdict = struct {
     target: OpaqueHash,
     age: U32,
-    votes: []Judgement, // validators_super_majority
+    votes: []const Judgement, // validators_super_majority
 
     // validators_super_majority size is defined at runtime
     pub fn votes_size(params: CodecParams) usize {
@@ -188,9 +198,21 @@ pub const Fault = struct {
 };
 
 pub const DisputesExtrinsic = struct {
-    verdicts: []Verdict,
-    culprits: []Culprit,
-    faults: []Fault,
+    verdicts: []const Verdict,
+    culprits: []const Culprit,
+    faults: []const Fault,
+
+    pub fn deinit(
+        self: *DisputesExtrinsic,
+        allocator: std.mem.Allocator,
+    ) void {
+        for (self.verdicts) |verdict| {
+            allocator.free(verdict.votes);
+        }
+        allocator.free(self.verdicts);
+        allocator.free(self.culprits);
+        allocator.free(self.faults);
+    }
 };
 
 pub const Preimage = struct {
