@@ -268,6 +268,16 @@ pub fn verifyDisputesExtrinsicPre(
     validator_count: usize,
     current_epoch: u32,
 ) VerificationError!void {
+    // Check if verdicts are sorted and unique
+    try verifyOrderedUnique(
+        extrinsic.verdicts,
+        Verdict,
+        Hash,
+        verdictTargetHash,
+        lessThanHash,
+        VerificationError.VerdictsNotSortedUnique,
+    );
+
     for (extrinsic.verdicts) |verdict| {
         // Verify signatures
         for (verdict.votes) |judgment| {
@@ -358,16 +368,6 @@ pub fn verifyDisputesExtrinsicPre(
             return VerificationError.BadVoteSplit;
         }
     }
-
-    // Check if verdicts are sorted and unique
-    try verifyOrderedUnique(
-        extrinsic.verdicts,
-        Verdict,
-        Hash,
-        verdictTargetHash,
-        lessThanHash,
-        VerificationError.VerdictsNotSortedUnique,
-    );
 
     // Check if culprits are sorted and unique
     try verifyOrderedUnique(

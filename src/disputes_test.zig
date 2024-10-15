@@ -218,6 +218,8 @@ test "tiny/progress_with_faults-3.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_faults-4.json" {
@@ -231,6 +233,8 @@ test "tiny/progress_with_faults-4.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_faults-5.json" {
@@ -244,6 +248,8 @@ test "tiny/progress_with_faults-5.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_faults-6.json" {
@@ -257,6 +263,8 @@ test "tiny/progress_with_faults-6.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_faults-7.json" {
@@ -270,6 +278,8 @@ test "tiny/progress_with_faults-7.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_verdict_signatures_from_previous_set-1.json" {
@@ -283,6 +293,8 @@ test "tiny/progress_with_verdict_signatures_from_previous_set-1.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_verdict_signatures_from_previous_set-2.json" {
@@ -296,6 +308,8 @@ test "tiny/progress_with_verdict_signatures_from_previous_set-2.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_verdicts-1.json" {
@@ -309,6 +323,8 @@ test "tiny/progress_with_verdicts-1.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_verdicts-2.json" {
@@ -322,6 +338,8 @@ test "tiny/progress_with_verdicts-2.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_verdicts-3.json" {
@@ -335,6 +353,8 @@ test "tiny/progress_with_verdicts-3.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_verdicts-4.json" {
