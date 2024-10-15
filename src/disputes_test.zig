@@ -144,7 +144,7 @@ test "tiny/progress_with_culprits-5.json" {
     // );
     //
 
-    // try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_culprits-6.json" {
@@ -158,6 +158,8 @@ test "tiny/progress_with_culprits-6.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_culprits-7.json" {
@@ -171,6 +173,8 @@ test "tiny/progress_with_culprits-7.json" {
     //     &test_vector.value.pre_state,
     //     &test_vector.value.post_state,
     // );
+
+    try runDisputeTest(allocator, TINY_PARAMS, test_vector.value);
 }
 
 test "tiny/progress_with_faults-1.json" {

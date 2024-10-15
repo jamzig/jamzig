@@ -267,8 +267,10 @@ pub fn transitionDisputes(
     );
     defer allocator.free(current_lambda_keys);
 
+    const disputes = @import("disputes.zig");
+
     // Verify correctness of the disputes extrinsic
-    try @import("disputes.zig").verifyDisputesExtrinsic(
+    try disputes.verifyDisputesExtrinsicPre(
         xtdisputes,
         current_psi,
         current_kappa_keys,
@@ -276,8 +278,15 @@ pub fn transitionDisputes(
         validator_count,
         current_epoch,
     );
+
     // Transition ψ based on new disputes
-    return try @import("disputes.zig").processDisputesExtrinsic(current_psi, xtdisputes, validator_count);
+    var posterior_state = try disputes.processDisputesExtrinsic(current_psi, xtdisputes, validator_count);
+    errdefer posterior_state.deinit();
+
+    // Verify correctness of the updated state after processing disputes
+    try disputes.verifyDisputesExtrinsicPost(xtdisputes, &posterior_state);
+
+    return posterior_state;
 }
 
 pub fn transitionServiceAccounts(

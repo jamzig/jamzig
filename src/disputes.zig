@@ -232,6 +232,7 @@ pub const VerificationError = error{
     JudgementsNotSortedUnique,
     CulpritsNotSortedUnique,
     FaultsNotSortedUnique,
+    FaultKeyNotInValidatorSet,
     NotEnoughCulprits,
     NotEnoughFaults,
     CulpritsVerdictNotBad,
@@ -259,7 +260,7 @@ fn judgmentValidatorIndex(judgment: *const Judgment) u16 {
     return judgment.index;
 }
 
-pub fn verifyDisputesExtrinsic(
+pub fn verifyDisputesExtrinsicPre(
     extrinsic: DisputesExtrinsic,
     current_state: *const Psi,
     kappa: []const PublicKey,
@@ -407,18 +408,47 @@ pub fn verifyDisputesExtrinsic(
     }
 
     // Verify faults
-    var fault_count: usize = 0;
     for (extrinsic.faults) |fault| {
         if (current_state.punish_set.contains(fault.key)) {
             return VerificationError.OffenderAlreadyReported;
         }
-        const in_good_set = current_state.good_set.contains(fault.target);
-        const in_bad_set = current_state.bad_set.contains(fault.target);
-        if ((fault.vote and !in_bad_set) or (!fault.vote and !in_good_set)) {
+
+        // check if the key is part of either the kappa or the lambda set
+        if (isKeyInSet(fault.key, kappa) or isKeyInSet(fault.key, lambda)) {
+            return VerificationError.FaultKeyNotInValidatorSet;
+        }
+    }
+}
+
+pub fn verifyDisputesExtrinsicPost(
+    extrinsic: DisputesExtrinsic,
+    posterior_state: *const Psi,
+) VerificationError!void {
+    // Verify culprits
+    for (extrinsic.culprits) |culprit| {
+        if (!posterior_state.bad_set.contains(culprit.target)) {
+            return VerificationError.CulpritsVerdictNotBad;
+        }
+    }
+
+    // Verify faults
+    for (extrinsic.faults) |fault| {
+        // Check if this after state transition this is correct
+        const in_good_set = posterior_state.good_set.contains(fault.target);
+        const in_bad_set = posterior_state.bad_set.contains(fault.target);
+        if (!(fault.vote and !in_bad_set and !in_good_set)) {
             return VerificationError.FaultVerdictWrong;
         }
-        fault_count += 1;
     }
+}
+
+fn isKeyInSet(key: PublicKey, set: []const PublicKey) bool {
+    for (set) |pubKey| {
+        if (std.mem.eql(u8, &key, &pubKey)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 fn verifyOrderedUnique(items: anytype, comptime T: type, comptime U: type, mapFn: fn (*const T) U, compareFn: fn (U, U) std.math.Order, errortype: VerificationError) !void {
