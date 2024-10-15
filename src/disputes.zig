@@ -268,6 +268,68 @@ pub fn verifyDisputesExtrinsic(
     current_epoch: u32,
 ) VerificationError!void {
     for (extrinsic.verdicts) |verdict| {
+        // Verify signatures
+        for (verdict.votes) |judgment| {
+            if (judgment.index >= validator_count) {
+                return VerificationError.BadValidatorIndex;
+            }
+
+            const validator_key = if (verdict.age == current_epoch)
+                kappa[judgment.index]
+            else if (verdict.age == current_epoch - 1)
+                lambda[judgment.index]
+            else
+                return VerificationError.BadJudgementAge;
+
+            const public_key = crypto.sign.Ed25519.PublicKey.fromBytes(validator_key) catch {
+                return VerificationError.BadValidatorPubKey;
+            };
+
+            const message = if (judgment.vote)
+                "jam_valid" ++ verdict.target
+            else
+                "jam_invalid" ++ verdict.target;
+
+            const signature = crypto.sign.Ed25519.Signature.fromBytes(judgment.signature);
+
+            signature.verify(message, public_key) catch {
+                return VerificationError.BadSignature;
+            };
+        }
+
+        // Check culprit signatures
+        for (extrinsic.culprits) |culprit| {
+            const public_key = crypto.sign.Ed25519.PublicKey.fromBytes(culprit.key) catch {
+                return VerificationError.BadValidatorPubKey;
+            };
+
+            const message = "jam_guarantee" ++ culprit.target;
+
+            const signature = crypto.sign.Ed25519.Signature.fromBytes(culprit.signature);
+
+            signature.verify(message, public_key) catch {
+                return VerificationError.BadSignature;
+            };
+        }
+
+        // Check fault signatures
+        for (extrinsic.faults) |fault| {
+            const public_key = crypto.sign.Ed25519.PublicKey.fromBytes(fault.key) catch {
+                return VerificationError.BadValidatorPubKey;
+            };
+
+            const message = if (fault.vote)
+                "jam_valid" ++ verdict.target
+            else
+                "jam_invalid" ++ verdict.target;
+
+            const signature = crypto.sign.Ed25519.Signature.fromBytes(fault.signature);
+
+            signature.verify(message, public_key) catch {
+                return VerificationError.BadSignature;
+            };
+        }
+
         // Check if the verdict has already been judged
         if (current_state.good_set.contains(verdict.target) or
             current_state.bad_set.contains(verdict.target) or
@@ -293,33 +355,6 @@ pub fn verifyDisputesExtrinsic(
             positive_votes != validator_count / 3)
         {
             return VerificationError.BadVoteSplit;
-        }
-
-        // Verify signatures
-        for (verdict.votes) |judgment| {
-            if (judgment.index >= validator_count) {
-                return VerificationError.BadValidatorIndex;
-            }
-
-            const public_key = crypto.sign.Ed25519.PublicKey.fromBytes(if (verdict.age == current_epoch)
-                kappa[judgment.index]
-            else if (verdict.age == current_epoch - 1)
-                lambda[judgment.index]
-            else
-                return VerificationError.BadJudgementAge) catch {
-                return VerificationError.BadValidatorPubKey;
-            };
-
-            const message = if (judgment.vote)
-                "jam_valid" ++ verdict.target
-            else
-                "jam_invalid" ++ verdict.target;
-
-            const signature = crypto.sign.Ed25519.Signature.fromBytes(judgment.signature);
-
-            signature.verify(message, public_key) catch {
-                return VerificationError.BadSignature;
-            };
         }
     }
 
@@ -368,9 +403,6 @@ pub fn verifyDisputesExtrinsic(
     for (extrinsic.culprits) |culprit| {
         if (current_state.punish_set.contains(culprit.key)) {
             return VerificationError.OffenderAlreadyReported;
-        }
-        if (!current_state.bad_set.contains(culprit.target)) {
-            return VerificationError.CulpritsVerdictNotBad;
         }
     }
 
