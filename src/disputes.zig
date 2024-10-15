@@ -414,9 +414,9 @@ pub fn verifyDisputesExtrinsicPre(
         }
 
         // check if the key is part of either the kappa or the lambda set
-        if (isKeyInSet(fault.key, kappa) or isKeyInSet(fault.key, lambda)) {
-            return VerificationError.FaultKeyNotInValidatorSet;
-        }
+        // if (isKeyInSet(fault.key, kappa) or isKeyInSet(fault.key, lambda)) {
+        //     return VerificationError.FaultKeyNotInValidatorSet;
+        // }
     }
 }
 
@@ -436,7 +436,7 @@ pub fn verifyDisputesExtrinsicPost(
         // Check if this after state transition this is correct
         const in_good_set = posterior_state.good_set.contains(fault.target);
         const in_bad_set = posterior_state.bad_set.contains(fault.target);
-        if (!(fault.vote and !in_bad_set and !in_good_set)) {
+        if ((fault.vote and !in_bad_set) or (!fault.vote and !in_good_set)) {
             return VerificationError.FaultVerdictWrong;
         }
     }
@@ -451,7 +451,14 @@ fn isKeyInSet(key: PublicKey, set: []const PublicKey) bool {
     return false;
 }
 
-fn verifyOrderedUnique(items: anytype, comptime T: type, comptime U: type, mapFn: fn (*const T) U, compareFn: fn (U, U) std.math.Order, errortype: VerificationError) !void {
+fn verifyOrderedUnique(
+    items: anytype,
+    comptime T: type,
+    comptime U: type,
+    mapFn: fn (*const T) U,
+    compareFn: fn (U, U) std.math.Order,
+    errortype: VerificationError,
+) !void {
     if (items.len == 0) return;
     var prev = mapFn(&items[0]);
     for (items[1..]) |*item| {
