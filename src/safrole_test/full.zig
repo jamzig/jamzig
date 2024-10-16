@@ -6,12 +6,7 @@ const assert = std.debug.assert;
 // NOTE: RING_SIZE = 1023 in ffi/rust/crypto/ring_vrf.rs
 // https://github.com/w3f/jamtestvectors/pull/5#issuecomment-2208938416
 
-pub const FULL_PARAMS = safrole.Params{
-    .epoch_length = 600,
-    .ticket_submission_end_epoch_slot = 500,
-    .max_ticket_entries_per_validator = 2,
-    .validators_count = 1023,
-};
+pub const FULL_PARAMS = @import("../jam_params.zig").FULL_PARAMS;
 
 const TEST_VECTOR_DIR = "src/tests/vectors/safrole/safrole/full";
 
