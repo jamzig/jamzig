@@ -25,7 +25,7 @@ pub fn runDisputeTest(allocator: std.mem.Allocator, params: Params, test_vector:
     defer allocator.free(lambda);
 
     const current_epoch = test_vector.pre_state.tau / params.epoch_length;
-    const transition_result = stf.transitionDisputes(allocator, 6, &current_psi, kappa, lambda, current_epoch, extrinsic_disputes);
+    const transition_result = stf.transitionDisputes(allocator, params.validators_count, &current_psi, kappa, lambda, current_epoch, extrinsic_disputes);
 
     defer {
         if (transition_result) |psi| {
