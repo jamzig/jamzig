@@ -6,8 +6,8 @@ pub const Hash = [32]u8;
 pub const RecentBlock = struct {
     header_hash: Hash,
     state_root: Hash,
-    beefy_mmr: []const Hash,
-    work_report_hashes: []const Hash,
+    beefy_mmr: []Hash,
+    work_report_hashes: []Hash,
 };
 
 pub const RecentHistory = struct {

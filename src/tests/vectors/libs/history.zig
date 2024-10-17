@@ -38,7 +38,7 @@ pub const TestCase = struct {
     post_state: State,
 };
 
-const HistoryTestVector = @import("utils.zig").TestVector;
+pub const HistoryTestVector = @import("utils.zig").TestVector;
 
 test "history: parsing the test case" {
     const allocator = std.testing.allocator;
