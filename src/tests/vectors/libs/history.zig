@@ -60,3 +60,23 @@ test "history: parsing the test case" {
     // Test if the post_state contains one block
     try std.testing.expectEqual(@as(usize, 1), vector.expected.value.post_state.beta.len);
 }
+
+test "history: parsing all test cases" {
+    const allocator = std.testing.allocator;
+    const target_dir = "src/tests/vectors/history/history/data";
+
+    var dir = try std.fs.cwd().openDir(target_dir, .{ .iterate = true });
+    defer dir.close();
+
+    var dir_iterator = dir.iterate();
+    while (try dir_iterator.next()) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".json")) continue;
+
+        const file_path = try std.fs.path.join(allocator, &[_][]const u8{ target_dir, entry.name });
+        defer allocator.free(file_path);
+
+        const vector = try HistoryTestVector(TestCase).build_from(allocator, file_path);
+        defer vector.deinit();
+    }
+}
