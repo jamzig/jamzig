@@ -6,6 +6,7 @@ pub const HexBytes = types.hex.HexBytes;
 pub const HexBytesFixed = types.hex.HexBytesFixed;
 
 pub const Hash = HexBytesFixed(32);
+pub const WorkReportHash = Hash;
 
 pub const MmrPeak = Hash;
 
@@ -28,7 +29,7 @@ pub const Input = struct {
     header_hash: Hash,
     parent_state_root: Hash,
     accumulate_root: Hash,
-    work_packages: []Hash,
+    work_packages: []WorkReportHash,
 };
 
 pub const TestCase = struct {
