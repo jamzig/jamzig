@@ -28,6 +28,9 @@ comptime {
     _ = @import("disputes.zig");
     _ = @import("disputes_test.zig");
     _ = @import("tests/vectors/disputes.zig");
+
+    _ = @import("recent_blocks.zig");
+    _ = @import("recent_blocks_test.zig");
 }
 
 pub const tv_types = @import("tests/vectors/libs/types.zig");

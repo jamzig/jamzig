@@ -7,7 +7,7 @@ const types = @import("merkle/types.zig");
 const Hash = types.Hash;
 const Entry = ?Hash;
 
-const MMR = std.ArrayList(Entry);
+pub const MMR = std.ArrayList(Entry);
 
 pub fn append(mrange: *MMR, leaf: Hash, hasher: anytype) !void {
     _ = try P(mrange, leaf, 0, hasher);
