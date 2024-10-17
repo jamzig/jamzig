@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 
 pub const Hash = [32]u8;
 
-pub const RecentBlock = struct {
+pub const BlockStateInformation = struct {
     header_hash: Hash,
     state_root: Hash,
     beefy_mmr: []Hash,
@@ -14,13 +14,13 @@ pub const RecentHistory = struct {
     const Self = @This();
 
     allocator: Allocator,
-    blocks: std.ArrayList(RecentBlock),
+    blocks: std.ArrayList(BlockStateInformation),
     max_blocks: usize,
 
     pub fn init(allocator: Allocator, max_blocks: usize) !Self {
         return Self{
             .allocator = allocator,
-            .blocks = try std.ArrayList(RecentBlock).initCapacity(allocator, max_blocks),
+            .blocks = try std.ArrayList(BlockStateInformation).initCapacity(allocator, max_blocks),
             .max_blocks = max_blocks,
         };
     }
@@ -33,7 +33,7 @@ pub const RecentHistory = struct {
         self.blocks.deinit();
     }
 
-    pub fn addBlock(self: *Self, new_block: RecentBlock) !void {
+    pub fn addBlockStateInformation(self: *Self, new_block: BlockStateInformation) !void {
         if (self.blocks.items.len == self.max_blocks) {
             const oldest_block = self.blocks.orderedRemove(0);
             self.allocator.free(oldest_block.beefy_mmr);
@@ -43,7 +43,7 @@ pub const RecentHistory = struct {
         try self.blocks.append(new_block);
     }
 
-    pub fn getBlock(self: Self, index: usize) ?RecentBlock {
+    pub fn getBlockStateInformation(self: Self, index: usize) ?BlockStateInformation {
         if (index < self.blocks.items.len) {
             return self.blocks.items[index];
         }
@@ -62,25 +62,25 @@ test RecentHistory {
     try testing.expectEqual(@as(usize, 0), recent_history.blocks.items.len);
 
     // Create some test blocks
-    const block1 = RecentBlock{
+    const block1 = BlockStateInformation{
         .header_hash = [_]u8{1} ** 32,
         .state_root = [_]u8{2} ** 32,
         .beefy_mmr = try allocator.dupe(Hash, &.{[_]u8{3} ** 32}),
         .work_report_hashes = try allocator.dupe(Hash, &.{[_]u8{4} ** 32}),
     };
-    const block2 = RecentBlock{
+    const block2 = BlockStateInformation{
         .header_hash = [_]u8{5} ** 32,
         .state_root = [_]u8{6} ** 32,
         .beefy_mmr = try allocator.dupe(Hash, &.{[_]u8{7} ** 32}),
         .work_report_hashes = try allocator.dupe(Hash, &.{[_]u8{8} ** 32}),
     };
-    const block3 = RecentBlock{
+    const block3 = BlockStateInformation{
         .header_hash = [_]u8{9} ** 32,
         .state_root = [_]u8{10} ** 32,
         .beefy_mmr = try allocator.dupe(Hash, &.{[_]u8{11} ** 32}),
         .work_report_hashes = try allocator.dupe(Hash, &.{[_]u8{12} ** 32}),
     };
-    const block4 = RecentBlock{
+    const block4 = BlockStateInformation{
         .header_hash = [_]u8{13} ** 32,
         .state_root = [_]u8{14} ** 32,
         .beefy_mmr = try allocator.dupe(Hash, &.{[_]u8{15} ** 32}),
@@ -88,27 +88,27 @@ test RecentHistory {
     };
 
     // Test adding blocks
-    try recent_history.addBlock(block1);
+    try recent_history.addBlockStateInformation(block1);
     try testing.expectEqual(@as(usize, 1), recent_history.blocks.items.len);
 
-    try recent_history.addBlock(block2);
+    try recent_history.addBlockStateInformation(block2);
     try testing.expectEqual(@as(usize, 2), recent_history.blocks.items.len);
 
-    try recent_history.addBlock(block3);
+    try recent_history.addBlockStateInformation(block3);
     try testing.expectEqual(@as(usize, 3), recent_history.blocks.items.len);
 
     // Test max_blocks limit
-    try recent_history.addBlock(block4);
+    try recent_history.addBlockStateInformation(block4);
     try testing.expectEqual(@as(usize, 3), recent_history.blocks.items.len);
 
-    // Test getBlock
-    const retrieved_block = recent_history.getBlock(1);
+    // Test get stateinformation
+    const retrieved_block = recent_history.getBlockStateInformation(1);
     try testing.expect(retrieved_block != null);
-    if (retrieved_block) |block| {
-        try testing.expectEqualSlices(u8, &block3.header_hash, &block.header_hash);
+    if (retrieved_block) |state_info| {
+        try testing.expectEqualSlices(u8, &block3.header_hash, &state_info.header_hash);
     }
 
     // Test getting non-existent block
-    const non_existent_block = recent_history.getBlock(3);
+    const non_existent_block = recent_history.getBlockStateInformation(3);
     try testing.expect(non_existent_block == null);
 }
