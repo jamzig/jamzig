@@ -31,6 +31,8 @@ comptime {
 
     _ = @import("recent_blocks.zig");
     _ = @import("recent_blocks_test.zig");
+
+    _ = @import("pending_reports.zig");
 }
 
 pub const tv_types = @import("tests/vectors/libs/types.zig");

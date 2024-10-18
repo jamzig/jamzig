@@ -47,42 +47,6 @@ pub const Psi = struct {
     }
 };
 
-// NOTE: We need to verify the signature of the judgements of the verdict, which
-// is a signature of the validator (indicated by the validator index) public key,
-// either in the kappa set if the age of the verdict is t/E, otherwise from the
-// lambda set. We need to verify this one level up before this processDisputesExtrinsic
-// is called. Maybe introduce a type VerifiedDisputesExtrinsic to ensure verification
-// has been done using the type system. The signature is build as a concatenation of:
-// jam_valid ++ verdict.target if voted true
-// jam_invalid ++ verdict.target if voted false
-//
-// NOTE: The same for Culprit and Fault, where not validator index is given but the
-// Edwards25519 public key of the validator. Which shoud be in the set of validators as
-// defined above.
-//
-// NOTE: Ordering needs to be checked. Verdicts on target hash, culprits and faults signatures
-// must be ordered by the key. The judgements need to be ordered by validator index
-// and there must not be any duplicates.
-//
-// NOTE: The sizes need to be either two-
-
-// TODO: Add a verify function for the DisputesExtrinsic which can report
-// on an error as descibied in the test vectors:
-// already_judged = 0,
-// bad_vote_split = 1,
-// verdicts_not_sorted_unique = 2,
-// judgements_not_sorted_unique = 3,
-// culprits_not_sorted_unique = 4,
-// faults_not_sorted_unique = 5,
-// not_enough_culprits = 6,
-// not_enough_faults = 7,
-// culprits_verdict_not_bad = 8,
-// fault_verdict_wrong = 9,
-// offender_already_reported = 10,
-// bad_judgement_age = 11,
-// bad_validator_index = 12,
-// bad_signature = 13,
-
 // The disputes extrinsic, ED , may contain one or more verdicts v as a
 // compilation of judgments coming from exactly two-thirds plus one of either
 // the active validator set or the previous epoch’s validator set, i.e. the
