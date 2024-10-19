@@ -81,4 +81,4 @@ pub const Tau = types.TimeSlot;
 pub const Phi = @import("authorization_queue.zig").Phi;
 pub const Chi = @import("services_priviledged.zig").Chi;
 pub const Psi = @import("disputes.zig").Psi;
-pub const Pi = struct {};
+pub const Pi = @import("validator_stats.zig").Pi;
