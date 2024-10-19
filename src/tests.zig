@@ -19,7 +19,9 @@ comptime {
     _ = @import("merkle_mountain_ranges.zig");
 
     _ = @import("state.zig");
+
     _ = @import("services.zig");
+    _ = @import("services_priviledged.zig");
 
     _ = @import("recent_blocks.zig");
 
@@ -33,6 +35,8 @@ comptime {
     _ = @import("recent_blocks_test.zig");
 
     _ = @import("pending_reports.zig");
+
+    _ = @import("validator_stats.zig");
 }
 
 pub const tv_types = @import("tests/vectors/libs/types.zig");
