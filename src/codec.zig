@@ -303,12 +303,35 @@ fn recursiveSerializeLeaky(comptime T: type, comptime params: anytype, writer: a
     }
 }
 
-fn serializeArray(comptime T: type, comptime len: usize, writer: anytype, value: [len]T) !void {
+pub fn serializeArray(comptime T: type, comptime len: usize, writer: anytype, value: [len]T) !void {
     trace(@src(), "serializeArray: start - type: {s}, length: {}", .{ @typeName(T), len });
     defer trace(@src(), "serializeArray: end", .{});
 
     const bytes = std.mem.asBytes(&value);
     try writer.writeAll(bytes);
+}
+
+/// Serializes a slice as an array without adding a length prefix to the output.
+/// This function is useful when you need to serialize a slice of known length
+/// or when the length information is stored separately.
+///
+/// Note: This differs from the standard slice serialization, which typically
+/// includes a length prefix. Use this function only when you're certain that
+/// the receiver knows the expected length of the data.
+///
+/// Params:
+///   T: The type of elements in the slice
+///   writer: The writer to which the serialized data will be written
+///   value: The slice to be serialized
+///
+/// Returns: An error if the write operation fails
+pub fn serializeSliceAsArray(comptime T: type, writer: anytype, value: []const T) !void {
+    trace(@src(), "serializeSliceAsArray: start - type: {s}, length: {}", .{ @typeName(@TypeOf(value)), value.len });
+    defer trace(@src(), "serializeSliceAsArray: end", .{});
+
+    for (value) |item| {
+        try recursiveSerializeLeaky(T, .{}, writer, item);
+    }
 }
 
 // Tests
