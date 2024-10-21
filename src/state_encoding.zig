@@ -12,4 +12,5 @@ pub const encodeDelta = delta.encode;
 
 comptime {
     _ = @import("state_encoding/alpha.zig");
+    _ = @import("state_encoding/beta.zig");
 }
