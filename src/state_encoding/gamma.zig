@@ -6,7 +6,7 @@ pub fn encode(gamma: *const state.Gamma, writer: anytype) !void {
     try serialize(state.Gamma, .{}, writer, gamma.*);
 }
 
-test "Gamma serialization" {
+test "encode" {
     const testing = std.testing;
     const allocator = std.testing.allocator;
 

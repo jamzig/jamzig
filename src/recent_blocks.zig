@@ -7,8 +7,6 @@ const Keccak256 = std.crypto.hash.sha3.Keccak256;
 const merkle = @import("merkle_binary.zig");
 const mmr = @import("merkle_mountain_ranges.zig");
 
-const encoder = @import("codec/encoder.zig");
-
 pub const Hash = [32]u8;
 
 pub const BlockInfo = struct {

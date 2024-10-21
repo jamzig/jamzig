@@ -33,7 +33,7 @@ pub fn encode(self: *const Phi, writer: anytype) !void {
 
 const testing = std.testing;
 
-test "AuthorizationQueue - encode function" {
+test "encode" {
     var auth_queue = try Phi.init(testing.allocator);
     defer auth_queue.deinit();
 

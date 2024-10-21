@@ -1,8 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
 
-const encoder = @import("codec/encoder.zig");
-
 // Constants
 pub const C: usize = 341; // Number of cores
 const O: usize = 8; // Maximum number of items in the authorizations pool
