@@ -99,6 +99,8 @@ pub const JamState = struct {
 
 pub const Alpha = @import("authorization.zig").Alpha;
 pub const Beta = @import("recent_blocks.zig").RecentHistory;
+
+// TODO: move this to a seperate file
 pub const Gamma = struct {
     k: safrole_types.GammaK,
     z: safrole_types.GammaZ,
@@ -114,6 +116,11 @@ pub const Gamma = struct {
         };
     }
 
+    const serialize = @import("codec.zig").serialize;
+    pub fn encode(self: *const Gamma, writer: anytype) !void {
+        try serialize(Gamma, .{}, writer, self.*);
+    }
+
     pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
         try jw.beginObject();
 
@@ -125,8 +132,16 @@ pub const Gamma = struct {
 
         try jw.objectField("s");
         try jw.beginObject();
-        try jw.objectField("tickets");
-        try jw.write(self.s.tickets);
+        switch (self.s) {
+            .tickets => |tickets| {
+                try jw.objectField("tickets");
+                try jw.write(tickets);
+            },
+            .keys => |keys| {
+                try jw.objectField("keys");
+                try jw.write(keys);
+            },
+        }
         try jw.endObject();
 
         try jw.objectField("a");
@@ -141,6 +156,30 @@ pub const Gamma = struct {
         allocator.free(self.a);
     }
 };
+
+test "Gamma serialization" {
+    const testing = std.testing;
+    const allocator = std.testing.allocator;
+
+    // Create a sample Gamma instance
+    var gamma = try Gamma.init(allocator);
+    defer gamma.deinit(allocator);
+
+    // Create a buffer to store the encoded data
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+
+    // Encode the Gamma instance
+    try gamma.encode(buffer.writer());
+
+    // Verify the encoded output
+    // Here, we're just checking if the buffer is not empty.
+    try testing.expect(buffer.items.len > 0);
+
+    // TODO: add more detailed tests
+
+}
+
 pub const Delta = @import("services.zig").Delta;
 pub const Eta = safrole_types.Eta;
 pub const Iota = safrole_types.Iota;
