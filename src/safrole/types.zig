@@ -28,6 +28,7 @@ pub const ValidatorData = types.ValidatorData;
 pub const Lambda = []const ValidatorData;
 pub const Kappa = []const ValidatorData;
 pub const GammaK = []const ValidatorData;
+pub const Iota = []const ValidatorData;
 
 pub const Eta = [4]Entropy;
 
@@ -85,7 +86,7 @@ pub const State = struct {
 
     /// ι: Validator keys and metadata to be drawn from next, which indicates the
     /// future state and validators likely to be active.
-    iota: []ValidatorData,
+    iota: Iota,
 
     /// γₐ: The sealing lottery ticket accumulator, part of the process ensuring
     /// randomness and fairness in block sealing.
