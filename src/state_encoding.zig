@@ -32,5 +32,6 @@ comptime {
     _ = @import("state_encoding/phi.zig");
     _ = @import("state_encoding/psi.zig");
     _ = @import("state_encoding/rho.zig");
+    _ = @import("state_encoding/tau.zig");
     _ = @import("state_encoding/validator_datas.zig");
 }
