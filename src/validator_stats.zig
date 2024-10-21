@@ -63,10 +63,27 @@ const ValidatorStats = struct {
     pub fn update_availability_assurances(self: *ValidatorStats, count: u32) void {
         self.availability_assurances += count;
     }
+
+    pub fn jsonStringify(stats: *const @This(), jw: anytype) !void {
+        try jw.beginObject();
+        try jw.objectField("blocks_produced");
+        try jw.write(stats.blocks_produced);
+        try jw.objectField("tickets_introduced");
+        try jw.write(stats.tickets_introduced);
+        try jw.objectField("preimages_introduced");
+        try jw.write(stats.preimages_introduced);
+        try jw.objectField("octets_across_preimages");
+        try jw.write(stats.octets_across_preimages);
+        try jw.objectField("reports_guaranteed");
+        try jw.write(stats.reports_guaranteed);
+        try jw.objectField("availability_assurances");
+        try jw.write(stats.availability_assurances);
+        try jw.endObject();
+    }
 };
 
 /// PiComponent holds the stats for all validators across two epochs
-const Pi = struct {
+pub const Pi = struct {
     currentEpochStats: std.AutoArrayHashMap(ValidatorIndex, ValidatorStats), // Stats for the current epoch
     previousEpochStats: std.AutoArrayHashMap(ValidatorIndex, ValidatorStats), // Stats for the previous epoch
     allocator: std.mem.Allocator,
@@ -99,6 +116,34 @@ const Pi = struct {
     pub fn deinit(self: *Pi) void {
         self.currentEpochStats.deinit();
         self.previousEpochStats.deinit();
+    }
+
+    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
+        try jw.beginObject();
+
+        try jw.objectField("currentEpochStats");
+        try jw.beginObject();
+        var current_it = self.currentEpochStats.iterator();
+        while (current_it.next()) |entry| {
+            const key = try std.fmt.allocPrint(self.allocator, "{d}", .{entry.key_ptr.*});
+            defer self.allocator.free(key);
+            try jw.objectField(key);
+            try entry.value_ptr.jsonStringify(jw);
+        }
+        try jw.endObject();
+
+        try jw.objectField("previousEpochStats");
+        try jw.beginObject();
+        var previous_it = self.previousEpochStats.iterator();
+        while (previous_it.next()) |entry| {
+            const key = try std.fmt.allocPrint(self.allocator, "{d}", .{entry.key_ptr.*});
+            defer self.allocator.free(key);
+            try jw.objectField(key);
+            try entry.value_ptr.jsonStringify(jw);
+        }
+        try jw.endObject();
+
+        try jw.endObject();
     }
 };
 

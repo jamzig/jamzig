@@ -61,6 +61,40 @@ pub const JamState = struct {
     /// π: Validator performance statistics, tracking penalties, rewards, and other metrics.
     /// Manipulated in: src/validator_stats.zig
     pi: Pi,
+
+    /// Initialize a new JamState
+    pub fn init(allocator: std.mem.Allocator) !JamState {
+        return JamState{
+            .alpha = Alpha.init(),
+            .beta = try Beta.init(allocator, 10),
+            .gamma = try Gamma.init(allocator),
+            .delta = Delta.init(allocator),
+            .eta = std.mem.zeroes(safrole_types.Eta),
+            .iota = &[_]safrole_types.ValidatorData{},
+            .kappa = &[_]safrole_types.ValidatorData{},
+            .lambda = &[_]safrole_types.ValidatorData{},
+            .rho = Rho.init(),
+            .tau = 0,
+            .phi = try Phi.init(allocator),
+            .chi = Chi.init(allocator),
+            .psi = Psi.init(allocator),
+            .pi = Pi.init(allocator),
+        };
+    }
+
+    /// Deinitialize and free resources
+    pub fn deinit(self: *JamState, allocator: std.mem.Allocator) void {
+        self.beta.deinit();
+        self.gamma.deinit(allocator);
+        self.delta.deinit();
+        allocator.free(self.iota);
+        allocator.free(self.kappa);
+        allocator.free(self.lambda);
+        self.phi.deinit();
+        self.chi.deinit();
+        self.psi.deinit();
+        self.pi.deinit();
+    }
 };
 
 pub const Alpha = @import("authorization.zig").Alpha;
@@ -70,10 +104,46 @@ pub const Gamma = struct {
     z: safrole_types.GammaZ,
     s: safrole_types.GammaS,
     a: safrole_types.GammaA,
+
+    pub fn init(allocator: std.mem.Allocator) !Gamma {
+        return Gamma{
+            .k = try allocator.alloc(safrole_types.ValidatorData, 0),
+            .z = std.mem.zeroes(safrole_types.BandersnatchVrfRoot),
+            .s = .{ .tickets = try allocator.alloc(safrole_types.TicketBody, 0) },
+            .a = try allocator.alloc(safrole_types.TicketBody, 0),
+        };
+    }
+
+    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
+        try jw.beginObject();
+
+        try jw.objectField("k");
+        try jw.write(self.k);
+
+        try jw.objectField("z");
+        try jw.write(self.z);
+
+        try jw.objectField("s");
+        try jw.beginObject();
+        try jw.objectField("tickets");
+        try jw.write(self.s.tickets);
+        try jw.endObject();
+
+        try jw.objectField("a");
+        try jw.write(self.a);
+
+        try jw.endObject();
+    }
+
+    pub fn deinit(self: *Gamma, allocator: std.mem.Allocator) void {
+        allocator.free(self.k);
+        allocator.free(self.s.tickets);
+        allocator.free(self.a);
+    }
 };
 pub const Delta = @import("services.zig").Delta;
 pub const Eta = safrole_types.Eta;
-pub const Iota = []safrole_types.ValidatorData;
+pub const Iota = safrole_types.Iota;
 pub const Kappa = safrole_types.Kappa;
 pub const Lambda = safrole_types.Lambda;
 pub const Rho = @import("pending_reports.zig").Rho;

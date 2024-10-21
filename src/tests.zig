@@ -19,6 +19,7 @@ comptime {
     _ = @import("merkle_mountain_ranges.zig");
 
     _ = @import("state.zig");
+    _ = @import("state_test.zig");
 
     _ = @import("services.zig");
     _ = @import("services_priviledged.zig");

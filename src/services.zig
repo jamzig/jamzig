@@ -99,6 +99,45 @@ pub const ServiceAccount = struct {
         };
     }
 
+    pub fn serialize(self: *const ServiceAccount, allocator: Allocator) ![]const u8 {
+        var list = std.ArrayList(u8).init(allocator);
+        errdefer list.deinit();
+
+        try list.appendSlice(&self.code_hash);
+        try list.appendSlice(try std.fmt.allocPrint(allocator, "{d},{d},{d},", .{ self.balance, self.min_gas_accumulate, self.min_gas_on_transfer }));
+
+        var storage_it = self.storage.iterator();
+        while (storage_it.next()) |entry| {
+            try list.appendSlice(entry.key_ptr);
+            try list.appendSlice(entry.value_ptr);
+        }
+        try list.append(';');
+
+        var preimages_it = self.preimages.iterator();
+        while (preimages_it.next()) |entry| {
+            try list.appendSlice(entry.key_ptr);
+            try list.appendSlice(entry.value_ptr);
+        }
+        try list.append(';');
+
+        var lookups_it = self.preimage_lookups.iterator();
+        while (lookups_it.next()) |entry| {
+            const key = entry.key_ptr.*;
+            const value = entry.value_ptr.*;
+            try list.appendSlice(&key.hash);
+            try list.appendSlice(try std.fmt.allocPrint(allocator, "{d}", .{key.length}));
+            for (value.status) |maybe_timeslot| {
+                if (maybe_timeslot) |timeslot| {
+                    try list.appendSlice(try std.fmt.allocPrint(allocator, "{d}", .{timeslot}));
+                } else {
+                    try list.append(0);
+                }
+            }
+        }
+
+        return list.toOwnedSlice();
+    }
+
     pub fn deinit(self: *ServiceAccount) void {
         self.storage.deinit();
 
@@ -216,6 +255,69 @@ pub const Delta = struct {
             .accounts = std.AutoHashMap(ServiceIndex, ServiceAccount).init(allocator),
             .allocator = allocator,
         };
+    }
+
+    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
+        try jw.beginObject();
+        try jw.objectField("accounts");
+        try jw.beginObject();
+
+        var it = self.accounts.iterator();
+        while (it.next()) |entry| {
+            const index = entry.key_ptr.*;
+            const account = entry.value_ptr.*;
+            const account_index = try std.fmt.allocPrint(self.allocator, "{d}", .{index});
+            defer self.allocator.free(account_index);
+            try jw.objectField(account_index);
+            // try jw.beginObjectFieldRaw();
+            // try jw.write(index);
+            // jw.endObjectFieldRaw();
+
+            try jw.beginObject();
+
+            try jw.objectField("balance");
+            try jw.write(account.balance);
+
+            try jw.objectField("min_gas_accumulate");
+            try jw.write(account.min_gas_accumulate);
+
+            try jw.objectField("min_gas_on_transfer");
+            try jw.write(account.min_gas_on_transfer);
+
+            try jw.objectField("code_hash");
+            try jw.write(std.fmt.fmtSliceHexLower(&account.code_hash));
+
+            try jw.objectField("storage");
+            try jw.beginObject();
+            var storage_it = account.storage.iterator();
+            while (storage_it.next()) |storage_entry| {
+                const key = std.fmt.fmtSliceHexLower(storage_entry.key_ptr).data;
+                const value = std.fmt.fmtSliceHexLower(storage_entry.value_ptr.*);
+                try jw.objectField(key);
+                try jw.write(value);
+            }
+            try jw.endObject();
+
+            try jw.objectField("preimage_lookups");
+            try jw.beginObject();
+            var lookup_it = account.preimage_lookups.iterator();
+            while (lookup_it.next()) |lookup_entry| {
+                const key = lookup_entry.key_ptr.*;
+                const value = lookup_entry.value_ptr.*;
+                const lookup_key = try std.fmt.allocPrint(self.allocator, "{s}:{d}", .{ std.fmt.fmtSliceHexLower(&key.hash), key.length });
+                defer self.allocator.free(lookup_key);
+                try jw.objectField(lookup_key);
+                const value_str = try std.fmt.allocPrint(self.allocator, "{d},{d},{d}", .{ value.status[0] orelse 0, value.status[1] orelse 0, value.status[2] orelse 0 });
+                defer self.allocator.free(value_str);
+                try jw.write(value_str);
+            }
+            try jw.endObject();
+
+            try jw.endObject();
+        }
+
+        try jw.endObject();
+        try jw.endObject();
     }
 
     pub fn deinit(self: *Delta) void {
