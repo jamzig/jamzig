@@ -30,9 +30,8 @@ pub fn encode(self: *const Psi, writer: anytype) !void {
 // 3. Adaptive behavior: Insertion sort performs exceptionally well on nearly sorted data, which is common in many real-world scenarios.
 // 4. In-place sorting: It sorts the list in-place, requiring only O(1) extra space.
 
-fn _lessThanU8_32_(_: void, a: [32]u8, b: [32]u8) bool {
-    return std.mem.lessThan(u8, &a, &b);
-}
+const makeLessThanSliceOfFn = @import("../utils/sort.zig").makeLessThanSliceOfFn;
+const lessThanSliceOfHashes = makeLessThanSliceOfFn([32]u8);
 
 fn encodeOrderedSet(set: *const std.AutoHashMap([32]u8, void), writer: anytype) !void {
     var list = std.ArrayList(Hash).init(set.allocator);
@@ -43,7 +42,7 @@ fn encodeOrderedSet(set: *const std.AutoHashMap([32]u8, void), writer: anytype) 
         try list.append(key.*);
     }
 
-    std.sort.insertion(Hash, list.items, {}, _lessThanU8_32_);
+    std.sort.insertion(Hash, list.items, {}, lessThanSliceOfHashes);
 
     try writer.writeAll(encoder.encodeInteger(@intCast(list.items.len)).as_slice());
     for (list.items) |hash| {

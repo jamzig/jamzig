@@ -62,6 +62,13 @@ pub const JamState = struct {
     /// Manipulated in: src/validator_stats.zig
     pi: Pi,
 
+    /// ξ: Epochs worth history of accumulated work reports
+    xi: Xi,
+
+    /// θ: List of available and/or audited but not yet accumulated work
+    /// reports
+    theta: Theta,
+
     /// Initialize a new JamState
     pub fn init(allocator: std.mem.Allocator) !JamState {
         return JamState{
@@ -79,6 +86,8 @@ pub const JamState = struct {
             .chi = Chi.init(allocator),
             .psi = Psi.init(allocator),
             .pi = Pi.init(allocator),
+            .xi = Xi.init(allocator),
+            .theta = Theta.init(allocator),
         };
     }
 
@@ -94,11 +103,15 @@ pub const JamState = struct {
         self.chi.deinit();
         self.psi.deinit();
         self.pi.deinit();
+        self.xi.deinit();
+        self.theta.deinit();
     }
 };
 
 pub const Alpha = @import("authorization.zig").Alpha;
 pub const Beta = @import("recent_blocks.zig").RecentHistory;
+pub const Xi = std.AutoHashMap(types.Hash, types.Hash);
+pub const Theta = std.ArrayList(types.WorkReport);
 
 // TODO: move this to a seperate file
 pub const Gamma = struct {
