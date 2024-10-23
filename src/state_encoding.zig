@@ -4,6 +4,7 @@ const state = @import("state.zig");
 const alpha = @import("state_encoding/alpha.zig");
 const beta = @import("state_encoding/beta.zig");
 const chi = @import("state_encoding/chi.zig");
+const delta = @import("state_encoding/delta.zig");
 const eta = @import("state_encoding/eta.zig");
 const gamma = @import("state_encoding/gamma.zig");
 const phi = @import("state_encoding/phi.zig");
@@ -38,6 +39,7 @@ comptime {
     _ = @import("state_encoding/alpha.zig");
     _ = @import("state_encoding/beta.zig");
     _ = @import("state_encoding/chi.zig");
+    _ = @import("state_encoding/delta.zig");
     _ = @import("state_encoding/eta.zig");
     _ = @import("state_encoding/gamma.zig");
     _ = @import("state_encoding/phi.zig");
