@@ -89,11 +89,4 @@ pub const TINY_PARAMS = Params{
     .core_count = 2,
 };
 
-pub const FULL_PARAMS = Params{
-    .epoch_length = 600,
-    .ticket_submission_end_epoch_slot = 500,
-    .max_ticket_entries_per_validator = 2,
-    .validators_count = 1023,
-    .validators_super_majority = 683,
-    .core_count = 341,
-};
+pub const FULL_PARAMS = Params{};
