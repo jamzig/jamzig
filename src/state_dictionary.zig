@@ -90,8 +90,22 @@ fn sliceToFixedArray(comptime size: usize, slice: []const u8) [size]u8 {
 /// @return A hash map where keys are 32-byte arrays and values are byte slices representing
 ///         the encoded state components. The function may return an error if memory allocation
 ///         fails or if encoding any state component fails.
-const MerklizationDictionary = struct {
+pub const MerklizationDictionary = struct {
     entries: std.AutoHashMap([32]u8, []const u8),
+
+    // FIX: move these entries to a shared type file
+    const Entry = @import("merkle.zig").Entry;
+
+    /// Slice is owned, the values are owned by the dictionary.
+    pub fn toOwnedSlice(self: *const MerklizationDictionary) ![]Entry {
+        var buffer = std.ArrayList(Entry).init(self.entries.allocator);
+        var it = self.entries.iterator();
+        while (it.next()) |entry| {
+            try buffer.append(.{ .k = entry.key_ptr.*, .v = entry.value_ptr.* });
+        }
+
+        return buffer.toOwnedSlice();
+    }
 
     pub fn deinit(self: *MerklizationDictionary) void {
         var it = self.entries.valueIterator();
