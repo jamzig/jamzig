@@ -16,7 +16,7 @@ pub fn format(
         if (slot_entries.items.len > 0) {
             try writer.print("  Slot {d}: {d} reports\n", .{ i, slot_entries.items.len });
             for (slot_entries.items) |entry| {
-                try writer.print("    Report: {s}\n", .{std.fmt.fmtSliceHexLower(&entry.work_report.hash)});
+                try writer.print("    Report: {s}\n", .{std.fmt.fmtSliceHexLower(&entry.work_report.package_spec.hash)});
                 try writer.writeAll("    Dependencies: ");
                 var it = entry.dependencies.iterator();
                 while (it.next()) |dep| {
