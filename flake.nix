@@ -4,14 +4,12 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
     flake-utils.url = "github:numtide/flake-utils";
+
+    # Overlays
     zig.url = "github:mitchellh/zig-overlay";
     rust.url = "github:oxalica/rust-overlay";
 
-    # Used for shell.nix
-    flake-compat = {
-      url = "github:edolstra/flake-compat";
-      flake = false;
-    };
+    flake-compat.url = "https://flakehub.com/f/edolstra/flake-compat/1.tar.gz";
   };
 
   outputs = {
@@ -41,12 +39,15 @@
             rustpkgs.rust-beta
           ];
 
-          shellHook = "exec zsh";
+          # shellHook = "exec zsh";
         
         };
 
         # For compatibility with older versions of the `nix` binary
         devShell = self.devShells.${system}.default;
+
+        # For shell.nix eems to need it
+        packages.default = self.devShells.${system}.default;
       }
     );
 }
