@@ -9,15 +9,13 @@
     zig.url = "github:mitchellh/zig-overlay";
     rust.url = "github:oxalica/rust-overlay";
 
+    # Adding ZLS
+    zls.url = "github:zigtools/zls";
+
     flake-compat.url = "https://flakehub.com/f/edolstra/flake-compat/1.tar.gz";
   };
 
-  outputs = {
-    self,
-    nixpkgs,
-    flake-utils,
-    ...
-  } @ inputs: let
+  outputs = { self, nixpkgs, flake-utils, zls, ... } @ inputs: let
     overlays = [
       # Other overlays
       (final: prev: {
@@ -31,22 +29,23 @@
   in
     flake-utils.lib.eachSystem systems (
       system: let
-        pkgs = import nixpkgs {inherit overlays system;};
+        pkgs = import nixpkgs { inherit overlays system; };
       in rec {
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
-            zigpkgs.master
             rustpkgs.rust-beta
+
+            zigpkgs.master
+            zls.packages.${system}.zls # Adding ZLS from the master branch
           ];
 
           # shellHook = "exec zsh";
-        
         };
 
         # For compatibility with older versions of the `nix` binary
         devShell = self.devShells.${system}.default;
 
-        # For shell.nix eems to need it
+        # For shell.nix compatibility
         packages.default = self.devShells.${system}.default;
       }
     );
