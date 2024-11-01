@@ -135,7 +135,7 @@ pub fn transition(
         // gamma_a. If this is the case, we have a duplicate ticket.
         const position = std.sort.binarySearch(types.TicketBody, pre_state.gamma_a, current_ticket, struct {
             fn order(context: types.TicketBody, item: types.TicketBody) std.math.Order {
-                return std.mem.order(u8, &item.id, &context.id);
+                return std.mem.order(u8, &context.id, &item.id);
             }
         }.order);
         if (position != null) {
