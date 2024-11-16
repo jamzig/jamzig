@@ -1,6 +1,15 @@
 const std = @import("std");
 const types = @import("types.zig");
 
+pub const Error = error{
+    SignatureGenerationFailed,
+    SignatureVerificationFailed,
+    KeyPairGenerationFailed,
+    PaddingPointGenerationFailed,
+    VerifierCommitmentFailed,
+    RingContextInitializationFailed,
+};
+
 // Extern declarations for Rust functions
 extern fn generate_ring_signature(
     public_keys: [*c]const u8,
@@ -58,7 +67,7 @@ pub extern fn get_verifier_commitment(
 
 pub fn getVerifierCommitment(
     public_keys: []const types.BandersnatchKey,
-) !types.GammaZ {
+) Error!types.GammaZ {
     var output: types.GammaZ = undefined;
     const result = get_verifier_commitment(
         @ptrCast(public_keys.ptr),
@@ -67,7 +76,7 @@ pub fn getVerifierCommitment(
     );
 
     if (!result) {
-        return error.VerifierCommitmentFailed;
+        return Error.VerifierCommitmentFailed;
     }
 
     return output;
@@ -85,7 +94,7 @@ pub fn generateRingSignature(
     aux_data: []const u8,
     prover_idx: usize,
     prover_key: types.BandersnatchKey,
-) !types.BandersnatchRingSignature {
+) Error!types.BandersnatchRingSignature {
     var output: types.BandersnatchRingSignature = undefined;
     const result = generate_ring_signature(
         @ptrCast(public_keys.ptr),
@@ -100,7 +109,7 @@ pub fn generateRingSignature(
     );
 
     if (!result) {
-        return error.SignatureGenerationFailed;
+        return Error.SignatureGenerationFailed;
     }
 
     return output;
@@ -111,7 +120,7 @@ pub fn verifyRingSignature(
     vrf_input: []const u8,
     aux_data: []const u8,
     signature: *const types.BandersnatchRingSignature,
-) !types.BandersnatchVrfOutput {
+) Error!types.BandersnatchVrfOutput {
     var vrf_output: types.BandersnatchVrfOutput = undefined;
 
     const result = verify_ring_signature(
@@ -126,7 +135,7 @@ pub fn verifyRingSignature(
     );
 
     if (!result) {
-        return error.SignatureVerificationFailed;
+        return Error.SignatureVerificationFailed;
     }
 
     return vrf_output;
@@ -138,7 +147,7 @@ pub fn verifyRingSignatureAgainstCommitment(
     vrf_input: []const u8,
     aux_data: []const u8,
     signature: *const types.BandersnatchRingSignature,
-) !types.BandersnatchVrfOutput {
+) Error!types.BandersnatchVrfOutput {
     var vrf_output: types.BandersnatchVrfOutput = undefined;
 
     const result = verify_ring_signature_against_commitment(
@@ -153,14 +162,14 @@ pub fn verifyRingSignatureAgainstCommitment(
     );
 
     if (!result) {
-        return error.SignatureVerificationFailed;
+        return Error.SignatureVerificationFailed;
     }
 
     return vrf_output;
 }
 
 // Helper functions
-pub fn createKeyPairFromSeed(seed: []const u8) !types.BandersnatchKeyPair {
+pub fn createKeyPairFromSeed(seed: []const u8) Error!types.BandersnatchKeyPair {
     var output: [64]u8 = undefined;
     const result = create_key_pair_from_seed(
         seed.ptr,
@@ -169,7 +178,7 @@ pub fn createKeyPairFromSeed(seed: []const u8) !types.BandersnatchKeyPair {
     );
 
     if (!result) {
-        return error.KeyPairGenerationFailed;
+        return Error.KeyPairGenerationFailed;
     }
 
     // Split the output into private and public keys
@@ -180,7 +189,7 @@ pub fn createKeyPairFromSeed(seed: []const u8) !types.BandersnatchKeyPair {
     return key_pair;
 }
 
-pub fn getPaddingPoint(ring_size: usize) !types.BandersnatchKey {
+pub fn getPaddingPoint(ring_size: usize) Error!types.BandersnatchKey {
     var output: types.BandersnatchKey = undefined;
     const result = get_padding_point(
         ring_size,
@@ -188,7 +197,7 @@ pub fn getPaddingPoint(ring_size: usize) !types.BandersnatchKey {
     );
 
     if (!result) {
-        return error.PaddingPointGenerationFailed;
+        return Error.PaddingPointGenerationFailed;
     }
 
     return output;

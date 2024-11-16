@@ -9,7 +9,7 @@ const crypto = @import("crypto.zig");
 
 pub const Params = @import("jam_params.zig").Params;
 
-pub const SafroleError = error{
+pub const Error = error{
     /// Bad slot value.
     bad_slot,
     /// Received a ticket while in epoch's tail.
@@ -24,10 +24,9 @@ pub const SafroleError = error{
     reserved,
     /// Found a ticket duplicate.
     duplicate_ticket,
-
     /// Too_many_tickets_in_extrinsic
     too_many_tickets_in_extrinsic,
-};
+} || std.mem.Allocator.Error || crypto.Error;
 
 pub const Result = struct {
     post_state: safrole_types.State,
@@ -45,10 +44,10 @@ pub fn transition(
     eta_entropy: types.OpaqueHash,
     // Ticket extrinsic.
     ticket_extrinsic: []types.TicketEnvelope,
-) !Result {
+) Error!Result {
     // Equation 41: H_t ∈ N_T, P(H)_t < H_t ∧ H_t · P ≤ T
     if (slot <= pre_state.tau) {
-        return SafroleError.bad_slot;
+        return Error.bad_slot;
     }
 
     // The slot inside this epoch
@@ -60,19 +59,19 @@ pub fn transition(
     // than N we have a bad ticket attempt
     for (ticket_extrinsic) |extrinsic| {
         if (extrinsic.attempt >= params.max_ticket_entries_per_validator) {
-            return SafroleError.bad_ticket_attempt;
+            return Error.bad_ticket_attempt;
         }
     }
 
     // We should not have more than K tickets in the input
     if (ticket_extrinsic.len > params.epoch_length) {
-        return SafroleError.too_many_tickets_in_extrinsic;
+        return Error.too_many_tickets_in_extrinsic;
     }
 
     // We shuold not have any tickets when the epoch slot < Y
     if (epoch_slot >= params.ticket_submission_end_epoch_slot) {
         if (ticket_extrinsic.len > 0) {
-            return SafroleError.unexpected_ticket;
+            return Error.unexpected_ticket;
         }
     }
 
@@ -85,7 +84,7 @@ pub fn transition(
         ticket_extrinsic,
     ) catch |e| {
         if (e == error.SignatureVerificationFailed) {
-            return SafroleError.bad_ticket_proof;
+            return Error.bad_ticket_proof;
         } else return e;
     };
     defer allocator.free(verified_extrinsic);
@@ -100,7 +99,7 @@ pub fn transition(
         var i: usize = 0;
         while (i < index) : (i += 1) {
             if (std.mem.eql(u8, &verified_extrinsic[i].id, &current_ticket.id)) {
-                return SafroleError.duplicate_ticket;
+                return Error.duplicate_ticket;
             }
         }
 
@@ -112,14 +111,14 @@ pub fn transition(
             }
         }.order);
         if (position != null) {
-            return SafroleError.duplicate_ticket;
+            return Error.duplicate_ticket;
         }
 
         // Check the order of tickets
         if (index > 0) {
             const prev_ticket = verified_extrinsic[index - 1];
             if (std.mem.order(u8, &current_ticket.id, &prev_ticket.id) == .lt) {
-                return SafroleError.bad_ticket_order;
+                return Error.bad_ticket_order;
             }
         }
     }
