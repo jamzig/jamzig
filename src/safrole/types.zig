@@ -25,42 +25,22 @@ pub const TicketEnvelope = types.TicketEnvelope;
 
 pub const ValidatorData = types.ValidatorData;
 
-pub const Lambda = []const ValidatorData;
-pub const Kappa = []const ValidatorData;
-pub const GammaK = []const ValidatorData;
-pub const Iota = []const ValidatorData;
+pub const Lambda = types.Lambda;
+pub const Kappa = types.Kappa;
+pub const GammaK = types.GammaK;
+pub const Iota = types.Iota;
 
-pub const Eta = [4]Entropy;
+pub const Eta = types.Eta;
 
-// γₛ ∈ ⟦C⟧E ∪ ⟦HB⟧E
-// the current epoch’s slot-sealer series, which is either a
-// full complement of E tickets or, in the case of a fallback
-// mode, a series of E Bandersnatch keys
-pub const GammaS = union(enum) {
-    tickets: []TicketBody,
-    keys: []BandersnatchKey,
+pub const GamaS = types.GammaS;
 
-    pub fn deinit(self: *@This(), allocator: Allocator) void {
-        switch (self.*) {
-            .tickets => |tickets| {
-                // We can use the Z_outsideInOrdering algorithm on tickets
-                allocator.free(tickets);
-            },
-            // fallback
-            .keys => |keys| {
-                // We are in fallback mode
-                allocator.free(keys);
-            },
-        }
-    }
-};
+pub const GammaS = types.GammaS;
 
 // γₐ ∈ ⟦C⟧∶E
 // is the ticket accumulator, a series of highestscoring ticket identifiers to
 // be used for the next epoch
-pub const GammaA = []TicketBody;
-
-pub const GammaZ = BandersnatchVrfRoot; // types.hex.HexBytesFixed(144);
+pub const GammaA = types.GammaA;
+pub const GammaZ = types.GammaZ; // types.hex.HexBytesFixed(144);
 
 /// Represents a Safrole state of the system as referenced in the GP γ.
 pub const State = struct {

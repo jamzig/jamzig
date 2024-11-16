@@ -18,6 +18,7 @@ pub const CoreIndex = U16;
 pub const TicketAttempt = u8; // as the range is 0..1
 
 pub const Entropy = OpaqueHash;
+pub const Eta = [4]Entropy;
 
 pub const BlsKey = [144]u8;
 pub const BandersnatchPrivateKey = ByteArray32;
@@ -148,6 +149,42 @@ pub const TicketsMark = struct {
     }
 };
 
+// Safrole types
+pub const Lambda = []const ValidatorData;
+pub const Kappa = []const ValidatorData;
+pub const GammaK = []const ValidatorData;
+pub const Iota = []const ValidatorData;
+
+// γₛ ∈ ⟦C⟧E ∪ ⟦HB⟧E
+// the current epoch’s slot-sealer series, which is either a
+// full complement of E tickets or, in the case of a fallback
+// mode, a series of E Bandersnatch keys
+pub const GammaS = union(enum) {
+    tickets: []TicketBody,
+    keys: []BandersnatchKey,
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .tickets => |tickets| {
+                // We can use the Z_outsideInOrdering algorithm on tickets
+                allocator.free(tickets);
+            },
+            // fallback
+            .keys => |keys| {
+                // We are in fallback mode
+                allocator.free(keys);
+            },
+        }
+    }
+};
+
+// γₐ ∈ ⟦C⟧∶E
+// is the ticket accumulator, a series of highestscoring ticket identifiers to
+// be used for the next epoch
+pub const GammaA = []TicketBody;
+pub const GammaZ = BandersnatchVrfRoot;
+
+// Header
 pub const Header = struct {
     parent: OpaqueHash,
     parent_state_root: OpaqueHash,
