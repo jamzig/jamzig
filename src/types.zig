@@ -299,6 +299,10 @@ pub const Extrinsic = struct {
     preimages: PreimagesExtrinsic,
     assurances: AssurancesExtrinsic,
     guarantees: GuaranteesExtrinsic,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try @import("types/format.zig").formatExtrinsic(self, writer);
+    }
 };
 
 pub const Block = struct {
