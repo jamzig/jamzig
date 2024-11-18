@@ -8,12 +8,12 @@ pub const Gamma = struct {
     s: types.GammaS,
     a: types.GammaA,
 
-    pub fn init(allocator: std.mem.Allocator) !Gamma {
+    pub fn init(allocator: std.mem.Allocator, validators_count: u32) !Gamma {
         return Gamma{
-            .k = try allocator.alloc(types.ValidatorData, 0),
+            .k = try allocator.alloc(types.ValidatorData, validators_count),
             .z = std.mem.zeroes(types.BandersnatchVrfRoot),
-            .s = .{ .tickets = try allocator.alloc(types.TicketBody, 0) },
-            .a = try allocator.alloc(types.TicketBody, 0),
+            .s = .{ .tickets = try allocator.alloc(types.TicketBody, validators_count) },
+            .a = try allocator.alloc(types.TicketBody, validators_count),
         };
     }
 
@@ -32,7 +32,10 @@ pub const Gamma = struct {
 
     pub fn deinit(self: *Gamma, allocator: std.mem.Allocator) void {
         allocator.free(self.k);
-        allocator.free(self.s.tickets);
+        switch (self.s) {
+            .tickets => allocator.free(self.s.tickets),
+            .keys => allocator.free(self.s.keys),
+        }
         allocator.free(self.a);
     }
 };

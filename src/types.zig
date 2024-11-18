@@ -150,10 +150,10 @@ pub const TicketsMark = struct {
 };
 
 // Safrole types
-pub const Lambda = []const ValidatorData;
-pub const Kappa = []const ValidatorData;
-pub const GammaK = []const ValidatorData;
-pub const Iota = []const ValidatorData;
+pub const Lambda = []ValidatorData;
+pub const Kappa = []ValidatorData;
+pub const GammaK = []ValidatorData;
+pub const Iota = []ValidatorData;
 
 // γₛ ∈ ⟦C⟧E ∪ ⟦HB⟧E
 // the current epoch’s slot-sealer series, which is either a

@@ -18,7 +18,7 @@ test "encode" {
     const allocator = std.testing.allocator;
 
     // Create a sample Gamma instance
-    var gamma = try state.Gamma.init(allocator);
+    var gamma = try state.Gamma.init(allocator, 6);
     defer gamma.deinit(allocator);
 
     // Create a buffer to store the encoded data

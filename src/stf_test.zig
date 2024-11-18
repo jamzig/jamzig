@@ -6,11 +6,7 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const codec = @import("codec.zig");
 
-const Params = @import("jam_params.zig").Params;
-
-const ordered_files = @import("tests/ordered_files.zig");
-
-const TINY_PARAMS = @import("jam_params.zig").TINY_PARAMS;
+const jam_params = @import("jam_params.zig");
 
 const SlurpedFile = struct {
     allocator: std.mem.Allocator,
@@ -51,27 +47,91 @@ const GenesisJson = struct {
     lambda: []safrole_tv_types.ValidatorData,
 };
 
-fn buildGenesisState(comptime params: Params, allocator: std.mem.Allocator, json_str: []const u8) !state.JamState(params) {
-    // Initialize empty state
-    var jam_state = try state.JamState(params).init(allocator);
-    errdefer jam_state.deinit(allocator);
-
+fn buildGenesisState(allocator: std.mem.Allocator, jam_state: *state.JamState(jam_params.TINY_PARAMS), json_str: []const u8) !void {
     var parsed = std.json.parseFromSlice(GenesisJson, allocator, json_str, .{ .ignore_unknown_fields = true, .parse_numbers = false }) catch |err| {
         std.debug.print("Could not parse GenesisJson", .{});
         return err;
     };
     defer parsed.deinit();
 
-    return jam_state;
+    // Copy eta values
+    for (parsed.value.eta, 0..) |eta_hash, i| {
+        std.mem.copyForwards(u8, &jam_state.eta[i], &eta_hash.bytes);
+    }
+
+    // Copy validator data arrays
+    for (parsed.value.gamma.gamma_k, 0..) |validator, i| {
+        jam_state.gamma.k[i].bandersnatch = validator.bandersnatch.bytes;
+        jam_state.gamma.k[i].ed25519 = validator.ed25519.bytes;
+        jam_state.gamma.k[i].bls = validator.bls.bytes;
+        jam_state.gamma.k[i].metadata = validator.metadata.bytes;
+    }
+
+    for (parsed.value.iota, 0..) |validator, i| {
+        jam_state.iota[i].bandersnatch = validator.bandersnatch.bytes;
+        jam_state.iota[i].ed25519 = validator.ed25519.bytes;
+        jam_state.iota[i].bls = validator.bls.bytes;
+        jam_state.iota[i].metadata = validator.metadata.bytes;
+    }
+
+    for (parsed.value.kappa, 0..) |validator, i| {
+        jam_state.kappa[i].bandersnatch = validator.bandersnatch.bytes;
+        jam_state.kappa[i].ed25519 = validator.ed25519.bytes;
+        jam_state.kappa[i].bls = validator.bls.bytes;
+        jam_state.kappa[i].metadata = validator.metadata.bytes;
+    }
+
+    for (parsed.value.lambda, 0..) |validator, i| {
+        jam_state.lambda[i].bandersnatch = validator.bandersnatch.bytes;
+        jam_state.lambda[i].ed25519 = validator.ed25519.bytes;
+        jam_state.lambda[i].bls = validator.bls.bytes;
+        jam_state.lambda[i].metadata = validator.metadata.bytes;
+    }
+
+    // copyForwards gamma_a ticket bodies
+    for (parsed.value.gamma.gamma_a, 0..) |ticket, i| {
+        std.mem.copyForwards(u8, &jam_state.gamma.a[i].id, &ticket.id.bytes);
+        jam_state.gamma.a[i].attempt = ticket.attempt;
+    }
+
+    // Copy gamma_s and gamma_z
+
+    // free the memory of gamma.s first
+    switch (jam_state.gamma.s) {
+        .tickets => |t| allocator.free(t),
+        .keys => |k| allocator.free(k),
+    }
+    jam_state.gamma.s = switch (parsed.value.gamma.gamma_s) {
+        .tickets => |tickets| blk: {
+            var converted = try allocator.alloc(types.TicketBody, tickets.len);
+            for (tickets, 0..) |ticket, i| {
+                converted[i] = .{
+                    .id = ticket.id.bytes,
+                    .attempt = ticket.attempt,
+                };
+            }
+            break :blk .{ .tickets = converted };
+        },
+        .keys => |keys| blk: {
+            var converted = try allocator.alloc(types.BandersnatchKey, keys.len);
+            for (keys, 0..) |key, i| {
+                converted[i] = key.bytes;
+            }
+            break :blk .{ .keys = converted };
+        },
+    };
+    std.mem.copyForwards(u8, &jam_state.gamma.z, &parsed.value.gamma.gamma_z.bytes);
 }
 
 test "jamtestnet: block import" {
     // Get test allocator
     const allocator = testing.allocator;
 
+    var jam_state = try state.JamState(jam_params.TINY_PARAMS).init(allocator);
+    defer jam_state.deinit(allocator);
+
     // Get ordered block files
-    var genesis = try buildGenesisState(TINY_PARAMS, allocator, @embedFile("stf_test/genesis.json"));
-    defer genesis.deinit(allocator);
+    try buildGenesisState(allocator, &jam_state, @embedFile("stf_test/genesis.json"));
 
     // src/stf_test/jamtestnet/traces/safrole/
     // src/stf_test/jamtestnet/traces/safrole/jam_duna
@@ -93,11 +153,11 @@ test "jamtestnet: block import" {
 
             // Now decode the block
             const block = try codec.deserialize(types.Block, .{
-                .validators = TINY_PARAMS.validators_count,
-                .epoch_length = TINY_PARAMS.epoch_length,
-                .cores_count = TINY_PARAMS.core_count, // TODO: consistent naming
-                .validators_super_majority = TINY_PARAMS.validators_super_majority,
-                .avail_bitfield_bytes = TINY_PARAMS.avail_bitfield_bytes,
+                .validators = jam_params.TINY_PARAMS.validators_count,
+                .epoch_length = jam_params.TINY_PARAMS.epoch_length,
+                .cores_count = jam_params.TINY_PARAMS.core_count, // TODO: consistent naming
+                .validators_super_majority = jam_params.TINY_PARAMS.validators_super_majority,
+                .avail_bitfield_bytes = jam_params.TINY_PARAMS.avail_bitfield_bytes,
             }, allocator, slurped.buffer);
             defer block.deinit();
 
