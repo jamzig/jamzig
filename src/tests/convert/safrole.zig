@@ -114,10 +114,10 @@ fn convertValidatorDataSlice(allocator: Allocator, from: []tv_lib_safrole.Valida
 }
 
 fn convertValidatorData(from: *tv_lib_safrole.ValidatorData, to: *types.ValidatorData) void {
-    convertHexBytesToArray(32, from.bandersnatch, &to.bandersnatch);
-    convertHexBytesToArray(32, from.ed25519, &to.ed25519);
-    convertHexBytesToArray(144, from.bls, &to.bls);
-    convertHexBytesToArray(128, from.metadata, &to.metadata);
+    to.bandersnatch = convertHexBytesFixedToArray(32, from.bandersnatch);
+    to.ed25519 = convertHexBytesFixedToArray(32, from.ed25519);
+    to.bls = convertHexBytesFixedToArray(144, from.bls);
+    to.metadata = convertHexBytesFixedToArray(128, from.metadata);
 }
 
 fn convertTicketBodySlice(allocator: Allocator, from: []tv_lib_safrole.TicketBody) Error![]types.TicketBody {
