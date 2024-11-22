@@ -6,7 +6,7 @@ const utils = @import("utils.zig");
 const SimpleType = struct {
     value: i32,
 
-    pub fn init() !SimpleType {
+    pub fn init() SimpleType {
         return .{ .value = 42 };
     }
 };
@@ -49,7 +49,7 @@ const CustomInitType = struct {
     x: i32,
     y: []const u8,
 
-    pub fn init(x: i32, y: []const u8) !CustomInitType {
+    pub fn init(x: i32, y: []const u8) CustomInitType {
         return .{
             .x = x,
             .y = y,

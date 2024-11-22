@@ -74,23 +74,27 @@ pub fn getOrInitManaged(
 
         // Get the return type of T.init
         const ReturnType = @typeInfo(init_fn).@"fn".return_type.?;
+        const returns_error = @typeInfo(ReturnType) == .error_union;
 
-        // Check if it returns an error union
-        if (@typeInfo(ReturnType) != .error_union) {
-            @compileError("T.init must return an error union: T = " ++ @typeName(T));
-        }
-
-        // Get the success type from the error union
-        const SuccessType = @typeInfo(ReturnType).error_union.payload;
-        if (SuccessType != T) {
-            @compileError("T.init must return error union of T: T = " ++ @typeName(T));
+        // If it returns an error union, verify the success type matches T
+        if (comptime returns_error) {
+            const SuccessType = @typeInfo(ReturnType).error_union.payload;
+            if (SuccessType != T) {
+                @compileError("T.init error union must return type T: T = " ++ @typeName(T));
+            }
+        } else if (ReturnType != T) {
+            @compileError("T.init must return type T: T = " ++ @typeName(T));
         }
 
         const instance = try allocator.create(T);
         errdefer allocator.destroy(instance);
 
-        // Create the value on the heap
-        instance.* = try @call(.auto, T.init, init_args);
+        // Create the value on the heap, handling both error union and direct return types
+        instance.* = if (comptime returns_error)
+            try @call(.auto, T.init, init_args)
+        else
+            @call(.auto, T.init, init_args);
+
         return .{ .ptr = instance, .needs_free = true };
     }
 }
