@@ -55,7 +55,7 @@ fn buildGenesisState(comptime params: jam_params.Params, allocator: std.mem.Allo
     defer parsed.deinit();
 
     var jam_state = try state.JamState(params).init(allocator);
-    defer jam_state.deinit(allocator);
+    errdefer jam_state.deinit(allocator);
 
     // Copy eta values
     for (parsed.value.eta, 0..) |eta_hash, i| {
@@ -63,48 +63,49 @@ fn buildGenesisState(comptime params: jam_params.Params, allocator: std.mem.Allo
     }
 
     // Copy validator data arrays
+    try jam_state.initSafrole(allocator);
     for (parsed.value.gamma.gamma_k, 0..) |validator, i| {
-        jam_state.gamma.k[i].bandersnatch = validator.bandersnatch.bytes;
-        jam_state.gamma.k[i].ed25519 = validator.ed25519.bytes;
-        jam_state.gamma.k[i].bls = validator.bls.bytes;
-        jam_state.gamma.k[i].metadata = validator.metadata.bytes;
+        jam_state.gamma.?.k[i].bandersnatch = validator.bandersnatch.bytes;
+        jam_state.gamma.?.k[i].ed25519 = validator.ed25519.bytes;
+        jam_state.gamma.?.k[i].bls = validator.bls.bytes;
+        jam_state.gamma.?.k[i].metadata = validator.metadata.bytes;
     }
 
     for (parsed.value.iota, 0..) |validator, i| {
-        jam_state.iota[i].bandersnatch = validator.bandersnatch.bytes;
-        jam_state.iota[i].ed25519 = validator.ed25519.bytes;
-        jam_state.iota[i].bls = validator.bls.bytes;
-        jam_state.iota[i].metadata = validator.metadata.bytes;
+        jam_state.iota.?[i].bandersnatch = validator.bandersnatch.bytes;
+        jam_state.iota.?[i].ed25519 = validator.ed25519.bytes;
+        jam_state.iota.?[i].bls = validator.bls.bytes;
+        jam_state.iota.?[i].metadata = validator.metadata.bytes;
     }
 
     for (parsed.value.kappa, 0..) |validator, i| {
-        jam_state.kappa[i].bandersnatch = validator.bandersnatch.bytes;
-        jam_state.kappa[i].ed25519 = validator.ed25519.bytes;
-        jam_state.kappa[i].bls = validator.bls.bytes;
-        jam_state.kappa[i].metadata = validator.metadata.bytes;
+        jam_state.kappa.?[i].bandersnatch = validator.bandersnatch.bytes;
+        jam_state.kappa.?[i].ed25519 = validator.ed25519.bytes;
+        jam_state.kappa.?[i].bls = validator.bls.bytes;
+        jam_state.kappa.?[i].metadata = validator.metadata.bytes;
     }
 
     for (parsed.value.lambda, 0..) |validator, i| {
-        jam_state.lambda[i].bandersnatch = validator.bandersnatch.bytes;
-        jam_state.lambda[i].ed25519 = validator.ed25519.bytes;
-        jam_state.lambda[i].bls = validator.bls.bytes;
-        jam_state.lambda[i].metadata = validator.metadata.bytes;
+        jam_state.lambda.?[i].bandersnatch = validator.bandersnatch.bytes;
+        jam_state.lambda.?[i].ed25519 = validator.ed25519.bytes;
+        jam_state.lambda.?[i].bls = validator.bls.bytes;
+        jam_state.lambda.?[i].metadata = validator.metadata.bytes;
     }
 
     // copyForwards gamma_a ticket bodies
     for (parsed.value.gamma.gamma_a, 0..) |ticket, i| {
-        std.mem.copyForwards(u8, &jam_state.gamma.a[i].id, &ticket.id.bytes);
-        jam_state.gamma.a[i].attempt = ticket.attempt;
+        std.mem.copyForwards(u8, &jam_state.gamma.?.a[i].id, &ticket.id.bytes);
+        jam_state.gamma.?.a[i].attempt = ticket.attempt;
     }
 
     // Copy gamma_s and gamma_z
 
     // free the memory of gamma.s first
-    switch (jam_state.gamma.s) {
+    switch (jam_state.gamma.?.s) {
         .tickets => |t| allocator.free(t),
         .keys => |k| allocator.free(k),
     }
-    jam_state.gamma.s = switch (parsed.value.gamma.gamma_s) {
+    jam_state.gamma.?.s = switch (parsed.value.gamma.gamma_s) {
         .tickets => |tickets| blk: {
             var converted = try allocator.alloc(types.TicketBody, tickets.len);
             for (tickets, 0..) |ticket, i| {
@@ -123,7 +124,7 @@ fn buildGenesisState(comptime params: jam_params.Params, allocator: std.mem.Allo
             break :blk .{ .keys = converted };
         },
     };
-    std.mem.copyForwards(u8, &jam_state.gamma.z, &parsed.value.gamma.gamma_z.bytes);
+    std.mem.copyForwards(u8, &jam_state.gamma.?.z, &parsed.value.gamma.gamma_z.bytes);
 
     return jam_state;
 }
@@ -133,8 +134,8 @@ test "jamtestnet: block import" {
     const allocator = testing.allocator;
 
     // Get ordered block files
-    const jam_state = try buildGenesisState(jam_params.TINY_PARAMS, allocator, @embedFile("stf_test/genesis.json"));
-    // _ = jam_state;
+    var jam_state = try buildGenesisState(jam_params.TINY_PARAMS, allocator, @embedFile("stf_test/genesis.json"));
+    defer jam_state.deinit(allocator);
 
     // src/stf_test/jamtestnet/traces/safrole/
     // src/stf_test/jamtestnet/traces/safrole/jam_duna
@@ -166,8 +167,8 @@ test "jamtestnet: block import" {
 
             std.debug.print("block {}\n", .{block.value.header.slot});
 
-            const new_state = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, &jam_state, &block.value);
-            _ = new_state;
+            var new_state = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, &jam_state, &block.value);
+            defer new_state.deinit(allocator);
             break;
         }
         break;

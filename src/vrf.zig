@@ -22,7 +22,7 @@ pub fn hashedOutput(proof: types.OpaqueHash) types.OpaqueHash {
 
     var hasher = Blake2b256.init(.{});
     hasher.update(domain_separator);
-    hasher.update(proof);
+    hasher.update(&proof);
     hasher.final(&output);
 
     return output;

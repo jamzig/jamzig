@@ -32,6 +32,20 @@ pub const Result = struct {
     post_state: safrole_types.State,
     epoch_marker: ?types.EpochMark,
     ticket_marker: ?types.TicketsMark,
+
+    pub fn deinit(self: *Result, allocator: std.mem.Allocator) void {
+        self.post_state.deinit(allocator);
+        self.deinit_markers(allocator);
+    }
+
+    pub fn deinit_markers(self: *Result, allocator: std.mem.Allocator) void {
+        if (self.epoch_marker) |*marker| {
+            allocator.free(marker.validators);
+        }
+        if (self.ticket_marker) |*marker| {
+            allocator.free(marker.tickets);
+        }
+    }
 };
 
 // TODO: swap params and allocator, use params first
