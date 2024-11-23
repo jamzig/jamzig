@@ -141,9 +141,9 @@ pub fn JamState(comptime params: Params) type {
             try self.initTau();
 
             try self.initGamma(allocator);
-            self.iota = try allocator.alloc(types.ValidatorData, params.validators_count);
-            self.kappa = try allocator.alloc(types.ValidatorData, params.validators_count);
-            self.lambda = try allocator.alloc(types.ValidatorData, params.validators_count);
+            self.iota = try types.ValidatorSet.init(allocator, params.validators_count);
+            self.kappa = try types.ValidatorSet.init(allocator, params.validators_count);
+            self.lambda = try types.ValidatorSet.init(allocator, params.validators_count);
         }
 
         /// Initialize a new JamState
