@@ -13,14 +13,18 @@
 const std = @import("std");
 
 fn ManagedPtr(comptime T: type) type {
+    // TODO: clean this up, match more generic on types and give compileError when not matches
     const has_deinit = if (@hasDecl(T, "deinit"))
         @TypeOf(@field(T, "deinit")) == fn (*T) void or
-            @TypeOf(@field(T, "deinit")) == fn (*T, std.mem.Allocator) void
+            @TypeOf(@field(T, "deinit")) == fn (*T, std.mem.Allocator) void or
+            @TypeOf(@field(T, "deinit")) == fn (T) void or
+            @TypeOf(@field(T, "deinit")) == fn (T, std.mem.Allocator) void
     else
         false;
 
     const needs_allocator_deinit = if (has_deinit)
-        @TypeOf(@field(T, "deinit")) == fn (*T, std.mem.Allocator) void
+        @TypeOf(@field(T, "deinit")) == fn (*T, std.mem.Allocator) void or
+            @TypeOf(@field(T, "deinit")) == fn (T, std.mem.Allocator) void
     else
         false;
 
@@ -47,7 +51,7 @@ fn ManagedPtr(comptime T: type) type {
 pub fn getOrInitManaged(
     allocator: std.mem.Allocator,
     maybe_value: anytype,
-    comptime init_args: anytype,
+    init_args: anytype,
 ) !ManagedPtr(std.meta.Child(std.meta.Child(@TypeOf(maybe_value)))) {
     const T = std.meta.Child(std.meta.Child(@TypeOf(maybe_value)));
     comptime {

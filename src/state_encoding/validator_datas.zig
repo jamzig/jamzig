@@ -2,8 +2,8 @@ const std = @import("std");
 const types = @import("../types.zig");
 const codec = @import("../codec.zig");
 
-pub fn encode(vdatas: []const types.ValidatorData, writer: anytype) !void {
-    try codec.serializeSliceAsArray(types.ValidatorData, writer, vdatas);
+pub fn encode(set: *const types.ValidatorSet, writer: anytype) !void {
+    try codec.serializeSliceAsArray(types.ValidatorData, writer, set.items());
 }
 
 //  _____         _   _

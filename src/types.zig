@@ -176,11 +176,29 @@ pub const TicketsMark = struct {
     }
 };
 
+pub const ValidatorSet = struct {
+    validators: []ValidatorData,
+
+    pub fn init(allocator: std.mem.Allocator, validators_count: u32) !@This() {
+        return @This(){
+            .validators = try allocator.alloc(ValidatorData, validators_count),
+        };
+    }
+
+    pub fn items(self: @This()) []ValidatorData {
+        return self.validators;
+    }
+
+    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.validators);
+    }
+};
+
 // Safrole types
-pub const Lambda = []ValidatorData;
-pub const Kappa = []ValidatorData;
-pub const GammaK = []ValidatorData;
-pub const Iota = []ValidatorData;
+pub const Lambda = ValidatorSet;
+pub const Kappa = ValidatorSet;
+pub const GammaK = ValidatorSet;
+pub const Iota = ValidatorSet;
 
 // γₛ ∈ ⟦C⟧E ∪ ⟦HB⟧E
 // the current epoch’s slot-sealer series, which is either a

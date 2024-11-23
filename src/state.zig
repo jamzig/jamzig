@@ -79,8 +79,8 @@ pub fn JamState(comptime params: Params) type {
 
         /// Initialize Beta component (max_blocks should be 10)
         /// TODO: check if this max_blocks is in the params
-        pub fn initBeta(self: *JamState(params), allocator: std.mem.Allocator, max_blocks: usize) !void {
-            self.beta = try Beta.init(allocator, max_blocks);
+        pub fn initBeta(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.beta = try Beta.init(allocator, params.recent_history_size);
         }
 
         /// Initialize Gamma component
@@ -173,12 +173,12 @@ pub fn JamState(comptime params: Params) type {
 
         /// Deinitialize and free resources
         pub fn deinit(self: *JamState(params), allocator: std.mem.Allocator) void {
-            if (self.beta) |*beta| beta.deinit();
-            if (self.gamma) |*gamma| gamma.deinit(allocator);
+            if (self.beta) |*beta| beta.deinit(); // TODO: check and make consistent to take allocator
             if (self.delta) |*delta| delta.deinit();
-            if (self.iota) |iota| allocator.free(iota);
-            if (self.kappa) |kappa| allocator.free(kappa);
-            if (self.lambda) |lambda| allocator.free(lambda);
+            if (self.gamma) |*gamma| gamma.deinit(allocator);
+            if (self.iota) |iota| iota.deinit(allocator);
+            if (self.kappa) |kappa| kappa.deinit(allocator);
+            if (self.lambda) |lambda| lambda.deinit(allocator);
             if (self.phi) |*phi| phi.deinit();
             if (self.chi) |*chi| chi.deinit();
             if (self.psi) |*psi| psi.deinit();

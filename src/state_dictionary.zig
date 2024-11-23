@@ -126,60 +126,93 @@ pub fn buildStateMerklizationDictionary(
     var map = std.AutoHashMap([32]u8, []const u8).init(allocator);
     errdefer map.deinit();
 
+    // Helpers to ...
+    const getOrInitManaged = @import("state_dictionary/utils.zig").getOrInitManaged;
+
     // Encode the simple state components using specific encoders
     {
         // Alpha (1)
         const alpha_key = constructSimpleByteKey(1);
-        const alpha_value = try encodeAndOwnSlice(allocator, //
-            state_encoder.encodeAlpha, .{&state.alpha});
+        var alpha_managed = try getOrInitManaged(allocator, &state.alpha, .{});
+        defer alpha_managed.deinit(allocator);
+        const alpha_value = try encodeAndOwnSlice(
+            allocator,
+            state_encoder.encodeAlpha,
+            .{alpha_managed.ptr},
+        );
         try map.put(alpha_key, alpha_value);
 
         // Phi (2)
         const phi_key = constructSimpleByteKey(2);
-        const phi_value = try encodeAndOwnSlice(allocator, state_encoder.encodePhi, .{&state.phi});
+        var phi_managed = try getOrInitManaged(allocator, &state.phi, .{allocator});
+        defer phi_managed.deinit(allocator);
+        const phi_value = try encodeAndOwnSlice(
+            allocator,
+            state_encoder.encodePhi,
+            .{phi_managed.ptr},
+        );
         try map.put(phi_key, phi_value);
 
         // Beta (3)
         const beta_key = constructSimpleByteKey(3);
-        const beta_value = try encodeAndOwnSlice(allocator, state_encoder.encodeBeta, .{&state.beta});
+        var beta_managed = try getOrInitManaged(allocator, &state.beta, .{ allocator, params.recent_history_size });
+        defer beta_managed.deinit(allocator);
+        const beta_value = try encodeAndOwnSlice(
+            allocator,
+            state_encoder.encodeBeta,
+            .{beta_managed.ptr},
+        );
         try map.put(beta_key, beta_value);
 
         // Gamma (4)
         const gamma_key = constructSimpleByteKey(4);
-        const gamma_value = try encodeAndOwnSlice(allocator, //
-            state_encoder.encodeGamma, .{&state.gamma});
+        var gamma_managed = try getOrInitManaged(allocator, &state.gamma, .{ allocator, params.validators_count });
+        defer gamma_managed.deinit(allocator);
+        const gamma_value = try encodeAndOwnSlice(
+            allocator,
+            state_encoder.encodeGamma,
+            .{gamma_managed.ptr},
+        );
         try map.put(gamma_key, gamma_value);
 
         // Psi (5)
         const psi_key = constructSimpleByteKey(5);
-        const psi_value = try encodeAndOwnSlice(allocator, state_encoder.encodePsi, .{&state.psi});
+        var psi_managed = try getOrInitManaged(allocator, &state.psi, .{allocator});
+        defer psi_managed.deinit(allocator);
+        const psi_value = try encodeAndOwnSlice(allocator, state_encoder.encodePsi, .{psi_managed.ptr});
         try map.put(psi_key, psi_value);
 
-        // Eta (6)
+        // Eta (6) does not contain allocations
         const eta_key = constructSimpleByteKey(6);
         const eta_value = try encodeAndOwnSlice(allocator, state_encoder.encodeEta, .{&state.eta});
         try map.put(eta_key, eta_value);
 
         // Iota (7)
         const iota_key = constructSimpleByteKey(7);
-        const iota_value = try encodeAndOwnSlice(allocator, state_encoder.encodeIota, .{state.iota});
+        var iota_managed = try getOrInitManaged(allocator, &state.iota, .{ allocator, params.validators_count });
+        defer iota_managed.deinit(allocator);
+        const iota_value = try encodeAndOwnSlice(allocator, state_encoder.encodeIota, .{iota_managed.ptr});
         try map.put(iota_key, iota_value);
 
         // Kappa (8)
         const kappa_key = constructSimpleByteKey(8);
-        const kappa_value = try encodeAndOwnSlice(allocator, //
-            state_encoder.encodeKappa, .{state.kappa});
+        var kappa_managed = try getOrInitManaged(allocator, &state.kappa, .{ allocator, params.validators_count });
+        defer kappa_managed.deinit(allocator);
+        const kappa_value = try encodeAndOwnSlice(allocator, state_encoder.encodeKappa, .{kappa_managed.ptr});
         try map.put(kappa_key, kappa_value);
 
         // Lambda (9)
         const lambda_key = constructSimpleByteKey(9);
-        const lambda_value = try encodeAndOwnSlice(allocator, //
-            state_encoder.encodeLambda, .{state.lambda});
+        var lambda_managed = try getOrInitManaged(allocator, &state.lambda, .{ allocator, params.validators_count });
+        defer lambda_managed.deinit(allocator);
+        const lambda_value = try encodeAndOwnSlice(allocator, state_encoder.encodeLambda, .{lambda_managed.ptr});
         try map.put(lambda_key, lambda_value);
 
         // Rho (10)
         const rho_key = constructSimpleByteKey(10);
-        const rho_value = try encodeAndOwnSlice(allocator, state_encoder.encodeRho, .{&state.rho});
+        var rho_managed = try getOrInitManaged(allocator, &state.rho, .{});
+        defer rho_managed.deinit(allocator);
+        const rho_value = try encodeAndOwnSlice(allocator, state_encoder.encodeRho, .{rho_managed.ptr});
         try map.put(rho_key, rho_value);
 
         // Tau (11)
@@ -189,31 +222,39 @@ pub fn buildStateMerklizationDictionary(
 
         // Chi (12)
         const chi_key = constructSimpleByteKey(12);
-        const chi_value = try encodeAndOwnSlice(allocator, state_encoder.encodeChi, .{&state.chi});
+        var chi_managed = try getOrInitManaged(allocator, &state.chi, .{allocator});
+        defer chi_managed.deinit(allocator);
+        const chi_value = try encodeAndOwnSlice(allocator, state_encoder.encodeChi, .{chi_managed.ptr});
         try map.put(chi_key, chi_value);
 
         // Pi (13)
         const pi_key = constructSimpleByteKey(13);
-        const pi_value = try encodeAndOwnSlice(allocator, state_encoder.encodePi, .{&state.pi});
+        var pi_managed = try getOrInitManaged(allocator, &state.pi, .{ allocator, params.validators_count });
+        defer pi_managed.deinit(allocator);
+        const pi_value = try encodeAndOwnSlice(allocator, state_encoder.encodePi, .{pi_managed.ptr});
         try map.put(pi_key, pi_value);
 
         // Theta (14)
         const theta_key = constructSimpleByteKey(14);
-        const theta_value = try encodeAndOwnSlice(allocator, //
-            state_encoder.encodeTheta, .{&state.theta});
+        var theta_managed = try getOrInitManaged(allocator, &state.theta, .{allocator});
+        defer theta_managed.deinit(allocator);
+        const theta_value = try encodeAndOwnSlice(allocator, state_encoder.encodeTheta, .{theta_managed.ptr});
         try map.put(theta_key, theta_value);
 
         // Xi (15)
         const xi_key = constructSimpleByteKey(15);
+        var xi_managed = try getOrInitManaged(allocator, &state.xi, .{allocator});
+        defer xi_managed.deinit(allocator);
         // FIXME: now hard coded epoch size
-        const xi_value = try encodeAndOwnSlice(allocator, //
-            state_encoder.encodeXi, .{ 12, allocator, &state.xi.entries });
+        const xi_value = try encodeAndOwnSlice(allocator, state_encoder.encodeXi, .{ 12, allocator, &xi_managed.ptr.entries });
         try map.put(xi_key, xi_value);
     }
 
     // Handle delta component (service accounts) specially
-    if (state.delta.accounts.count() > 0) {
-        var service_iter = state.delta.accounts.iterator();
+    var delta_managed = try getOrInitManaged(allocator, &state.delta, .{allocator});
+    defer delta_managed.deinit(allocator);
+    if (delta_managed.ptr.accounts.count() > 0) {
+        var service_iter = delta_managed.ptr.accounts.iterator();
         while (service_iter.next()) |service_entry| {
             const service_idx = service_entry.key_ptr.*;
             const account = service_entry.value_ptr;
