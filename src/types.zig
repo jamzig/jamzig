@@ -148,6 +148,10 @@ pub const EpochMark = struct {
         return params.validators;
     }
 
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.validators);
+    }
+
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){
             .entropy = self.entropy,
@@ -169,6 +173,10 @@ pub const TicketsMark = struct {
         return params.epoch_length;
     }
 
+    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.tickets);
+    }
+
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){
             .tickets = try allocator.dupe(TicketBody, self.tickets),
@@ -185,8 +193,18 @@ pub const ValidatorSet = struct {
         };
     }
 
+    pub fn len(self: @This()) usize {
+        return self.validators.len;
+    }
+
     pub fn items(self: @This()) []ValidatorData {
         return self.validators;
+    }
+
+    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return @This(){
+            .validators = try allocator.dupe(ValidatorData, self.validators),
+        };
     }
 
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
@@ -208,7 +226,7 @@ pub const GammaS = union(enum) {
     tickets: []TicketBody,
     keys: []BandersnatchKey,
 
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
         switch (self.*) {
             .tickets => |tickets| {
                 // We can use the Z_outsideInOrdering algorithm on tickets
@@ -220,6 +238,17 @@ pub const GammaS = union(enum) {
                 allocator.free(keys);
             },
         }
+    }
+
+    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return switch (self) {
+            .tickets => |tickets| @This(){
+                .tickets = try allocator.dupe(TicketBody, tickets),
+            },
+            .keys => |keys| @This(){
+                .keys = try allocator.dupe(BandersnatchKey, keys),
+            },
+        };
     }
 };
 

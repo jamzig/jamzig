@@ -46,16 +46,14 @@ pub const State = struct {
 
     /// Frees all allocated memory in the State struct.
     pub fn deinit(self: State, allocator: Allocator) void {
-        allocator.free(self.lambda);
-        allocator.free(self.kappa);
-        allocator.free(self.gamma_k);
-        allocator.free(self.iota);
+        self.lambda.deinit(allocator);
+        self.kappa.deinit(allocator);
+        self.gamma_k.deinit(allocator);
+        self.iota.deinit(allocator);
+
         allocator.free(self.gamma_a);
 
-        switch (self.gamma_s) {
-            .tickets => |tickets| allocator.free(tickets),
-            .keys => |keys| allocator.free(keys),
-        }
+        self.gamma_s.deinit(allocator);
     }
 
     /// Implement the default format function
@@ -73,15 +71,12 @@ pub const State = struct {
         return State{
             .tau = self.tau,
             .eta = self.eta,
-            .lambda = try allocator.dupe(types.ValidatorData, self.lambda),
-            .kappa = try allocator.dupe(types.ValidatorData, self.kappa),
-            .gamma_k = try allocator.dupe(types.ValidatorData, self.gamma_k),
-            .iota = try allocator.dupe(types.ValidatorData, self.iota),
+            .lambda = try self.lambda.deepClone(allocator),
+            .kappa = try self.kappa.deepClone(allocator),
+            .gamma_k = try self.gamma_k.deepClone(allocator),
+            .iota = try self.iota.deepClone(allocator),
             .gamma_a = try allocator.dupe(types.TicketBody, self.gamma_a),
-            .gamma_s = switch (self.gamma_s) {
-                .tickets => |tickets| types.GammaS{ .tickets = try allocator.dupe(types.TicketBody, tickets) },
-                .keys => |keys| types.GammaS{ .keys = try allocator.dupe(types.BandersnatchKey, keys) },
-            },
+            .gamma_s = try self.gamma_s.deepClone(allocator),
             .gamma_z = self.gamma_z,
         };
     }

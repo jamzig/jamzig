@@ -55,10 +55,10 @@ pub const Output = union(enum) {
             .err => {},
             .ok => |marks| {
                 if (marks.epoch_mark) |epoch_mark| {
-                    allocator.free(epoch_mark.validators);
+                    epoch_mark.deinit(allocator);
                 }
                 if (marks.tickets_mark) |tickets_mark| {
-                    allocator.free(tickets_mark.tickets);
+                    tickets_mark.deinit(allocator);
                 }
             },
         }

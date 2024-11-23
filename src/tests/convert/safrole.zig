@@ -105,9 +105,9 @@ fn convertHexBytesToArray(comptime size: u32, from: tv_types.hex.HexBytes, to: *
     }
 }
 
-fn convertValidatorDataSlice(allocator: Allocator, from: []tv_lib_safrole.ValidatorData) Error![]types.ValidatorData {
-    const to = try allocator.alloc(types.ValidatorData, from.len);
-    for (from, to) |*from_validator, *to_validator| {
+fn convertValidatorDataSlice(allocator: Allocator, from: []tv_lib_safrole.ValidatorData) Error!types.ValidatorSet {
+    const to = try types.ValidatorSet.init(allocator, @intCast(from.len));
+    for (from, to.items()) |*from_validator, *to_validator| {
         convertValidatorData(from_validator, to_validator);
     }
     return to;

@@ -166,9 +166,9 @@ pub fn transition(
         const iota = post_state.iota;
 
         post_state.kappa = gamma_k;
-        post_state.gamma_k = phiZeroOutOffenders(try allocator.dupe(types.ValidatorData, iota));
+        post_state.gamma_k = phiZeroOutOffenders(try iota.deepClone(allocator));
         post_state.lambda = kappa;
-        allocator.free(lamda);
+        lamda.deinit(allocator);
 
         // post_state.iota seems to stay the same
 
@@ -352,11 +352,11 @@ fn bandersnatchRingRoot(allocator: std.mem.Allocator, gamma_k: types.GammaK) !ty
     return commitment;
 }
 
+// TODO: this can be placed on the ValidatorSet now
 fn extractBandersnatchKeys(allocator: std.mem.Allocator, gamma_k: types.GammaK) ![]types.BandersnatchKey {
-    const keys = try allocator.alloc(types.BandersnatchKey, gamma_k.len);
-    errdefer allocator.free(keys);
+    const keys = try allocator.alloc(types.BandersnatchKey, gamma_k.len());
 
-    for (gamma_k, 0..) |validator, i| {
+    for (gamma_k.items(), 0..) |validator, i| {
         keys[i] = validator.bandersnatch;
     }
 
@@ -364,7 +364,7 @@ fn extractBandersnatchKeys(allocator: std.mem.Allocator, gamma_k: types.GammaK) 
 }
 
 // 58. PHI: Zero out any offenders on post_state.iota
-fn phiZeroOutOffenders(data: []types.ValidatorData) []types.ValidatorData {
+fn phiZeroOutOffenders(data: types.ValidatorSet) types.ValidatorSet {
     // TODO: (58) Zero out any offenders on post_state.iota, The origin of
     // the offenders is explained in section 10.
     return data;

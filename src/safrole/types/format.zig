@@ -65,7 +65,7 @@ pub fn formatState(state: safrole_types.State, writer: anytype) !void {
     try writer.print("  gamma_z: 0x{x}\n", .{std.fmt.fmtSliceHexLower(&state.gamma_z)});
 
     // Calculate and print total validators
-    const totalValidators = state.lambda.len + state.kappa.len + state.gamma_k.len + state.iota.len;
+    const totalValidators = state.lambda.len() + state.kappa.len() + state.gamma_k.len() + state.iota.len();
     try writer.writeAll("\n---- Total Validators ----\n");
     try writer.print("  {} validators\n", .{totalValidators});
 
@@ -133,9 +133,9 @@ fn formatKeySlice(writer: anytype, name: []const u8, keys: []const types.Banders
     }
 }
 
-fn formatValidatorSlice(writer: anytype, name: []const u8, validators: []const types.ValidatorData) !void {
-    try writer.print("  {s}: {} validators\n", .{ name, validators.len });
-    for (validators, 0..) |validator, i| {
+fn formatValidatorSlice(writer: anytype, name: []const u8, validators: types.ValidatorSet) !void {
+    try writer.print("  {s}: {} validators\n", .{ name, validators.len() });
+    for (validators.items(), 0..) |validator, i| {
         try writer.print("    Validator {}:\n", .{i});
         try writer.print("      bandersnatch: 0x{x}\n", .{std.fmt.fmtSliceHexLower(&validator.bandersnatch)});
         try writer.print("      ed25519: 0x{x}\n", .{std.fmt.fmtSliceHexLower(&validator.ed25519)});
