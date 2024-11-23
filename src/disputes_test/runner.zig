@@ -23,10 +23,10 @@ pub fn runDisputeTest(allocator: std.mem.Allocator, params: Params, test_vector:
     defer extrinsic_disputes.deinit(allocator);
 
     const kappa = try converters.convertValidatorData(allocator, test_vector.pre_state.kappa);
-    defer allocator.free(kappa);
+    defer kappa.deinit(allocator);
 
     const lambda = try converters.convertValidatorData(allocator, test_vector.pre_state.lambda);
-    defer allocator.free(lambda);
+    defer lambda.deinit(allocator);
 
     const current_epoch = test_vector.pre_state.tau / params.epoch_length;
     const transition_result = stf.transitionDisputes(allocator, params.validators_count, &current_psi, kappa, lambda, &current_rho, current_epoch, extrinsic_disputes);

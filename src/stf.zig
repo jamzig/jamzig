@@ -341,7 +341,7 @@ pub fn transitionDisputes(
         types.ValidatorData,
         types.Ed25519Key,
         allocator,
-        current_kappa,
+        current_kappa.items(),
         validator_key,
     );
     defer allocator.free(current_kappa_keys);
@@ -350,7 +350,7 @@ pub fn transitionDisputes(
         types.ValidatorData,
         types.Ed25519Key,
         allocator,
-        current_lambda,
+        current_lambda.items(),
         validator_key,
     );
     defer allocator.free(current_lambda_keys);
