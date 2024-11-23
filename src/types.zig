@@ -211,6 +211,14 @@ pub const ValidatorSet = struct {
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
         allocator.free(self.validators);
     }
+
+    pub fn merge(self: *@This(), other: @This()) !void {
+        if (self.validators.len != other.validators.len) {
+            return error.LengthMismatch;
+        }
+
+        @memcpy(self.validators, other.validators);
+    }
 };
 
 // Safrole types

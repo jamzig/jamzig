@@ -174,6 +174,8 @@ test "jamtestnet: block import" {
 
             var new_state = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, &jam_state, &block.value);
             defer new_state.deinit(allocator);
+
+            try jam_state.merge(&new_state, allocator);
         }
         break;
     }

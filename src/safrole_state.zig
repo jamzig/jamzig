@@ -35,4 +35,32 @@ pub const Gamma = struct {
         self.s.deinit(allocator);
         allocator.free(self.a);
     }
+
+    /// Merges another Gamma into this one, handling all allocations
+    pub fn merge(
+        self: *Gamma,
+        other: *const Gamma,
+        allocator: std.mem.Allocator,
+    ) !void {
+        // Use ValidatorSet merge for k
+        try self.k.merge(other.k);
+
+        // For GammaS, need to handle the union and copy data
+        self.s.deinit(allocator);
+        switch (other.s) {
+            .tickets => |tickets| {
+                self.s = .{ .tickets = try allocator.dupe(types.TicketBody, tickets) };
+            },
+            .keys => |keys| {
+                self.s = .{ .keys = try allocator.dupe(types.BandersnatchKey, keys) };
+            },
+        }
+
+        // Copy a
+        allocator.free(self.a);
+        self.a = try allocator.dupe(types.TicketBody, other.a);
+
+        // Merge z using stack
+        self.z = other.z;
+    }
 };

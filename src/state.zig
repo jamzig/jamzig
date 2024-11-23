@@ -152,39 +152,41 @@ pub fn JamState(comptime params: Params) type {
             _: std.mem.Allocator,
         ) !JamState(params) {
             return JamState(params){
+                .tau = 0,
+                .eta = [_]types.Entropy{[_]u8{0} ** 32} ** 4,
+
                 .alpha = null,
                 .beta = null,
-                .gamma = null,
+                .chi = null,
                 .delta = null,
-                .eta = [_]types.Entropy{[_]u8{0} ** 32} ** 4,
+                .gamma = null,
                 .iota = null,
                 .kappa = null,
                 .lambda = null,
-                .rho = null,
-                .tau = 0,
                 .phi = null,
-                .chi = null,
-                .psi = null,
                 .pi = null,
-                .xi = null,
+                .psi = null,
+                .rho = null,
                 .theta = null,
+                .xi = null,
             };
         }
 
         /// Deinitialize and free resources
         pub fn deinit(self: *JamState(params), allocator: std.mem.Allocator) void {
+            // NOTE: alpha has no allocations, yet?
             if (self.beta) |*beta| beta.deinit(); // TODO: check and make consistent to take allocator
+            if (self.chi) |*chi| chi.deinit();
             if (self.delta) |*delta| delta.deinit();
             if (self.gamma) |*gamma| gamma.deinit(allocator);
             if (self.iota) |iota| iota.deinit(allocator);
             if (self.kappa) |kappa| kappa.deinit(allocator);
             if (self.lambda) |lambda| lambda.deinit(allocator);
             if (self.phi) |*phi| phi.deinit();
-            if (self.chi) |*chi| chi.deinit();
-            if (self.psi) |*psi| psi.deinit();
             if (self.pi) |*pi| pi.deinit();
-            if (self.xi) |*xi| xi.deinit();
+            if (self.psi) |*psi| psi.deinit();
             if (self.theta) |*theta| theta.deinit();
+            if (self.xi) |*xi| xi.deinit();
         }
 
         /// Format
@@ -199,23 +201,58 @@ pub fn JamState(comptime params: Params) type {
 
         /// Merge another state into this one
         /// If a field is non-null in the source state, it will override the corresponding field in this state
-        pub fn merge(self: *JamState(params), source: JamState(params)) void {
-            if (source.alpha) |alpha| self.alpha = alpha;
-            if (source.beta) |beta| self.beta = beta;
-            if (source.gamma) |gamma| self.gamma = gamma;
-            if (source.delta) |delta| self.delta = delta;
-            if (source.eta) |eta| self.eta = eta;
-            if (source.iota) |iota| self.iota = iota;
-            if (source.kappa) |kappa| self.kappa = kappa;
-            if (source.lambda) |lambda| self.lambda = lambda;
-            if (source.rho) |rho| self.rho = rho;
-            if (source.tau) |tau| self.tau = tau;
-            if (source.phi) |phi| self.phi = phi;
-            if (source.chi) |chi| self.chi = chi;
-            if (source.psi) |psi| self.psi = psi;
-            if (source.pi) |pi| self.pi = pi;
-            if (source.xi) |xi| self.xi = xi;
-            if (source.theta) |theta| self.theta = theta;
+        /// NOTE: Performs a simple state merge operation for Milestone 1.
+        /// Future versions will implement optimized merge strategies.
+        pub fn merge(
+            self: *JamState(params),
+            other: *const JamState(params),
+            allocator: std.mem.Allocator,
+        ) !void {
+            if (other.tau) |tau| self.tau = tau;
+            if (other.eta) |eta| self.eta = eta;
+
+            // if (source.alpha) |alpha| self.alpha = alpha;
+            // if (source.beta) |beta| self.beta = beta;
+            // if (source.chi) |chi| self.chi = chi;
+            // if (source.delta) |delta| self.delta = delta;
+            if (other.gamma) |*gamma| {
+                if (self.gamma) |*self_gamma| {
+                    try self_gamma.merge(gamma, allocator);
+                } else {
+                    self.gamma = try Gamma.init(allocator, params.validators_count);
+                    try self.gamma.?.merge(gamma, allocator);
+                }
+            }
+            if (other.iota) |iota| {
+                if (self.iota) |*self_iota| {
+                    try self_iota.merge(iota);
+                } else {
+                    self.iota = try types.ValidatorSet.init(allocator, params.validators_count);
+                    try self.iota.?.merge(iota);
+                }
+            }
+            if (other.kappa) |kappa| {
+                if (self.kappa) |*self_kappa| {
+                    try self_kappa.merge(kappa);
+                } else {
+                    self.kappa = try types.ValidatorSet.init(allocator, params.validators_count);
+                    try self.kappa.?.merge(kappa);
+                }
+            }
+            if (other.lambda) |lambda| {
+                if (self.lambda) |*self_lambda| {
+                    try self_lambda.merge(lambda);
+                } else {
+                    self.lambda = try types.ValidatorSet.init(allocator, params.validators_count);
+                    try self.lambda.?.merge(lambda);
+                }
+            }
+            // if (source.phi) |phi| self.phi = phi;
+            // if (source.pi) |pi| self.pi = pi;
+            // if (source.psi) |psi| self.psi = psi;
+            // if (source.rho) |rho| self.rho = rho;
+            // if (source.theta) |theta| self.theta = theta;
+            // if (source.xi) |xi| self.xi = xi;
         }
     };
 }
