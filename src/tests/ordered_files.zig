@@ -8,7 +8,7 @@ pub const OrderedFileList = struct {
     allocator: Allocator,
     files: ArrayList([]const u8),
 
-    pub fn items(self: *@This()) [][]const u8 {
+    pub fn items(self: *const @This()) [][]const u8 {
         return self.files.items;
     }
 
@@ -29,8 +29,8 @@ pub fn getOrderedFiles(allocator: Allocator, dir_path: []const u8) !OrderedFileL
 
     while (try dir_iterator.next()) |entry| {
         if (entry.kind == .file) {
-            const name = try allocator.dupe(u8, entry.name);
-            try files.append(name);
+            const full_path = try std.fs.path.join(allocator, &[_][]const u8{ dir_path, entry.name });
+            try files.append(full_path);
         }
     }
 

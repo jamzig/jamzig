@@ -49,8 +49,13 @@ const GenesisJson = struct {
 };
 
 fn buildGenesisState(comptime params: jam_params.Params, allocator: std.mem.Allocator, json_str: []const u8) !state.JamState(params) {
-    var parsed = std.json.parseFromSlice(GenesisJson, allocator, json_str, .{ .ignore_unknown_fields = true, .parse_numbers = false }) catch |err| {
-        std.debug.print("Could not parse GenesisJson", .{});
+    var diagnostics = std.json.Diagnostics{};
+    var scanner = std.json.Scanner.initCompleteInput(allocator, json_str);
+    scanner.enableDiagnostics(&diagnostics);
+    defer scanner.deinit();
+
+    var parsed = std.json.parseFromTokenSource(GenesisJson, allocator, &scanner, .{ .ignore_unknown_fields = true, .parse_numbers = false }) catch |err| {
+        std.debug.print("Could not parse genesis.json: {}\n{any}", .{ err, diagnostics });
         return err;
     };
     defer parsed.deinit();
@@ -151,33 +156,36 @@ test "jamtestnet: block import" {
     // src/stf_test/jamtestnet/traces/safrole/jam_duna/traces
     // src/stf_test/jamtestnet/traces/safrole/jam_duna/state_snapshots0
 
+    const base_path = "src/stf_test/jamtestnet/traces/safrole/jam_duna/blocks";
+    const getOrderedFiles = @import("tests/ordered_files.zig").getOrderedFiles;
+    var trace_files = try getOrderedFiles(allocator, base_path);
+    defer trace_files.deinit();
     // generate the block file from epoch 373496..=373500 and and for each of
     // those number 0..12 epochs
-    const base_path = "src/stf_test/jamtestnet/traces/safrole/jam_duna/blocks";
     // iterate the epochs
-    for (373496..373500) |epoch| {
-        // iterate the slots within one epoch
-        for (0..12) |number| {
-            const block_path = try std.fmt.allocPrint(allocator, "{s}/{d}_{d}.bin", .{ base_path, epoch, number });
-            defer allocator.free(block_path);
-            std.debug.print("Generated block path: {s}\n", .{block_path});
-
-            // Slurp the binary file
-            var slurped = try slurpBin(allocator, block_path);
-            defer slurped.deinit();
-
-            // Now decode the block
-            const block = try codec.deserialize(types.Block, jam_params.TINY_PARAMS, allocator, slurped.buffer);
-            defer block.deinit();
-
-            std.debug.print("block {}\n", .{block.value.header.slot});
-
-            var new_state = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, &jam_state, &block.value);
-            defer new_state.deinit(allocator);
-
-            try jam_state.merge(&new_state, allocator);
+    std.debug.print("\n", .{});
+    for (trace_files.items()) |trace_file| {
+        // we are only insterested in the bin files
+        if (!std.mem.endsWith(u8, trace_file, ".bin")) {
+            continue;
         }
-        break;
+
+        std.debug.print("deserializing {s}\n", .{trace_file});
+
+        // Slurp the binary file
+        var slurped = try slurpBin(allocator, trace_file);
+        defer slurped.deinit();
+
+        // Now decode the block
+        const block = try codec.deserialize(types.Block, jam_params.TINY_PARAMS, allocator, slurped.buffer);
+        defer block.deinit();
+
+        std.debug.print("block {}\n", .{block.value.header.slot});
+
+        var new_state = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, &jam_state, &block.value);
+        defer new_state.deinit(allocator);
+
+        try jam_state.merge(&new_state, allocator);
     }
     // NOTE: there is one more 373500_0.bin which we can do later
 
