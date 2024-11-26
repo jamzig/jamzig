@@ -11,7 +11,7 @@ const EncodeSchema = struct {
     a: types.GammaA,
 };
 
-pub fn encode(gamma: *const state.Gamma, writer: anytype) !void {
+pub fn encode(gamma: anytype, writer: anytype) !void {
     const x: u8 = switch (gamma.s) {
         .keys => 1,
         .tickets => 0,

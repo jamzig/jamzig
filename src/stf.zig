@@ -285,7 +285,7 @@ const safrole = @import("safrole.zig");
 pub fn transitionSafrole(
     comptime params: Params,
     allocator: Allocator,
-    current_gamma: *const state.Gamma,
+    current_gamma: *const state.Gamma(params.validators_count),
     current_eta: *const state.Eta,
     current_iota: *const state.Iota,
     current_kappa: *const state.Kappa,

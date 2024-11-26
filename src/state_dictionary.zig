@@ -326,7 +326,7 @@ pub fn buildStateMerklizationDictionary(
 
         // Gamma (4)
         const gamma_key = constructSimpleByteKey(4);
-        var gamma_managed = try getOrInitManaged(allocator, &state.gamma, .{ allocator, params.validators_count });
+        var gamma_managed = try getOrInitManaged(allocator, &state.gamma, .{allocator});
         defer gamma_managed.deinit(allocator);
         const gamma_value = try encodeAndOwnSlice(
             allocator,

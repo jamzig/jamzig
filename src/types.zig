@@ -263,6 +263,42 @@ pub const ValidatorSet = struct {
     }
 };
 
+pub fn ValidatorSetFixed(comptime validators_count: u32) type {
+    return struct {
+        validators: [validators_count]ValidatorData,
+
+        pub fn init() !@This() {
+            return @This(){ .validators = std.mem.zeroes([validators_count]ValidatorData) };
+        }
+
+        pub fn len(self: @This()) usize {
+            return self.validators.len;
+        }
+
+        pub fn items(self: @This()) []ValidatorData {
+            return self.validators;
+        }
+
+        pub fn deepClone(self: *@This(), allocator: std.mem.Allocator) *@This() {
+            var cloned = try allocator.create(@This());
+            cloned.validators = self.validators;
+
+            return cloned;
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            allocator.destroy(self);
+        }
+
+        pub fn merge(self: *@This(), other: *@This()) !void {
+            if (self.validators.len != other.validators.len) {
+                return error.LengthMismatch;
+            }
+            std.mem.copyForwards(ValidatorData, &self.validators, &other.validators);
+        }
+    };
+}
+
 // Safrole types
 pub const Lambda = ValidatorSet;
 pub const Kappa = ValidatorSet;
