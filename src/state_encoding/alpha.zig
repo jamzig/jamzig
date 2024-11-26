@@ -5,7 +5,7 @@ const authorization = @import("../authorization.zig");
 const Alpha = authorization.Alpha;
 
 /// Encodes pools where each pool is length encoded. Length of pools is assumed to be C
-pub fn encode(self: *const Alpha, writer: anytype) !void {
+pub fn encode(self: anytype, writer: anytype) !void {
     // Encode pools
     for (self.pools) |pool| {
         try writer.writeAll(encoder.encodeInteger(pool.len).as_slice());
