@@ -26,48 +26,7 @@ pub const JamProcessingOutput = struct {
     state_snapshot: OutputFormats,
 
     pub fn parseTraceJson(self: *const JamProcessingOutput, allocator: Allocator) !MerklizationDictionary {
-        const slurp = @import("../utils/slurp.zig");
-        // Read the JSON file
-        var content = try slurp.slurpFile(allocator, self.trace.json.path);
-        defer content.deinit();
-
-        // Parse JSON
-        var parsed = try std.json.parseFromSlice(std.json.Value, allocator, content.buffer, .{});
-        defer parsed.deinit();
-
-        var dict = MerklizationDictionary.init(allocator);
-        errdefer dict.deinit();
-
-        // Extract keyvals array
-        const root = parsed.value;
-        const keyvals = root.object.get("keyvals").?.array;
-
-        // Process each keyval pair
-        for (keyvals.items) |pair| {
-            const key = pair.array.items[0].string;
-            const value = pair.array.items[1].string;
-
-            const key_bytes = try hex_bytes.hexStringToBytes(allocator, key[2..]);
-            errdefer allocator.free(key_bytes);
-            const value_bytes = try hex_bytes.hexStringToBytes(allocator, value[2..]);
-            errdefer allocator.free(value_bytes);
-
-            if (key_bytes.len != 32) {
-                std.debug.print("Invalid key length: got {d} bytes, expected 32. Key hex: {s}\n", .{
-                    key_bytes.len,
-                    key,
-                });
-                return error.KeyError;
-            }
-
-            var key_array: [32]u8 = undefined;
-            @memcpy(&key_array, key_bytes);
-            allocator.free(key_bytes);
-
-            try dict.entries.put(key_array, value_bytes);
-        }
-
-        return dict;
+        return loadStateDictionaryDump(allocator, self.trace.json.path);
     }
 };
 
@@ -117,6 +76,52 @@ fn isValidJamFilename(filename: []const u8) bool {
     }
 
     return true;
+}
+
+// TODO: move this into serparate file, loaders of the dumps
+pub fn loadStateDictionaryDump(allocator: Allocator, file_path: []const u8) !MerklizationDictionary {
+    const slurp = @import("../utils/slurp.zig");
+    // Read the JSON file
+    var content = try slurp.slurpFile(allocator, file_path);
+    defer content.deinit();
+
+    // Parse JSON
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, content.buffer, .{});
+    defer parsed.deinit();
+
+    var dict = MerklizationDictionary.init(allocator);
+    errdefer dict.deinit();
+
+    // Extract keyvals array
+    const root = parsed.value;
+    const keyvals = root.object.get("keyvals").?.array;
+
+    // Process each keyval pair
+    for (keyvals.items) |pair| {
+        const key = pair.array.items[0].string;
+        const value = pair.array.items[1].string;
+
+        const key_bytes = try hex_bytes.hexStringToBytes(allocator, key[2..]);
+        errdefer allocator.free(key_bytes);
+        const value_bytes = try hex_bytes.hexStringToBytes(allocator, value[2..]);
+        errdefer allocator.free(value_bytes);
+
+        if (key_bytes.len != 32) {
+            std.debug.print("Invalid key length: got {d} bytes, expected 32. Key hex: {s}\n", .{
+                key_bytes.len,
+                key,
+            });
+            return error.KeyError;
+        }
+
+        var key_array: [32]u8 = undefined;
+        @memcpy(&key_array, key_bytes);
+        allocator.free(key_bytes);
+
+        try dict.entries.put(key_array, value_bytes);
+    }
+
+    return dict;
 }
 
 const FilteredFiles = struct {

@@ -92,6 +92,93 @@ fn sliceToFixedArray(comptime size: usize, slice: []const u8) [size]u8 {
 /// @return A hash map where keys are 32-byte arrays and values are byte slices representing
 ///         the encoded state components. The function may return an error if memory allocation
 ///         fails or if encoding any state component fails.
+pub const DiffType = enum {
+    added,
+    removed,
+    changed,
+};
+
+pub const DiffEntry = struct {
+    key: [32]u8,
+    diff_type: DiffType,
+    old_value: ?[]const u8 = null,
+    new_value: ?[]const u8 = null,
+
+    pub fn format(
+        self: DiffEntry,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+        allocator: std.mem.Allocator,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        try writer.print("{s} key: {s}", .{
+            @tagName(self.diff_type),
+            std.fmt.fmtSliceHexLower(&self.key),
+        });
+
+        switch (self.diff_type) {
+            .added => try writer.print(", value(len={d}): {s}", .{
+                self.new_value.?.len,
+                std.fmt.fmtSliceHexLower(self.new_value.?[0..@min(self.new_value.?.len, 160)]),
+            }),
+            .removed => try writer.print(", value(len={d}): {s}", .{
+                self.old_value.?.len,
+                std.fmt.fmtSliceHexLower(self.old_value.?[0..@min(self.old_value.?.len, 160)]),
+            }),
+            .changed => {
+                try writer.print("\n", .{});
+                try writer.print("old(len={d}):     new(len={d}):\n", .{ self.old_value.?.len, self.new_value.?.len });
+
+                const old_hex = try std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexLower(self.old_value.?)});
+                defer allocator.free(old_hex);
+                const new_hex = try std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexLower(self.new_value.?)});
+                defer allocator.free(new_hex);
+
+                var i: usize = 0;
+                while (i < @max(old_hex.len, new_hex.len)) : (i += 40) {
+                    const old_chunk = if (i < old_hex.len) old_hex[i..@min(i + 40, old_hex.len)] else "";
+                    const new_chunk = if (i < new_hex.len) new_hex[i..@min(i + 40, new_hex.len)] else "";
+
+                    try writer.print("{s: <40} {s: <40}\n", .{ old_chunk, new_chunk });
+                }
+            },
+        }
+        try writer.writeByte('\n');
+    }
+};
+
+pub const MerklizationDictionaryDiff = struct {
+    entries: std.ArrayList(DiffEntry),
+
+    pub fn init(allocator: std.mem.Allocator) MerklizationDictionaryDiff {
+        return .{
+            .entries = std.ArrayList(DiffEntry).init(allocator),
+        };
+    }
+
+    pub fn has_changes(self: *const MerklizationDictionaryDiff) bool {
+        return self.entries.items.len > 0;
+    }
+
+    pub fn deinit(self: *MerklizationDictionaryDiff) void {
+        self.entries.deinit();
+    }
+
+    pub fn format(
+        self: MerklizationDictionaryDiff,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        for (self.entries.items) |entry| {
+            try entry.format(fmt, options, writer, self.entries.allocator);
+        }
+    }
+};
+
 pub const MerklizationDictionary = struct {
     entries: std.AutoHashMap([32]u8, []const u8),
 
@@ -121,6 +208,55 @@ pub const MerklizationDictionary = struct {
             self.entries.allocator.free(entry.*);
         }
         self.entries.deinit();
+    }
+
+    /// Compare this dictionary with another and return their differences
+    pub fn diff(self: *const MerklizationDictionary, other: *const MerklizationDictionary) !MerklizationDictionaryDiff {
+        var result = MerklizationDictionaryDiff.init(self.entries.allocator);
+        errdefer result.deinit();
+
+        // Check for added and changed entries
+        var other_it = other.entries.iterator();
+        while (other_it.next()) |other_entry| {
+            const key = other_entry.key_ptr.*;
+            const new_value = other_entry.value_ptr.*;
+
+            if (self.entries.get(key)) |old_value| {
+                // Entry exists in both - check if changed
+                if (!std.mem.eql(u8, old_value, new_value)) {
+                    try result.entries.append(.{
+                        .key = key,
+                        .diff_type = .changed,
+                        .old_value = old_value,
+                        .new_value = new_value,
+                    });
+                }
+            } else {
+                // Entry only in other - added
+                try result.entries.append(.{
+                    .key = key,
+                    .diff_type = .added,
+                    .new_value = new_value,
+                });
+            }
+        }
+
+        // Check for removed entries
+        var self_it = self.entries.iterator();
+        while (self_it.next()) |self_entry| {
+            const key = self_entry.key_ptr.*;
+            const old_value = self_entry.value_ptr.*;
+
+            if (!other.entries.contains(key)) {
+                try result.entries.append(.{
+                    .key = key,
+                    .diff_type = .removed,
+                    .old_value = old_value,
+                });
+            }
+        }
+
+        return result;
     }
 
     pub fn format(
@@ -361,6 +497,70 @@ test "constructByteServiceIndexKey" {
     for (key[5..]) |byte| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
+}
+
+test "MerklizationDictionary diff" {
+    const allocator = testing.allocator;
+
+    var dict1 = MerklizationDictionary.init(allocator);
+    defer dict1.deinit();
+
+    var dict2 = MerklizationDictionary.init(allocator);
+    defer dict2.deinit();
+
+    // Setup some test data
+    const key1 = constructSimpleByteKey(1);
+    const key2 = constructSimpleByteKey(2);
+    const key3 = constructSimpleByteKey(3);
+
+    const val1 = try allocator.dupe(u8, &[_]u8{ 1, 1, 1 });
+    const val2 = try allocator.dupe(u8, &[_]u8{ 2, 2, 2 });
+    const val3 = try allocator.dupe(u8, &[_]u8{ 3, 3, 3 });
+    const val2_changed = try allocator.dupe(u8, &[_]u8{ 4, 4, 4 });
+
+    // Dict1: key1->val1, key2->val2
+    try dict1.entries.put(key1, val1);
+    try dict1.entries.put(key2, val2);
+
+    // Dict2: key2->val2_changed, key3->val3
+    try dict2.entries.put(key2, val2_changed);
+    try dict2.entries.put(key3, val3);
+
+    // Compare
+    var diff = try dict1.diff(&dict2);
+    defer diff.deinit();
+
+    // Verify results
+    try testing.expectEqual(@as(usize, 3), diff.entries.items.len);
+
+    var found_removed = false;
+    var found_changed = false;
+    var found_added = false;
+
+    for (diff.entries.items) |entry| {
+        switch (entry.diff_type) {
+            .removed => {
+                try testing.expect(std.mem.eql(u8, &key1, &entry.key));
+                try testing.expect(std.mem.eql(u8, val1, entry.old_value.?));
+                found_removed = true;
+            },
+            .changed => {
+                try testing.expect(std.mem.eql(u8, &key2, &entry.key));
+                try testing.expect(std.mem.eql(u8, val2, entry.old_value.?));
+                try testing.expect(std.mem.eql(u8, val2_changed, entry.new_value.?));
+                found_changed = true;
+            },
+            .added => {
+                try testing.expect(std.mem.eql(u8, &key3, &entry.key));
+                try testing.expect(std.mem.eql(u8, val3, entry.new_value.?));
+                found_added = true;
+            },
+        }
+    }
+
+    try testing.expect(found_removed);
+    try testing.expect(found_changed);
+    try testing.expect(found_added);
 }
 
 test "constructServiceIndexHashKey" {

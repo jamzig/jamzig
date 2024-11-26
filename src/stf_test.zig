@@ -22,6 +22,19 @@ test "jamtestnet: jamduna safrole import" {
     var parent_state_dict = try jam_state.buildStateMerklizationDictionary(allocator);
     defer parent_state_dict.deinit();
 
+    // load the expecte genesis state
+    var expected_genesis_state_dict = try jamtestnet.loadStateDictionaryDump(
+        allocator,
+        "src/stf_test/jamtestnet/traces/safrole/jam_duna/traces/genesis.json",
+    );
+
+    var genesis_state_diff = try expected_genesis_state_dict.diff(&parent_state_dict);
+    defer genesis_state_diff.deinit();
+    if (genesis_state_diff.has_changes()) {
+        std.debug.print("\nGenesis State diff:\n\n{any}\n", .{genesis_state_diff});
+        return error.InvalidGenesisState;
+    }
+
     var parent_state_root = try jam_state.buildStateRoot(allocator);
 
     var outputs = try jamtestnet.collectJamOutputs("src/stf_test/jamtestnet/traces/safrole/jam_duna/", allocator);
@@ -58,6 +71,10 @@ test "jamtestnet: jamduna safrole import" {
             defer expected_state_dict.deinit();
 
             std.debug.print("\nExpected State Dictionary:\n{any}\n", .{expected_state_dict});
+
+            var delta = try expected_state_dict.diff(&parent_state_dict);
+            defer delta.deinit();
+            std.debug.print("\n State diff:\n{any}\n", .{delta});
 
             return error.ParentStateRootsDoNotMatch;
         }
