@@ -209,7 +209,7 @@ pub fn serializeAlloc(comptime T: type, comptime params: anytype, allocator: std
     return list.toOwnedSlice();
 }
 
-fn recursiveSerializeLeaky(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
+pub fn recursiveSerializeLeaky(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
     trace(@src(), "start - type: {s}", .{@typeName(T)});
     defer trace(@src(), "recursiveSerializeLeaky: end - type: {s}", .{@typeName(T)});
 

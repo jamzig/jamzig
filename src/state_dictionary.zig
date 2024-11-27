@@ -360,7 +360,7 @@ pub fn buildStateMerklizationDictionary(
         var gamma_managed = try getOrInitManaged(allocator, &state.gamma, .{allocator});
         defer gamma_managed.deinit(allocator);
         var buffer = std.ArrayList(u8).init(allocator);
-        try state_encoder.encodeGamma(params.validators_count, gamma_managed.ptr, buffer.writer());
+        try state_encoder.encodeGamma(params, gamma_managed.ptr, buffer.writer());
         const gamma_value = try buffer.toOwnedSlice();
         try map.put(gamma_key, gamma_value);
 

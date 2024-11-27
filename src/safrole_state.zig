@@ -2,19 +2,19 @@ const std = @import("std");
 const types = @import("types.zig");
 
 // TODO: move this to a seperate file
-pub fn Gamma(comptime validators_count: u32) type {
+pub fn Gamma(comptime validators_count: u32, comptime epoch_length: u32) type {
     return struct {
         k: types.GammaK,
         z: types.GammaZ,
         s: types.GammaS,
         a: types.GammaA,
 
-        pub fn init(allocator: std.mem.Allocator) !Gamma(validators_count) {
-            return Gamma(validators_count){
+        pub fn init(allocator: std.mem.Allocator) !Gamma(validators_count, epoch_length) {
+            return Gamma(validators_count, epoch_length){
                 .k = try types.GammaK.init(allocator, validators_count),
                 .z = std.mem.zeroes(types.BandersnatchVrfRoot),
-                .s = .{ .tickets = try allocator.alloc(types.TicketBody, validators_count) },
-                .a = try allocator.alloc(types.TicketBody, validators_count),
+                .s = .{ .tickets = try allocator.alloc(types.TicketBody, epoch_length) },
+                .a = &[_]types.TicketBody{},
             };
         }
 

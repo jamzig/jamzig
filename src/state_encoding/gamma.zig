@@ -1,34 +1,46 @@
 const std = @import("std");
 const state = @import("../state.zig");
 const types = @import("../types.zig");
-const serialize = @import("../codec.zig").serialize;
+const codec = @import("../codec.zig");
+const jam_params = @import("../jam_params.zig");
 
-const EncodeSchema = struct {
-    validators: []types.ValidatorData,
-    z: types.BandersnatchVrfRoot,
-    x: u8,
-    s: types.GammaS,
-    a: types.GammaA,
+pub fn encode(comptime params: jam_params.Params, gamma: *const state.Gamma(params.validators_count, params.epoch_length), writer: anytype) !void {
+    // Serialize validators array
 
-    pub fn validators_size(validators_count: u32) usize {
-        return @intCast(validators_count);
+    std.debug.assert(gamma.k.validators.len == params.validators_count);
+
+    for (gamma.k.validators) |validator| {
+        try codec.serialize(types.ValidatorData, params, writer, validator);
     }
-};
 
-pub fn encode(comptime validators_count: u32, gamma: anytype, writer: anytype) !void {
-    const x: u8 = switch (gamma.s) {
-        .keys => 1,
-        .tickets => 0,
-    };
-    const data = EncodeSchema{
-        .validators = gamma.k.validators, // TODO this should be a count validators array
-        .z = gamma.z,
-        .x = x,
-        .s = gamma.s,
-        .a = gamma.a,
-    };
+    // Serialize VRF root
+    try codec.serialize(types.BandersnatchVrfRoot, params, writer, gamma.z);
 
-    try serialize(EncodeSchema, validators_count, writer, data);
+    // Serialize state-specific fields
+    switch (gamma.s) {
+        .tickets => |tickets| {
+            try codec.serialize(u8, params, writer, 0);
+
+            std.debug.assert(tickets.len == params.epoch_length);
+
+            for (tickets) |ticket| {
+                try codec.serialize(types.TicketBody, params, writer, ticket);
+            }
+        },
+        .keys => |keys| {
+            try codec.serialize(u8, params, writer, 1);
+
+            std.debug.assert(keys.len == params.epoch_length);
+
+            for (keys) |key| {
+                try codec.serialize(types.BandersnatchPublic, params, writer, key);
+            }
+        },
+    }
+
+    std.debug.print("gamma.a: {any}\n", .{gamma.a});
+
+    try codec.serialize([]types.TicketBody, params, writer, gamma.a);
 }
 
 //  _____         _   _

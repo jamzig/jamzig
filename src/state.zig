@@ -19,7 +19,7 @@ pub fn JamState(comptime params: Params) type {
 
         /// γ: List of current validators and their states, such as stakes and identities.
         /// Manipulated in: src/safrole.zig
-        gamma: ?Gamma(params.validators_count),
+        gamma: ?Gamma(params.validators_count, params.epoch_length),
 
         /// δ: Service accounts state, managing all service-related data (similar to smart contracts).
         /// Manipulated in: src/services.zig
@@ -85,7 +85,7 @@ pub fn JamState(comptime params: Params) type {
 
         /// Initialize Gamma component
         pub fn initGamma(self: *JamState(params), allocator: std.mem.Allocator) !void {
-            self.gamma = try Gamma(params.validators_count).init(allocator);
+            self.gamma = try Gamma(params.validators_count, params.epoch_length).init(allocator);
         }
 
         /// Initialize Delta component
@@ -231,7 +231,7 @@ pub fn JamState(comptime params: Params) type {
                 if (self.gamma) |*self_gamma| {
                     try self_gamma.merge(gamma, allocator);
                 } else {
-                    self.gamma = try Gamma(params.validators_count).init(allocator);
+                    self.gamma = try Gamma(params.validators_count, params.epoch_length).init(allocator);
                     try self.gamma.?.merge(gamma, allocator);
                 }
             }
