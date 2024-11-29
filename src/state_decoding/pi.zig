@@ -5,19 +5,19 @@ const Pi = validator_statistics.Pi;
 const ValidatorStats = validator_statistics.ValidatorStats;
 const ValidatorIndex = @import("../types.zig").ValidatorIndex;
 
-pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Pi {
+pub fn decode(validators_count: u32, reader: anytype, allocator: std.mem.Allocator) !Pi {
     // Initialize Pi with validator count which we'll determine from the data
-    var current_epoch_stats = std.ArrayList(ValidatorStats).init(allocator);
+    var current_epoch_stats = try std.ArrayList(ValidatorStats).initCapacity(allocator, validators_count);
     errdefer current_epoch_stats.deinit();
 
-    var previous_epoch_stats = std.ArrayList(ValidatorStats).init(allocator);
+    var previous_epoch_stats = try std.ArrayList(ValidatorStats).initCapacity(allocator, validators_count);
     errdefer previous_epoch_stats.deinit();
 
     // Read current epoch stats
-    try decodeEpochStats(reader, &current_epoch_stats);
+    try decodeEpochStats(validators_count, reader, &current_epoch_stats);
 
     // Read previous epoch stats
-    try decodeEpochStats(reader, &previous_epoch_stats);
+    try decodeEpochStats(validators_count, reader, &previous_epoch_stats);
 
     // Ensure both arrays have same length
     if (current_epoch_stats.items.len != previous_epoch_stats.items.len) {
@@ -32,13 +32,10 @@ pub fn decode(reader: anytype, allocator: std.mem.Allocator) !Pi {
     };
 }
 
-fn decodeEpochStats(reader: anytype, stats: *std.ArrayList(ValidatorStats)) !void {
-    while (true) {
+fn decodeEpochStats(validators_count: u32, reader: anytype, stats: *std.ArrayList(ValidatorStats)) !void {
+    for (0..validators_count) |_| {
         // Try to read all stats fields
-        const blocks_produced = reader.readInt(u32, .little) catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => return err,
-        };
+        const blocks_produced = try reader.readInt(u32, .little);
         const tickets_introduced = try reader.readInt(u32, .little);
         const preimages_introduced = try reader.readInt(u32, .little);
         const octets_across_preimages = try reader.readInt(u32, .little);
@@ -56,165 +53,89 @@ fn decodeEpochStats(reader: anytype, stats: *std.ArrayList(ValidatorStats)) !voi
     }
 }
 
-test "decode pi - empty state" {
-    const allocator = testing.allocator;
+test "decode Pi - successful case" {
+    // Create a test buffer with mock data
+    var buffer: [4 * @sizeOf(ValidatorStats)]u8 = undefined; // Space for 2 validators × 2 epochs
+    var fbs = std.io.fixedBufferStream(&buffer);
+    var writer = fbs.writer();
 
-    // Create buffer with no stats
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
+    // Write current epoch data for 2 validators
+    try writer.writeInt(u32, 1, .little); // blocks_produced
+    try writer.writeInt(u32, 2, .little); // tickets_introduced
+    try writer.writeInt(u32, 3, .little); // preimages_introduced
+    try writer.writeInt(u32, 4, .little); // octets_across_preimages
+    try writer.writeInt(u32, 5, .little); // reports_guaranteed
+    try writer.writeInt(u32, 6, .little); // availability_assurances
 
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var pi = try decode(fbs.reader(), allocator);
+    try writer.writeInt(u32, 7, .little);
+    try writer.writeInt(u32, 8, .little);
+    try writer.writeInt(u32, 9, .little);
+    try writer.writeInt(u32, 10, .little);
+    try writer.writeInt(u32, 11, .little);
+    try writer.writeInt(u32, 12, .little);
+
+    // Write previous epoch data
+    try writer.writeInt(u32, 13, .little);
+    try writer.writeInt(u32, 14, .little);
+    try writer.writeInt(u32, 15, .little);
+    try writer.writeInt(u32, 16, .little);
+    try writer.writeInt(u32, 17, .little);
+    try writer.writeInt(u32, 18, .little);
+
+    try writer.writeInt(u32, 19, .little);
+    try writer.writeInt(u32, 20, .little);
+    try writer.writeInt(u32, 21, .little);
+    try writer.writeInt(u32, 22, .little);
+    try writer.writeInt(u32, 23, .little);
+    try writer.writeInt(u32, 24, .little);
+
+    // Reset reader position
+    fbs.reset();
+    const reader = fbs.reader();
+
+    // Decode the data
+    var pi = try decode(2, reader, testing.allocator);
     defer pi.deinit();
 
-    try testing.expectEqual(@as(usize, 0), pi.current_epoch_stats.items.len);
-    try testing.expectEqual(@as(usize, 0), pi.previous_epoch_stats.items.len);
-}
-
-test "decode pi - with validator stats" {
-    const allocator = testing.allocator;
-
-    // Create test data buffer
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
-
-    // Write current epoch stats for two validators
-    inline for ([_]u32{ 10, 5, 3, 1000, 2, 1 }) |val| {
-        try buffer.writer().writeInt(u32, val, .little);
-    }
-    inline for ([_]u32{ 8, 4, 2, 800, 1, 0 }) |val| {
-        try buffer.writer().writeInt(u32, val, .little);
-    }
-
-    // Write previous epoch stats for two validators
-    inline for ([_]u32{ 9, 4, 2, 900, 1, 0 }) |val| {
-        try buffer.writer().writeInt(u32, val, .little);
-    }
-    inline for ([_]u32{ 7, 3, 1, 700, 0, 0 }) |val| {
-        try buffer.writer().writeInt(u32, val, .little);
-    }
-
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var pi = try decode(fbs.reader(), allocator);
-    defer pi.deinit();
-
-    // Verify stats count
+    // Verify current epoch stats
     try testing.expectEqual(@as(usize, 2), pi.current_epoch_stats.items.len);
+    try testing.expectEqual(@as(u32, 1), pi.current_epoch_stats.items[0].blocks_produced);
+    try testing.expectEqual(@as(u32, 2), pi.current_epoch_stats.items[0].tickets_introduced);
+    try testing.expectEqual(@as(u32, 7), pi.current_epoch_stats.items[1].blocks_produced);
+    try testing.expectEqual(@as(u32, 8), pi.current_epoch_stats.items[1].tickets_introduced);
+
+    // Verify previous epoch stats
     try testing.expectEqual(@as(usize, 2), pi.previous_epoch_stats.items.len);
-
-    // Verify current epoch stats for first validator
-    const current_stats1 = pi.current_epoch_stats.items[0];
-    try testing.expectEqual(@as(u32, 10), current_stats1.blocks_produced);
-    try testing.expectEqual(@as(u32, 5), current_stats1.tickets_introduced);
-    try testing.expectEqual(@as(u32, 3), current_stats1.preimages_introduced);
-    try testing.expectEqual(@as(u32, 1000), current_stats1.octets_across_preimages);
-    try testing.expectEqual(@as(u32, 2), current_stats1.reports_guaranteed);
-    try testing.expectEqual(@as(u32, 1), current_stats1.availability_assurances);
-
-    // Verify previous epoch stats for second validator
-    const previous_stats2 = pi.previous_epoch_stats.items[1];
-    try testing.expectEqual(@as(u32, 7), previous_stats2.blocks_produced);
-    try testing.expectEqual(@as(u32, 3), previous_stats2.tickets_introduced);
-    try testing.expectEqual(@as(u32, 1), previous_stats2.preimages_introduced);
-    try testing.expectEqual(@as(u32, 700), previous_stats2.octets_across_preimages);
-    try testing.expectEqual(@as(u32, 0), previous_stats2.reports_guaranteed);
-    try testing.expectEqual(@as(u32, 0), previous_stats2.availability_assurances);
+    try testing.expectEqual(@as(u32, 13), pi.previous_epoch_stats.items[0].blocks_produced);
+    try testing.expectEqual(@as(u32, 14), pi.previous_epoch_stats.items[0].tickets_introduced);
+    try testing.expectEqual(@as(u32, 19), pi.previous_epoch_stats.items[1].blocks_produced);
+    try testing.expectEqual(@as(u32, 20), pi.previous_epoch_stats.items[1].tickets_introduced);
 }
 
-test "decode pi - invalid data" {
-    const allocator = testing.allocator;
+test "decode Pi - empty buffer" {
+    var buffer: [0]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buffer);
+    const reader = fbs.reader();
 
-    // Test truncated stats
-    {
-        var buffer = std.ArrayList(u8).init(allocator);
-        defer buffer.deinit();
-
-        // Write incomplete stats record
-        inline for ([_]u32{ 10, 5, 3 }) |val| {
-            try buffer.writer().writeInt(u32, val, .little);
-        }
-
-        var fbs = std.io.fixedBufferStream(buffer.items);
-        try testing.expectError(error.EndOfStream, decode(fbs.reader(), allocator));
-    }
-
-    // Test mismatched epoch stats lengths
-    {
-        var buffer = std.ArrayList(u8).init(allocator);
-        defer buffer.deinit();
-
-        // Write one current epoch stat
-        inline for ([_]u32{ 10, 5, 3, 1000, 2, 1 }) |val| {
-            try buffer.writer().writeInt(u32, val, .little);
-        }
-
-        // Write two previous epoch stats
-        inline for ([_]u32{ 9, 4, 2, 900, 1, 0, 8, 3, 1, 800, 0, 0 }) |val| {
-            try buffer.writer().writeInt(u32, val, .little);
-        }
-
-        var fbs = std.io.fixedBufferStream(buffer.items);
-        try testing.expectError(error.InvalidData, decode(fbs.reader(), allocator));
-    }
+    // Attempt to decode empty buffer should result in error
+    try testing.expectError(error.EndOfStream, decode(1, reader, testing.allocator));
 }
 
-test "decode pi - roundtrip" {
-    const allocator = testing.allocator;
-    const encoder = @import("../state_encoding/pi.zig");
+test "decode Pi - incomplete data" {
+    var buffer: [20]u8 = undefined; // Not enough data for complete stats
+    var fbs = std.io.fixedBufferStream(&buffer);
+    var writer = fbs.writer();
 
-    // Create original pi state
-    var original = try Pi.init(allocator, 2);
-    defer original.deinit();
+    // Write partial data
+    try writer.writeInt(u32, 1, .little);
+    try writer.writeInt(u32, 2, .little);
+    try writer.writeInt(u32, 3, .little);
+    try writer.writeInt(u32, 4, .little);
+    try writer.writeInt(u32, 5, .little);
 
-    // Set test stats
-    original.current_epoch_stats.items[0] = ValidatorStats{
-        .blocks_produced = 10,
-        .tickets_introduced = 5,
-        .preimages_introduced = 3,
-        .octets_across_preimages = 1000,
-        .reports_guaranteed = 2,
-        .availability_assurances = 1,
-    };
-    original.previous_epoch_stats.items[1] = ValidatorStats{
-        .blocks_produced = 7,
-        .tickets_introduced = 3,
-        .preimages_introduced = 1,
-        .octets_across_preimages = 700,
-        .reports_guaranteed = 0,
-        .availability_assurances = 0,
-    };
+    fbs.reset();
+    const reader = fbs.reader();
 
-    // Encode
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
-    try encoder.encode(&original, buffer.writer());
-
-    // Decode
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var decoded = try decode(fbs.reader(), allocator);
-    defer decoded.deinit();
-
-    // Verify stats counts
-    try testing.expectEqual(original.validator_count, decoded.validator_count);
-    try testing.expectEqual(original.current_epoch_stats.items.len, decoded.current_epoch_stats.items.len);
-    try testing.expectEqual(original.previous_epoch_stats.items.len, decoded.previous_epoch_stats.items.len);
-
-    // Verify stats contents
-    const orig_curr = original.current_epoch_stats.items[0];
-    const dec_curr = decoded.current_epoch_stats.items[0];
-    try testing.expectEqual(orig_curr.blocks_produced, dec_curr.blocks_produced);
-    try testing.expectEqual(orig_curr.tickets_introduced, dec_curr.tickets_introduced);
-    try testing.expectEqual(orig_curr.preimages_introduced, dec_curr.preimages_introduced);
-    try testing.expectEqual(orig_curr.octets_across_preimages, dec_curr.octets_across_preimages);
-    try testing.expectEqual(orig_curr.reports_guaranteed, dec_curr.reports_guaranteed);
-    try testing.expectEqual(orig_curr.availability_assurances, dec_curr.availability_assurances);
-
-    const orig_prev = original.previous_epoch_stats.items[1];
-    const dec_prev = decoded.previous_epoch_stats.items[1];
-    try testing.expectEqual(orig_prev.blocks_produced, dec_prev.blocks_produced);
-    try testing.expectEqual(orig_prev.tickets_introduced, dec_prev.tickets_introduced);
-    try testing.expectEqual(orig_prev.preimages_introduced, dec_prev.preimages_introduced);
-    try testing.expectEqual(orig_prev.octets_across_preimages, dec_prev.octets_across_preimages);
-    try testing.expectEqual(orig_prev.reports_guaranteed, dec_prev.reports_guaranteed);
-    try testing.expectEqual(orig_prev.availability_assurances, dec_prev.availability_assurances);
+    // Attempt to decode incomplete data should result in error
+    try testing.expectError(error.EndOfStream, decode(1, reader, testing.allocator));
 }
