@@ -4,7 +4,11 @@ const types = @import("../types.zig");
 const codec = @import("../codec.zig");
 const jam_params = @import("../jam_params.zig");
 
-pub fn encode(comptime params: jam_params.Params, gamma: *const state.Gamma(params.validators_count, params.epoch_length), writer: anytype) !void {
+pub fn encode(
+    comptime params: jam_params.Params,
+    gamma: *const state.Gamma(params.validators_count, params.epoch_length),
+    writer: anytype,
+) !void {
     // Serialize validators array
 
     std.debug.assert(gamma.k.validators.len == params.validators_count);
@@ -55,7 +59,7 @@ test "encode" {
     const allocator = std.testing.allocator;
 
     // Create a sample Gamma instance
-    var gamma = try state.Gamma.init(allocator, 6);
+    var gamma = try state.Gamma(6, 12).init(allocator);
     defer gamma.deinit(allocator);
 
     // Create a buffer to store the encoded data
@@ -63,7 +67,7 @@ test "encode" {
     defer buffer.deinit();
 
     // Encode the Gamma instance
-    try encode(&gamma, buffer.writer());
+    try encode(jam_params.TINY_PARAMS, &gamma, buffer.writer());
 
     // Verify the encoded output
     // Here, we're just checking if the buffer is not empty.
