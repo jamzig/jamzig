@@ -2,8 +2,12 @@ const std = @import("std");
 const state = @import("../state.zig");
 const state_decoding = @import("../state_decoding.zig");
 const types = @import("../types.zig");
+const delta_reconstruction = @import("delta_reconstruction.zig");
+
 const MerklizationDictionary = @import("../state_dictionary.zig").MerklizationDictionary;
 const Params = @import("../jam_params.zig").Params;
+
+const detectKeyType = @import("../state_dictionary/key_type_detection.zig").detectKeyType;
 
 /// Reconstructs a JamState from a MerklizationDictionary by decoding its entries
 pub fn reconstructState(
@@ -28,66 +32,50 @@ pub fn reconstructState(
         const key = entry.key_ptr.*;
         const value = entry.value_ptr.*;
 
-        // Check first byte to determine component
-        switch (key[0]) {
-            1 => { // Alpha
-                jam_state.alpha = try state_decoding.alpha.decode(params.core_count, getReader(value));
+        switch (detectKeyType(key)) {
+            .state_component => switch (key[0]) {
+                1 => jam_state.alpha = try state_decoding.alpha.decode(params.core_count, getReader(value)),
+                2 => jam_state.phi = try state_decoding.phi.decode(params.core_count, allocator, getReader(value)),
+                3 => jam_state.beta = try state_decoding.beta.decode(allocator, getReader(value)),
+                4 => jam_state.gamma = try state_decoding.gamma.decode(params, allocator, getReader(value)),
+                5 => jam_state.psi = try state_decoding.psi.decode(allocator, getReader(value)),
+                6 => jam_state.eta = try state_decoding.eta.decode(getReader(value)),
+                7 => jam_state.iota = try state_decoding.iota.decode(allocator, params.validators_count, getReader(value)),
+                8 => jam_state.kappa = try state_decoding.kappa.decode(allocator, params.validators_count, getReader(value)),
+                9 => jam_state.lambda = try state_decoding.lambda.decode(allocator, params.validators_count, getReader(value)),
+                10 => jam_state.rho = try state_decoding.rho.decode(params, allocator, getReader(value)),
+                11 => jam_state.tau = try state_decoding.tau.decode(getReader(value)),
+                12 => jam_state.chi = try state_decoding.chi.decode(allocator, getReader(value)),
+                13 => jam_state.pi = try state_decoding.pi.decode(params.validators_count, getReader(value), allocator),
+                14 => jam_state.theta = try state_decoding.theta.decode(params.epoch_length, allocator, getReader(value)),
+                15 => jam_state.xi = try state_decoding.xi.decode(params.epoch_length, allocator, getReader(value)),
+                else => return error.UnknownStateComponent,
             },
-            2 => { // Phi
-                jam_state.phi = try state_decoding.phi.decode(params.core_count, allocator, getReader(value));
-            },
-            3 => { // Beta
-                jam_state.beta = try state_decoding.beta.decode(allocator, getReader(value));
-            },
-            4 => { // Gamma
-                jam_state.gamma = try state_decoding.gamma.decode(params, allocator, getReader(value));
-            },
-            5 => { // Psi
-                jam_state.psi = try state_decoding.psi.decode(allocator, getReader(value));
-            },
-            6 => { // Eta
-                jam_state.eta = try state_decoding.eta.decode(getReader(value));
-            },
-            7 => { // Iota
-                jam_state.iota = try state_decoding.iota.decode(allocator, params.validators_count, getReader(value));
-            },
-            8 => { // Kappa
-                jam_state.kappa = try state_decoding.kappa.decode(allocator, params.validators_count, getReader(value));
-            },
-            9 => { // Lambda
-                jam_state.lambda = try state_decoding.lambda.decode(allocator, params.validators_count, getReader(value));
-            },
-            10 => { // Rho
-                jam_state.rho = try state_decoding.rho.decode(params, allocator, getReader(value));
-            },
-            11 => { // Tau
-                jam_state.tau = try state_decoding.tau.decode(getReader(value));
-            },
-            12 => { // Chi
-                jam_state.chi = try state_decoding.chi.decode(allocator, getReader(value));
-            },
-            13 => { // Pi
-                jam_state.pi = try state_decoding.pi.decode(params.validators_count, getReader(value), allocator);
-            },
-            14 => { // Theta
-                jam_state.theta = try state_decoding.theta.decode(params.epoch_length, allocator, getReader(value));
-            },
-            15 => { // Xi
-                jam_state.xi = try state_decoding.xi.decode(params.epoch_length, allocator, getReader(value));
-            },
-            255 => { // Delta base
-                // Delta requires special handling since it has multiple key types
-                // TODO: Implement Delta reconstruction
-                continue;
-            },
-            else => {
-                // Check if key is for Delta storage/preimages
-                if (key[0] >= 128) {
-                    // TODO: Handle Delta storage/preimage entries
-                    continue;
+            .delta_base => {
+                if (jam_state.delta == null) {
+                    jam_state.delta = state.Delta.init(allocator);
                 }
-                return error.UnknownStateComponent;
+                try delta_reconstruction.reconstructServiceAccountBase(allocator, &jam_state.delta.?, key, value);
             },
+            .delta_storage => {
+                if (jam_state.delta == null) {
+                    jam_state.delta = state.Delta.init(allocator);
+                }
+                try delta_reconstruction.reconstructStorageEntry(allocator, &jam_state.delta.?, key, value);
+            },
+            .delta_preimage => {
+                if (jam_state.delta == null) {
+                    jam_state.delta = state.Delta.init(allocator);
+                }
+                try delta_reconstruction.reconstructPreimageEntry(allocator, &jam_state.delta.?, key, value);
+            },
+            .delta_lookup => {
+                if (jam_state.delta == null) {
+                    jam_state.delta = state.Delta.init(allocator);
+                }
+                try delta_reconstruction.reconstructPreimageLookupEntry(allocator, &jam_state.delta.?, key, value);
+            },
+            .unknown => return error.InvalidKey,
         }
     }
 

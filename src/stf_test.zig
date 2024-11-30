@@ -10,10 +10,12 @@ const jam_params = @import("jam_params.zig");
 
 const jamtestnet_traces = @import("stf_test/jamtestnet_traces.zig");
 
+const state_dict_reconstruct = @import("state_dictionary/reconstruct.zig");
+
 const buildGenesisState = @import("stf_test/jamtestnet_genesis.zig").buildGenesisState;
 const jamtestnet = @import("stf_test/jamtestnet.zig");
 
-test "jamtestnet: jamduna safrole import" {
+test "jamtestnet.jamduna: safrole import" {
     // we derive from the normal settings
     const JAMDUNA_PARAMS = jam_params.Params{
         .epoch_length = 12,
@@ -30,7 +32,10 @@ test "jamtestnet: jamduna safrole import" {
     const allocator = testing.allocator;
 
     // Genesis state
-    // const genesis_state_dict = jamtestnet_traces.loadStateDictionaryBin(allocator, "src/stf_test/jamtestnet/traces/safrole/jam_duna/traces/genesis.bin");
+    const genesis_state_dict = try jamtestnet_traces.loadStateDictionaryBin(allocator, "src/stf_test/jamtestnet/traces/safrole/jam_duna/traces/genesis.bin");
+    const genesis_jam_state = try state_dict_reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &genesis_state_dict);
+
+    _ = genesis_jam_state;
 
     // Get ordered block files
     var jam_state = try buildGenesisState(JAMDUNA_PARAMS, allocator, @embedFile("stf_test/jamtestnet/traces/safrole/jam_duna/state_snapshots/genesis.json"));

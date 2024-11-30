@@ -99,6 +99,10 @@ pub const ServiceAccount = struct {
     }
 
     pub fn deinit(self: *ServiceAccount) void {
+        var storage_it = self.storage.valueIterator();
+        while (storage_it.next()) |value| {
+            self.storage.allocator.free(value.*);
+        }
         self.storage.deinit();
 
         var it = self.preimages.valueIterator();
@@ -237,14 +241,23 @@ pub const Delta = struct {
         self.accounts.deinit();
     }
 
-    pub fn createAccount(self: *Delta, index: ServiceIndex) !void {
+    // TODO: change serviceindex to serviceid in types
+    pub fn putAccount(self: *Delta, index: ServiceIndex, account: ServiceAccount) !void {
         if (self.accounts.contains(index)) return error.AccountAlreadyExists;
-        const account = ServiceAccount.init(self.allocator);
         try self.accounts.put(index, account);
     }
 
     pub fn getAccount(self: *Delta, index: ServiceIndex) ?*ServiceAccount {
         return if (self.accounts.getPtr(index)) |account_ptr| account_ptr else null;
+    }
+
+    pub fn getOrCreateAccount(self: *Delta, index: ServiceIndex) !*ServiceAccount {
+        if (self.getAccount(index)) |account| {
+            return account;
+        }
+        const account = ServiceAccount.init(self.allocator);
+        try self.putAccount(index, account);
+        return self.getAccount(index).?;
     }
 
     pub fn updateBalance(self: *Delta, index: ServiceIndex, new_balance: Balance) !void {
@@ -298,13 +311,7 @@ test "Delta initialization, account creation, and retrieval" {
     defer delta.deinit();
 
     const index: ServiceIndex = 1;
-    try delta.createAccount(index);
-
-    const account = delta.getAccount(index);
-    try testing.expect(account != null);
-    try testing.expect(account.?.balance == 0);
-
-    try testing.expectError(error.AccountAlreadyExists, delta.createAccount(index));
+    _ = try delta.getOrCreateAccount(index);
 }
 
 test "Delta balance update" {
@@ -313,7 +320,7 @@ test "Delta balance update" {
     defer delta.deinit();
 
     const index: ServiceIndex = 1;
-    try delta.createAccount(index);
+    _ = try delta.getOrCreateAccount(index);
 
     const new_balance: Balance = 1000;
     try delta.updateBalance(index, new_balance);

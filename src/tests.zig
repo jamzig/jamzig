@@ -22,6 +22,8 @@ comptime {
     _ = @import("state.zig");
     _ = @import("state_dictionary.zig");
     _ = @import("state_dictionary/reconstruct.zig");
+    _ = @import("state_dictionary/delta_reconstruction.zig");
+    _ = @import("state_dictionary/delta_reconstruction_test.zig");
 
     _ = @import("state_merklization.zig");
     _ = @import("state_test.zig");

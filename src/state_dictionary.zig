@@ -6,14 +6,26 @@ const state_encoder = @import("state_encoding.zig");
 
 const Params = @import("jam_params.zig").Params;
 
+//  _  __             ____                _                   _   _
+// | |/ /___ _   _   / ___|___  _ __  ___| |_ _ __ _   _  ___| |_(_) ___  _ __
+// | ' // _ \ | | | | |   / _ \| '_ \/ __| __| '__| | | |/ __| __| |/ _ \| '_ \
+// | . \  __/ |_| | | |__| (_) | | | \__ \ |_| |  | |_| | (__| |_| | (_) | | | |
+// |_|\_\___|\__, |  \____\___/|_| |_|___/\__|_|   \__,_|\___|\__|_|\___/|_| |_|
+//           |___/
+
 /// Constructs a 32-byte key with the input byte as the first element and zeros for the rest.
 ///
 /// @param input - The byte to use as the first element of the key
 /// @return A 32-byte array representing the key
-fn constructSimpleByteKey(input: u8) [32]u8 {
+/// TODO: rename to state component
+pub fn constructSimpleByteKey(input: u8) [32]u8 {
     var result: [32]u8 = [_]u8{0} ** 32;
     result[0] = input;
     return result;
+}
+
+pub fn deconstructSimpleByteKey(key: [32]u8) u8 {
+    return key[0];
 }
 
 /// Constructs a 32-byte key using a byte and a service index.
@@ -22,12 +34,33 @@ fn constructSimpleByteKey(input: u8) [32]u8 {
 /// @param i - The byte to use as the first element of the key
 /// @param s - The service index to encode in the key
 /// @return A 32-byte array representing the key
-fn constructByteServiceIndexKey(i: u8, s: u32) [32]u8 {
+pub fn constructByteServiceIndexKey(i: u8, s: u32) [32]u8 {
     var result: [32]u8 = [_]u8{0} ** 32;
 
     result[0] = i;
-    std.mem.writeInt(u32, result[1..5], s, .little);
+    var service_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &service_bytes, s, .little);
+
+    result[1] = service_bytes[0];
+    result[3] = service_bytes[1];
+    result[5] = service_bytes[2];
+    result[7] = service_bytes[3];
+
     return result;
+}
+
+pub fn deconstructByteServiceIndexKey(key: [32]u8) struct { byte: u8, service_index: u32 } {
+    // Reconstruct service index from repeated bytes
+    var service_bytes: [4]u8 = undefined;
+    service_bytes[0] = key[1];
+    service_bytes[1] = key[3];
+    service_bytes[2] = key[5];
+    service_bytes[3] = key[7];
+
+    return .{
+        .byte = key[0],
+        .service_index = std.mem.readInt(u32, &service_bytes, .little),
+    };
 }
 
 /// Constructs a 32-byte key by interleaving a service index with a hash.
@@ -37,7 +70,7 @@ fn constructByteServiceIndexKey(i: u8, s: u32) [32]u8 {
 /// @param s - The service index to encode in the key
 /// @param h - A 32-byte hash to incorporate into the key
 /// @return A 32-byte array representing the key
-fn constructServiceIndexHashKey(s: u32, h: [32]u8) [32]u8 {
+pub fn constructServiceIndexHashKey(s: u32, h: [32]u8) [32]u8 {
     var result: [32]u8 = [_]u8{0} ** 32;
 
     // Write service index in pieces
@@ -59,6 +92,121 @@ fn constructServiceIndexHashKey(s: u32, h: [32]u8) [32]u8 {
     return result;
 }
 
+pub fn deconstructServiceIndexHashKey(key: [32]u8) struct { service_index: u32, hash: LossyHash(28) } {
+    var hash: [28]u8 = undefined;
+
+    // Reconstruct service index from interleaved bytes
+    const service_bytes = [4]u8{
+        key[0],
+        key[2],
+        key[4],
+        key[6],
+    };
+    const service_index = std.mem.readInt(u32, &service_bytes, .little);
+
+    // Reconstruct hash from interleaved and remaining bytes
+    hash[0] = key[1];
+    hash[1] = key[3];
+    hash[2] = key[5];
+    hash[3] = key[7];
+    @memcpy(hash[4..], key[8..]);
+
+    return .{
+        .service_index = service_index,
+        .hash = .{ .hash = hash, .start = 0, .end = 28 },
+    };
+}
+
+//  _  __            __  __                   _ _
+// | |/ /___ _   _  |  \/  | __ _ _ __   __ _| (_)_ __   __ _
+// | ' // _ \ | | | | |\/| |/ _` | '_ \ / _` | | | '_ \ / _` |
+// | . \  __/ |_| | | |  | | (_| | | | | (_| | | | | | | (_| |
+// |_|\_\___|\__, | |_|  |_|\__,_|_| |_|\__, |_|_|_| |_|\__, |
+//           |___/                      |___/           |___/
+
+/// represents a lossy hash and the start and end of where the has was cut
+pub fn LossyHash(comptime size: usize) type {
+    return struct {
+        hash: [size]u8,
+        start: usize,
+        end: usize,
+
+        pub fn matches(self: *const @This(), other: *const [32]u8) bool {
+            // Compare the stored hash portion with the corresponding slice of the input hash
+            return std.mem.eql(u8, &self.hash, other[self.start..self.end]);
+        }
+    };
+}
+
+pub fn buildStorageKey(k: [32]u8) [32]u8 {
+    var result: [32]u8 = undefined;
+    std.mem.writeInt(u32, result[0..4], 0xFFFFFFFF, .little);
+    @memcpy(result[4..32], k[0..28]);
+    return result;
+}
+
+pub fn deconstructStorageKey(key: [28]u8) ?LossyHash(24) {
+    // Verify the expected magic number
+    const magic = std.mem.readInt(u32, key[0..4], .little);
+    if (magic != 0xFFFFFFFF) return null;
+
+    var result: [24]u8 = undefined;
+    @memcpy(&result, key[4..28]); // Copy the stored data back
+    return .{ .hash = result, .start = 0, .end = 24 };
+}
+
+// TODO: rename to construct ...
+pub fn buildPreimageKey(k: [32]u8) [32]u8 {
+    var result: [32]u8 = undefined;
+    std.mem.writeInt(u32, result[0..4], 0xFFFFFFFE, .little);
+    @memcpy(result[4..32], k[1..29]);
+    return result;
+}
+
+pub fn deconstructPreimageKey(key: [28]u8) ?LossyHash(24) {
+    // Verify the expected magic number
+    const magic = std.mem.readInt(u32, key[0..4], .little);
+    if (magic != 0xFFFFFFFE) return null;
+
+    var result: [24]u8 = undefined;
+    @memcpy(&result, key[4..]); // Copy the stored data back
+    return .{ .hash = result, .start = 1, .end = 25 };
+}
+
+const services = @import("services.zig");
+pub fn buildPreimageLookupKey(key: services.PreimageLookupKey) [32]u8 {
+    const Blake2b256 = std.crypto.hash.blake2.Blake2b(256);
+    var hash: [32]u8 = undefined;
+    Blake2b256.hash(&key.hash, &hash, .{});
+    var lookup_key: [32]u8 = undefined;
+    @memcpy(lookup_key[4..], hash[2..30]);
+    std.mem.writeInt(u32, lookup_key[0..4], key.length, .little);
+    return lookup_key;
+}
+
+pub fn deconstructPreimageLookupKey(key: [28]u8) struct { lenght: u32, lossy_hash_of_hash: LossyHash(24) } {
+    // Extract the length from the first 4 bytes
+    const length = std.mem.readInt(u32, key[0..4], .little);
+
+    // Create a zeroed hash buffer
+    var result: [28]u8 = undefined;
+
+    // Copy the stored hash portion (bytes 2-29 of the original Blake2b hash)
+    @memcpy(&result, key[4..]);
+
+    return .{
+        .length = length,
+        .lossy_hash_of_hash = .{ .hash = result, .start = 2, .end = 26 },
+    };
+}
+
+//  _   _ _   _ _
+// | | | | |_(_) |___
+// | | | | __| | / __|
+// | |_| | |_| | \__ \
+//  \___/ \__|_|_|___/
+//
+
 /// Encodes data using the provided writer function and returns an owned slice.
 fn encodeAndOwnSlice(
     allocator: std.mem.Allocator,
@@ -79,6 +227,13 @@ fn sliceToFixedArray(comptime size: usize, slice: []const u8) [size]u8 {
     std.mem.copyForwards(u8, result[0..], slice[0..size]);
     return result;
 }
+
+//  ____  _  __  __
+// |  _ \(_)/ _|/ _|
+// | | | | | |_| |_
+// | |_| | |  _|  _|
+// |____/|_|_| |_|
+//
 
 /// Maps a state component to its encoding using the appropriate state key.
 ///
@@ -463,14 +618,14 @@ pub fn buildStateMerklizationDictionary(
             // Storage entries
             var storage_iter = account.storage.iterator();
             while (storage_iter.next()) |storage_entry| {
-                const storage_key = constructServiceIndexHashKey(service_idx, storage_entry.key_ptr.*);
+                const storage_key = constructServiceIndexHashKey(service_idx, buildStorageKey(storage_entry.key_ptr.*));
                 try map.put(storage_key, storage_entry.value_ptr.*);
             }
 
             // Preimage lookups
             var preimage_iter = account.preimages.iterator();
             while (preimage_iter.next()) |preimage_entry| {
-                const preimage_key = constructServiceIndexHashKey(service_idx, preimage_entry.key_ptr.*);
+                const preimage_key = constructServiceIndexHashKey(service_idx, buildPreimageKey(preimage_entry.key_ptr.*));
                 try map.put(preimage_key, preimage_entry.value_ptr.*);
             }
 
@@ -478,15 +633,12 @@ pub fn buildStateMerklizationDictionary(
             var lookup_iter = account.preimage_lookups.iterator();
             while (lookup_iter.next()) |lookup_entry| {
                 const delta_encoder = state_encoder.delta;
-
-                // FIXME: use initCapacity
-                var preimage_key = try std.ArrayList(u8).initCapacity(allocator, 32);
-                try delta_encoder.encodePreimageKey(lookup_entry.key_ptr.*, preimage_key.writer());
+                const key: services.PreimageLookupKey = lookup_entry.key_ptr.*;
 
                 var preimage_lookup = try std.ArrayList(u8).initCapacity(allocator, 24);
                 try delta_encoder.encodePreimageLookup(lookup_entry.value_ptr.*, preimage_lookup.writer());
 
-                const lookup_key = constructServiceIndexHashKey(service_idx, sliceToFixedArray(32, try preimage_key.toOwnedSlice()));
+                const lookup_key = constructServiceIndexHashKey(service_idx, buildPreimageLookupKey(key));
                 try map.put(lookup_key, try preimage_lookup.toOwnedSlice());
             }
         }
@@ -525,8 +677,12 @@ test "constructSimpleByteKey" {
 test "constructByteServiceIndexKey" {
     const key = constructByteServiceIndexKey(0xFF, 0x12345678);
     try testing.expectEqual(@as(u8, 0xFF), key[0]);
-    try testing.expectEqual(@as(u32, 0x12345678), std.mem.readInt(u32, key[1..5], .little));
-    for (key[5..]) |byte| {
+
+    const dkey = deconstructByteServiceIndexKey(key);
+
+    try testing.expectEqual(@as(u32, 0x12345678), dkey.service_index);
+
+    for (key[8..]) |byte| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -573,18 +729,18 @@ test "MerklizationDictionary diff" {
         switch (entry.diff_type) {
             .removed => {
                 try testing.expect(std.mem.eql(u8, &key1, &entry.key));
-                try testing.expect(std.mem.eql(u8, val1, entry.old_value.?));
+                try testing.expect(std.mem.eql(u8, val1, entry.me_value.?));
                 found_removed = true;
             },
             .changed => {
                 try testing.expect(std.mem.eql(u8, &key2, &entry.key));
-                try testing.expect(std.mem.eql(u8, val2, entry.old_value.?));
-                try testing.expect(std.mem.eql(u8, val2_changed, entry.new_value.?));
+                try testing.expect(std.mem.eql(u8, val2, entry.me_value.?));
+                try testing.expect(std.mem.eql(u8, val2_changed, entry.other_value.?));
                 found_changed = true;
             },
             .added => {
                 try testing.expect(std.mem.eql(u8, &key3, &entry.key));
-                try testing.expect(std.mem.eql(u8, val3, entry.new_value.?));
+                try testing.expect(std.mem.eql(u8, val3, entry.other_value.?));
                 found_added = true;
             },
         }
