@@ -4,6 +4,8 @@ const std = @import("std");
 const readInteger = @import("../codec.zig").readInteger;
 const writeInteger = @import("../codec.zig").writeInteger;
 
+const log = std.log.scoped(.blob_dict);
+
 /// A dictionary mapping 32-byte keys to variable-length binary blobs
 pub const BlobDict = struct {
     map: std.AutoArrayHashMap([32]u8, []const u8),
@@ -32,33 +34,55 @@ pub fn deserializeDict(allocator: std.mem.Allocator, reader: anytype) !BlobDict 
 
     // Read number of entries
     const count = try readInteger(reader);
+    log.debug("deserializing dictionary with {d} entries", .{count});
 
     // Read each key-value pair in sorted order
     var prev_key: ?[32]u8 = null;
     var i: usize = 0;
     while (i < count) : (i += 1) {
+        log.debug("reading entry {d}/{d}", .{ i + 1, count });
+
         // Read fixed-size key
         var key: [32]u8 = undefined;
         try reader.readNoEof(&key);
+        log.debug("  key: {s}", .{std.fmt.fmtSliceHexLower(&key)});
 
         // Verify keys are in ascending order
         if (prev_key) |pk| {
+            log.debug("  comparing with previous key: {s}", .{std.fmt.fmtSliceHexLower(&pk)});
             if (!std.mem.lessThan(u8, &pk, &key)) {
+                log.err("key ordering violation: {s} >= {s}", .{
+                    std.fmt.fmtSliceHexLower(&pk),
+                    std.fmt.fmtSliceHexLower(&key),
+                });
                 return error.KeysNotSorted;
             }
+            log.debug("  key order valid", .{});
         }
         prev_key = key;
 
         // Read value length and data
         const value_len = try readInteger(reader);
+        log.debug("  value length: {d} bytes", .{value_len});
+
         const value = try allocator.alloc(u8, @intCast(value_len));
         errdefer allocator.free(value);
         try reader.readNoEof(value);
 
+        if (value_len < 32) {
+            // Only log small values in full
+            log.debug("  value: {s}", .{std.fmt.fmtSliceHexLower(value)});
+        } else {
+            // For large values, just log the first 32 bytes
+            log.debug("  value (first 32 bytes): {s}...", .{std.fmt.fmtSliceHexLower(value[0..32])});
+        }
+
         // Value will be owned by the dictionary after put()
         try dict.map.put(key, value);
+        log.debug("  entry {d} added successfully", .{i + 1});
     }
 
+    log.debug("dictionary deserialization complete, {d} entries read", .{count});
     return dict;
 }
 
