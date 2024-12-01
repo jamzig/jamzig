@@ -1,99 +1,90 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 
-pub const types = @import("safrole/types.zig");
+pub const types = @import("types.zig");
+pub const safrole_types = @import("safrole/types.zig");
 pub const entropy = @import("safrole/entropy.zig");
 
 const crypto = @import("crypto.zig");
 
 pub const Params = @import("jam_params.zig").Params;
 
-const Safrole = struct {
-    allocator: std.mem.Allocator,
-    state: types.State,
+pub const Error = error{
+    /// Bad slot value.
+    bad_slot,
+    /// Received a ticket while in epoch's tail.
+    unexpected_ticket,
+    /// Tickets must be sorted.
+    bad_ticket_order,
+    /// Invalid ticket ring proof.
+    bad_ticket_proof,
+    /// Invalid ticket attempt value.
+    bad_ticket_attempt,
+    /// Reserved
+    reserved,
+    /// Found a ticket duplicate.
+    duplicate_ticket,
+    /// Too_many_tickets_in_extrinsic
+    too_many_tickets_in_extrinsic,
+} || std.mem.Allocator.Error || crypto.Error;
 
-    epoch_length: u32,
+pub const Result = struct {
+    post_state: safrole_types.State,
+    epoch_marker: ?types.EpochMark,
+    ticket_marker: ?types.TicketsMark,
 
-    pub fn init(allocator: std.mem.Allocator, state: types.State, params: Params) Safrole {
-        return .{
-            .allocator = allocator,
-            .state = state,
-            .params = params,
-        };
+    pub fn deinit(self: *Result, allocator: std.mem.Allocator) void {
+        self.post_state.deinit(allocator);
+        self.deinit_markers(allocator);
     }
 
-    pub fn Y(self: *@This(), input: types.Input) !TransitionResult {
-        const result = try transition(self.allocator, self.params, self.state, input);
-        if (result.state) |new_state| {
-            self.state.deinit(self.allocator);
-            self.state = new_state;
+    pub fn deinit_markers(self: *Result, allocator: std.mem.Allocator) void {
+        if (self.epoch_marker) |*marker| {
+            allocator.free(marker.validators);
         }
-        return result;
-    }
-
-    pub fn deinit(self: Safrole) void {
-        self.state.deinit(self.allocator);
+        if (self.ticket_marker) |*marker| {
+            allocator.free(marker.tickets);
+        }
     }
 };
 
-// Constant
-pub const TransitionResult = struct {
-    output: types.Output,
-    state: ?types.State,
-
-    pub fn deinit(self: TransitionResult, allocator: std.mem.Allocator) void {
-        if (self.state != null) {
-            self.state.?.deinit(allocator);
-        }
-        self.output.deinit(allocator);
-    }
-};
-
+// TODO: swap params and allocator, use params first
 pub fn transition(
     allocator: std.mem.Allocator,
     params: Params,
-    pre_state: types.State,
-    input: types.Input,
-) !TransitionResult {
+    pre_state: safrole_types.State,
+    slot: types.TimeSlot,
+    bandersnatch_vrf_output: types.BandersnatchVrfOutput,
+    ticket_extrinsic: types.TicketsExtrinsic,
+) Error!Result {
     // Equation 41: H_t ∈ N_T, P(H)_t < H_t ∧ H_t · P ≤ T
-    if (input.slot <= pre_state.tau) {
-        return .{
-            .output = .{ .err = .bad_slot },
-            .state = null,
-        };
+    if (slot <= pre_state.tau) {
+        return Error.bad_slot;
     }
 
     // The slot inside this epoch
     const prev_epoch_slot = pre_state.tau % params.epoch_length;
-    const epoch_slot = input.slot % params.epoch_length;
+    const epoch_slot = slot % params.epoch_length;
 
     // Chapter 6.7 Ticketing and extrensics
     // Check the number of ticket attempts in the input when more
     // than N we have a bad ticket attempt
-    for (input.extrinsic) |extrinsic| {
+    for (ticket_extrinsic) |extrinsic| {
         if (extrinsic.attempt >= params.max_ticket_entries_per_validator) {
-            return .{
-                .output = .{ .err = .bad_ticket_attempt },
-                .state = null,
-            };
+            std.debug.print("attempt {d}\n", .{extrinsic.attempt});
+            return Error.bad_ticket_attempt;
         }
     }
 
     // We should not have more than K tickets in the input
-    if (input.extrinsic.len > params.epoch_length) {
-        return .{
-            .output = .{ .err = .too_many_tickets_in_extrinsic },
-            .state = null,
-        };
+    if (ticket_extrinsic.len > params.epoch_length) {
+        return Error.too_many_tickets_in_extrinsic;
     }
 
     // We shuold not have any tickets when the epoch slot < Y
     if (epoch_slot >= params.ticket_submission_end_epoch_slot) {
-        if (input.extrinsic.len > 0) {
-            return .{
-                .output = .{ .err = .unexpected_ticket },
-                .state = null,
-            };
+        if (ticket_extrinsic.len > 0) {
+            return Error.unexpected_ticket;
         }
     }
 
@@ -103,13 +94,10 @@ pub fn transition(
         params.validators_count,
         pre_state.gamma_z,
         pre_state.eta[2],
-        input.extrinsic,
+        ticket_extrinsic,
     ) catch |e| {
         if (e == error.SignatureVerificationFailed) {
-            return .{
-                .output = .{ .err = .bad_ticket_proof },
-                .state = null,
-            };
+            return Error.bad_ticket_proof;
         } else return e;
     };
     defer allocator.free(verified_extrinsic);
@@ -124,10 +112,7 @@ pub fn transition(
         var i: usize = 0;
         while (i < index) : (i += 1) {
             if (std.mem.eql(u8, &verified_extrinsic[i].id, &current_ticket.id)) {
-                return .{
-                    .output = .{ .err = .duplicate_ticket },
-                    .state = null,
-                };
+                return Error.duplicate_ticket;
             }
         }
 
@@ -139,20 +124,14 @@ pub fn transition(
             }
         }.order);
         if (position != null) {
-            return .{
-                .output = .{ .err = .duplicate_ticket },
-                .state = null,
-            };
+            return Error.duplicate_ticket;
         }
 
         // Check the order of tickets
         if (index > 0) {
             const prev_ticket = verified_extrinsic[index - 1];
             if (std.mem.order(u8, &current_ticket.id, &prev_ticket.id) == .lt) {
-                return .{
-                    .output = .{ .err = .bad_ticket_order },
-                    .state = null,
-                };
+                return Error.bad_ticket_order;
             }
         }
     }
@@ -161,12 +140,12 @@ pub fn transition(
     errdefer post_state.deinit(allocator);
 
     // Update the tau
-    post_state.tau = input.slot;
+    post_state.tau = slot;
 
     // Calculate epoch and slot phase
     const prev_epoch = pre_state.tau / params.epoch_length;
     // const prev_slot_phase = pre_state.tau % EPOCH_LENGTH;
-    const current_epoch = input.slot / params.epoch_length;
+    const current_epoch = slot / params.epoch_length;
     // const current_slot_phase = input.slot % EPOCH_LENGTH;
 
     // Check for epoch transition
@@ -188,9 +167,9 @@ pub fn transition(
         const iota = post_state.iota;
 
         post_state.kappa = gamma_k;
-        post_state.gamma_k = phiZeroOutOffenders(try allocator.dupe(types.ValidatorData, iota));
+        post_state.gamma_k = phiZeroOutOffenders(try iota.deepClone(allocator));
         post_state.lambda = kappa;
-        allocator.free(lamda);
+        lamda.deinit(allocator);
 
         // post_state.iota seems to stay the same
 
@@ -240,7 +219,7 @@ pub fn transition(
 
     // GP0.3.6@(66) Combine previous entropy accumulator (η0) with new entropy
     // input η′0 ≡H(η0 ⌢ Y(Hv))
-    post_state.eta[0] = entropy.update(post_state.eta[0], input.entropy);
+    post_state.eta[0] = entropy.update(post_state.eta[0], bandersnatch_vrf_output);
 
     // Section 6.7 Ticketing
     // GP0.3.6@(78) Merge the gamma_a and extrinsic tickets into a new ticket
@@ -260,11 +239,12 @@ pub fn transition(
 
     // Determine the output
     var epoch_marker: ?types.EpochMark = null;
-    var winning_ticket_marker: ?types.TicketMark = null;
+    var winning_ticket_marker: ?types.TicketsMark = null;
 
     if (current_epoch > prev_epoch) {
         epoch_marker = .{
             .entropy = post_state.eta[1],
+            .tickets_entropy = post_state.eta[2], // TODO: check GP for what this is
             .validators = try extractBandersnatchKeys(allocator, post_state.gamma_k),
         };
     }
@@ -278,22 +258,19 @@ pub fn transition(
         // And we have a full epoch worth of tickets accumulated
         post_state.gamma_a.len == params.epoch_length)
     {
-        winning_ticket_marker =
-            try Z_outsideInOrdering(
-            types.TicketBody,
-            allocator,
-            pre_state.gamma_a,
-        );
+        winning_ticket_marker = .{
+            .tickets = try Z_outsideInOrdering(
+                types.TicketBody,
+                allocator,
+                pre_state.gamma_a,
+            ),
+        };
     }
 
-    return .{
-        .output = .{
-            .ok = types.OutputMarks{
-                .epoch_mark = epoch_marker,
-                .tickets_mark = winning_ticket_marker,
-            },
-        },
-        .state = post_state,
+    return Result{
+        .post_state = post_state,
+        .epoch_marker = epoch_marker,
+        .ticket_marker = winning_ticket_marker,
     };
 }
 
@@ -377,11 +354,11 @@ fn bandersnatchRingRoot(allocator: std.mem.Allocator, gamma_k: types.GammaK) !ty
     return commitment;
 }
 
-fn extractBandersnatchKeys(allocator: std.mem.Allocator, gamma_k: types.GammaK) ![]types.BandersnatchKey {
-    const keys = try allocator.alloc(types.BandersnatchKey, gamma_k.len);
-    errdefer allocator.free(keys);
+// TODO: this can be placed on the ValidatorSet now
+fn extractBandersnatchKeys(allocator: std.mem.Allocator, gamma_k: types.GammaK) ![]types.BandersnatchPublic {
+    const keys = try allocator.alloc(types.BandersnatchPublic, gamma_k.len());
 
-    for (gamma_k, 0..) |validator, i| {
+    for (gamma_k.items(), 0..) |validator, i| {
         keys[i] = validator.bandersnatch;
     }
 
@@ -389,7 +366,7 @@ fn extractBandersnatchKeys(allocator: std.mem.Allocator, gamma_k: types.GammaK) 
 }
 
 // 58. PHI: Zero out any offenders on post_state.iota
-fn phiZeroOutOffenders(data: []types.ValidatorData) []types.ValidatorData {
+fn phiZeroOutOffenders(data: types.ValidatorSet) types.ValidatorSet {
     // TODO: (58) Zero out any offenders on post_state.iota, The origin of
     // the offenders is explained in section 10.
     return data;
@@ -402,12 +379,12 @@ fn gammaS_Fallback(
     r: types.OpaqueHash,
     epoch_length: u32,
     kappa: types.Kappa,
-) ![]types.BandersnatchKey {
+) ![]types.BandersnatchPublic {
     const keys = try extractBandersnatchKeys(allocator, kappa);
     defer allocator.free(keys);
 
     // Allocate memory of the same length as keys to return
-    var result = try allocator.alloc(types.BandersnatchKey, epoch_length);
+    var result = try allocator.alloc(types.BandersnatchPublic, epoch_length);
     errdefer allocator.free(result);
 
     for (0..epoch_length) |i| {

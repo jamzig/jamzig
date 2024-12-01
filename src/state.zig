@@ -1,6 +1,5 @@
 const std = @import("std");
 const types = @import("types.zig");
-const safrole_types = @import("safrole/types.zig");
 
 const Params = @import("jam_params.zig").Params;
 
@@ -12,106 +11,194 @@ pub fn JamState(comptime params: Params) type {
     return struct {
         /// α: Core authorization state and associated queues.
         /// Manipulated in: src/authorization.zig
-        alpha: Alpha,
+        alpha: ?Alpha(params.core_count),
 
         /// β: Metadata of the latest block, including block number, timestamps, and cryptographic references.
         /// Manipulated in: src/recent_blocks.zig
-        beta: Beta,
+        beta: ?Beta,
 
         /// γ: List of current validators and their states, such as stakes and identities.
         /// Manipulated in: src/safrole.zig
-        gamma: Gamma,
+        gamma: ?Gamma(params.validators_count, params.epoch_length),
 
         /// δ: Service accounts state, managing all service-related data (similar to smart contracts).
         /// Manipulated in: src/services.zig
-        delta: Delta,
+        delta: ?Delta,
 
         /// η: On-chain entropy pool used for randomization and consensus mechanisms.
         /// Manipulated in: src/safrole.zig
-        eta: Eta,
+        eta: ?Eta,
 
         /// ι: Validators enqueued for activation in the upcoming epoch.
         /// Manipulated in: src/safrole.zig
-        iota: Iota,
+        iota: ?Iota,
 
         /// κ: Active validator set currently responsible for validating blocks and maintaining the network.
         /// Manipulated in: src/safrole.zig
-        kappa: Kappa,
+        kappa: ?Kappa,
 
         /// λ: Archived validators who have been removed or rotated out of the active set.
         /// Manipulated in: src/safrole.zig
-        lambda: Lambda,
+        lambda: ?Lambda,
 
         /// ρ: State related to each core’s current assignment, including work packages and reports.
         /// Manipulated in: src/core_assignments.zig
-        rho: Rho,
+        rho: ?Rho(params.core_count),
 
         /// τ: Current time, represented in terms of epochs and slots.
         /// Manipulated in: src/safrole.zig
-        tau: Tau,
+        tau: ?Tau,
 
         /// φ: Authorization queue for tasks or processes awaiting authorization by the network.
         /// Manipulated in: src/authorization.zig
-        phi: Phi,
+        phi: ?Phi(params.core_count),
 
         /// χ: Privileged service identities, which may have special roles within the protocol.
         /// Manipulated in: src/services.zig
-        chi: Chi,
+        chi: ?Chi,
 
         /// ψ: Judgement state, tracking disputes or reports about validators or state transitions.
         /// Manipulated in: src/disputes.zig
-        psi: Psi,
+        psi: ?Psi,
 
         /// π: Validator performance statistics, tracking penalties, rewards, and other metrics.
         /// Manipulated in: src/validator_stats.zig
-        pi: Pi,
+        pi: ?Pi,
 
         /// ξ: Epochs worth history of accumulated work reports
-        xi: Xi(params.epoch_length),
+        xi: ?Xi(params.epoch_length),
 
         /// θ: List of available and/or audited but not yet accumulated work
         /// reports
-        theta: Theta(params.epoch_length),
+        theta: ?Theta(params.epoch_length),
+
+        /// Initialize Alpha component
+        pub fn initAlpha(self: *JamState(params), _: std.mem.Allocator) !void {
+            self.alpha = try Alpha.init();
+        }
+
+        /// Initialize Beta component (max_blocks should be 10)
+        /// TODO: check if this max_blocks is in the params
+        pub fn initBeta(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.beta = try Beta.init(allocator, params.recent_history_size);
+        }
+
+        /// Initialize Gamma component
+        pub fn initGamma(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.gamma = try Gamma(params.validators_count, params.epoch_length).init(allocator);
+        }
+
+        /// Initialize Delta component
+        pub fn initDelta(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.delta = try Delta.init(allocator);
+        }
+
+        /// Initialize Phi component
+        pub fn initPhi(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.phi = try Phi(params.core_count).init(allocator);
+        }
+
+        /// Initialize Chi component
+        pub fn initChi(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.chi = try Chi.init(allocator);
+        }
+
+        /// Initialize Psi component
+        pub fn initPsi(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.psi = try Psi.init(allocator);
+        }
+
+        /// Initialize Pi component
+        pub fn initPi(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.pi = try Pi.init(allocator, params.validators_count);
+        }
+
+        /// Initialize Xi component
+        pub fn initXi(self: *JamState(params), _: std.mem.Allocator) !void {
+            self.xi = try Xi(params.epoch_length).init();
+        }
+
+        /// Initialize Theta component
+        pub fn initTheta(self: *JamState(params), _: std.mem.Allocator) !void {
+            self.theta = try Theta(params.epoch_length).init();
+        }
+
+        /// Initialize Eta component
+        pub fn initEta(self: *JamState(params)) !void {
+            // TODO: std.mem.zeroes
+            self.eta = [_]types.Entropy{[_]u8{0} ** 32} ** 4;
+        }
+
+        /// Initialize Tau component
+        pub fn initTau(self: *JamState(params)) !void {
+            self.tau = 0;
+        }
+
+        /// Initialize all components necessary for Safrole operation
+        /// This includes: gamma, eta, iota, kappa, lambda, and tau
+        pub fn initSafrole(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            // Initialize required components
+            try self.initEta();
+            try self.initTau();
+
+            try self.initGamma(allocator);
+            self.iota = try types.ValidatorSet.init(allocator, params.validators_count);
+            self.kappa = try types.ValidatorSet.init(allocator, params.validators_count);
+            self.lambda = try types.ValidatorSet.init(allocator, params.validators_count);
+        }
 
         /// Initialize a new JamState
         pub fn init(
-            allocator: std.mem.Allocator,
+            // TODO: maybe remove parameter
+            _: std.mem.Allocator,
         ) !JamState(params) {
             return JamState(params){
-                .alpha = Alpha.init(),
-                .beta = try Beta.init(allocator, 10),
-                .gamma = try Gamma.init(allocator),
-                .delta = Delta.init(allocator),
-                .eta = std.mem.zeroes(safrole_types.Eta),
-                .iota = &[_]safrole_types.ValidatorData{},
-                .kappa = &[_]safrole_types.ValidatorData{},
-                .lambda = &[_]safrole_types.ValidatorData{},
-                .rho = Rho.init(),
-                .tau = 0,
-                .phi = try Phi.init(allocator),
-                .chi = Chi.init(allocator),
-                .psi = Psi.init(allocator),
-                // TODO: make validator count a parameter
-                .pi = try Pi.init(allocator, 6),
-                .xi = Xi(params.epoch_length).init(allocator),
-                .theta = Theta(params.epoch_length).init(allocator),
+                .tau = null,
+                .eta = null,
+
+                .alpha = null,
+                .beta = null,
+                .chi = null,
+                .delta = null,
+                .gamma = null,
+                .iota = null,
+                .kappa = null,
+                .lambda = null,
+                .phi = null,
+                .pi = null,
+                .psi = null,
+                .rho = null,
+                .theta = null,
+                .xi = null,
             };
+        }
+
+        const state_dict = @import("state_dictionary.zig");
+        pub fn buildStateMerklizationDictionary(self: *const JamState(params), allocator: std.mem.Allocator) !state_dict.MerklizationDictionary {
+            return try state_dict.buildStateMerklizationDictionary(params, allocator, self);
+        }
+
+        pub fn buildStateRoot(self: *const JamState(params), allocator: std.mem.Allocator) !types.StateRoot {
+            var map = try self.buildStateMerklizationDictionary(allocator);
+            defer map.deinit();
+            return try @import("state_merklization.zig").merklizeStateDictionary(allocator, &map);
         }
 
         /// Deinitialize and free resources
         pub fn deinit(self: *JamState(params), allocator: std.mem.Allocator) void {
-            self.beta.deinit();
-            self.gamma.deinit(allocator);
-            self.delta.deinit();
-            allocator.free(self.iota);
-            allocator.free(self.kappa);
-            allocator.free(self.lambda);
-            self.phi.deinit();
-            self.chi.deinit();
-            self.psi.deinit();
-            self.pi.deinit();
-            self.xi.deinit();
-            self.theta.deinit();
+            // NOTE: alpha has no allocations, yet?
+            if (self.beta) |*beta| beta.deinit(); // TODO: check and make consistent to take allocator
+            if (self.chi) |*chi| chi.deinit();
+            if (self.delta) |*delta| delta.deinit();
+            if (self.gamma) |*gamma| gamma.deinit(allocator);
+            if (self.iota) |iota| iota.deinit(allocator);
+            if (self.kappa) |kappa| kappa.deinit(allocator);
+            if (self.lambda) |lambda| lambda.deinit(allocator);
+            if (self.phi) |*phi| phi.deinit();
+            if (self.pi) |*pi| pi.deinit();
+            if (self.psi) |*psi| psi.deinit();
+            if (self.theta) |*theta| theta.deinit();
+            if (self.xi) |*xi| xi.deinit();
         }
 
         /// Format
@@ -122,6 +209,62 @@ pub fn JamState(comptime params: Params) type {
             writer: anytype,
         ) !void {
             try @import("state_format/jam_state.zig").format(params, self, fmt, options, writer);
+        }
+
+        /// Merge another state into this one
+        /// If a field is non-null in the source state, it will override the corresponding field in this state
+        /// NOTE: Performs a simple state merge operation for Milestone 1.
+        /// Future versions will implement optimized merge strategies.
+        pub fn merge(
+            self: *JamState(params),
+            other: *const JamState(params),
+            allocator: std.mem.Allocator,
+        ) !void {
+            if (other.tau) |tau| self.tau = tau;
+            if (other.eta) |eta| self.eta = eta;
+
+            // if (source.alpha) |alpha| self.alpha = alpha;
+            // if (source.beta) |beta| self.beta = beta;
+            // if (source.chi) |chi| self.chi = chi;
+            // if (source.delta) |delta| self.delta = delta;
+            if (other.gamma) |*gamma| {
+                if (self.gamma) |*self_gamma| {
+                    try self_gamma.merge(gamma, allocator);
+                } else {
+                    self.gamma = try Gamma(params.validators_count, params.epoch_length).init(allocator);
+                    try self.gamma.?.merge(gamma, allocator);
+                }
+            }
+            if (other.iota) |iota| {
+                if (self.iota) |*self_iota| {
+                    try self_iota.merge(iota);
+                } else {
+                    self.iota = try types.ValidatorSet.init(allocator, params.validators_count);
+                    try self.iota.?.merge(iota);
+                }
+            }
+            if (other.kappa) |kappa| {
+                if (self.kappa) |*self_kappa| {
+                    try self_kappa.merge(kappa);
+                } else {
+                    self.kappa = try types.ValidatorSet.init(allocator, params.validators_count);
+                    try self.kappa.?.merge(kappa);
+                }
+            }
+            if (other.lambda) |lambda| {
+                if (self.lambda) |*self_lambda| {
+                    try self_lambda.merge(lambda);
+                } else {
+                    self.lambda = try types.ValidatorSet.init(allocator, params.validators_count);
+                    try self.lambda.?.merge(lambda);
+                }
+            }
+            // if (source.phi) |phi| self.phi = phi;
+            // if (source.pi) |pi| self.pi = pi;
+            // if (source.psi) |psi| self.psi = psi;
+            // if (source.rho) |rho| self.rho = rho;
+            // if (source.theta) |theta| self.theta = theta;
+            // if (source.xi) |xi| self.xi = xi;
         }
     };
 }
@@ -136,10 +279,10 @@ pub const Theta = @import("available_reports.zig").Theta;
 // TODO: move this to a seperate file
 pub const Gamma = @import("safrole_state.zig").Gamma;
 pub const Delta = @import("services.zig").Delta;
-pub const Eta = safrole_types.Eta;
-pub const Iota = safrole_types.Iota;
-pub const Kappa = safrole_types.Kappa;
-pub const Lambda = safrole_types.Lambda;
+pub const Eta = types.Eta;
+pub const Iota = types.Iota;
+pub const Kappa = types.Kappa;
+pub const Lambda = types.Lambda;
 pub const Rho = @import("pending_reports.zig").Rho;
 pub const Tau = types.TimeSlot;
 pub const Phi = @import("authorization_queue.zig").Phi;

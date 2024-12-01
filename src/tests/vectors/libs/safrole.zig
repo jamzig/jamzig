@@ -5,15 +5,16 @@ const Allocator = std.mem.Allocator;
 const types = @import("types.zig");
 
 pub const HexBytes = types.hex.HexBytes;
+pub const HexBytesFixed = types.hex.HexBytesFixed;
 pub const Ed25519Key = types.hex.HexBytesFixed(32);
-pub const BandersnatchKey = types.hex.HexBytesFixed(32);
+pub const BandersnatchPublic = types.hex.HexBytesFixed(32);
 pub const OpaqueHash = types.hex.HexBytesFixed(32);
 
-pub const TicketOrKey = union(enum) { tickets: []TicketBody, keys: []BandersnatchKey };
+pub const TicketOrKey = union(enum) { tickets: []TicketBody, keys: []BandersnatchPublic };
 
 pub const EpochMark = struct {
     entropy: OpaqueHash,
-    validators: []BandersnatchKey,
+    validators: []BandersnatchPublic,
 };
 
 pub const TicketMark = []TicketBody;
@@ -29,10 +30,10 @@ pub const TicketEnvelope = struct {
 };
 
 pub const ValidatorData = struct {
-    bandersnatch: HexBytes,
-    ed25519: HexBytes,
-    bls: HexBytes,
-    metadata: HexBytes,
+    bandersnatch: HexBytesFixed(32),
+    ed25519: HexBytesFixed(32),
+    bls: HexBytesFixed(144),
+    metadata: HexBytesFixed(128),
 };
 
 // TODO: Make a custom type to handle TicketOrKey

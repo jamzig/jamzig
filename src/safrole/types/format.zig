@@ -1,5 +1,6 @@
 const std = @import("std");
-const types = @import("../types.zig");
+const types = @import("../../types.zig");
+const safrole_types = @import("../types.zig");
 
 pub fn formatInput(input: types.Input, writer: anytype) !void {
     try writer.writeAll("Input {\n");
@@ -19,7 +20,7 @@ pub fn formatInput(input: types.Input, writer: anytype) !void {
     try writer.writeAll("}\n");
 }
 
-pub fn formatState(state: types.State, writer: anytype) !void {
+pub fn formatState(state: safrole_types.State, writer: anytype) !void {
     try writer.writeAll("State {\n");
 
     try writer.writeAll("\n---- Timeslot (τ) ----\n");
@@ -64,7 +65,7 @@ pub fn formatState(state: types.State, writer: anytype) !void {
     try writer.print("  gamma_z: 0x{x}\n", .{std.fmt.fmtSliceHexLower(&state.gamma_z)});
 
     // Calculate and print total validators
-    const totalValidators = state.lambda.len + state.kappa.len + state.gamma_k.len + state.iota.len;
+    const totalValidators = state.lambda.len() + state.kappa.len() + state.gamma_k.len() + state.iota.len();
     try writer.writeAll("\n---- Total Validators ----\n");
     try writer.print("  {} validators\n", .{totalValidators});
 
@@ -125,16 +126,16 @@ fn formatTicketSlice(writer: anytype, name: []const u8, tickets: []const types.T
     }
 }
 
-fn formatKeySlice(writer: anytype, name: []const u8, keys: []const types.BandersnatchKey) !void {
+fn formatKeySlice(writer: anytype, name: []const u8, keys: []const types.BandersnatchPublic) !void {
     try writer.print("  {s}: {} keys\n", .{ name, keys.len });
     for (keys, 0..) |key, i| {
         try writer.print("    Key {}: 0x{x}\n", .{ i, std.fmt.fmtSliceHexLower(&key) });
     }
 }
 
-fn formatValidatorSlice(writer: anytype, name: []const u8, validators: []const types.ValidatorData) !void {
-    try writer.print("  {s}: {} validators\n", .{ name, validators.len });
-    for (validators, 0..) |validator, i| {
+fn formatValidatorSlice(writer: anytype, name: []const u8, validators: types.ValidatorSet) !void {
+    try writer.print("  {s}: {} validators\n", .{ name, validators.len() });
+    for (validators.items(), 0..) |validator, i| {
         try writer.print("    Validator {}:\n", .{i});
         try writer.print("      bandersnatch: 0x{x}\n", .{std.fmt.fmtSliceHexLower(&validator.bandersnatch)});
         try writer.print("      ed25519: 0x{x}\n", .{std.fmt.fmtSliceHexLower(&validator.ed25519)});

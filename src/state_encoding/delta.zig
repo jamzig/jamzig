@@ -11,22 +11,36 @@ pub fn encodeServiceAccountBase(account: *const ServiceAccount, writer: anytype)
     // Write code hash (a_c)
     try writer.writeAll(&account.code_hash);
 
-    const storage_footprint = account.storageFootprint();
-
     // Write 8-byte values in sequence (a_b, a_g, a_m, a_l)
     try writer.writeInt(u64, account.balance, .little); // a_b
     try writer.writeInt(u64, account.min_gas_accumulate, .little); // a_g
     try writer.writeInt(u64, account.min_gas_on_transfer, .little); // a_m
+
+    const storage_footprint = account.storageFootprint();
     try writer.writeInt(u64, storage_footprint.a_l, .little); // a_l
 
     // Write 4-byte items count (a_i)
     try writer.writeInt(u32, storage_footprint.a_i, .little);
 }
 
+const state_dictionary = @import("../state_dictionary.zig");
+
 /// Encodes storage entries: C(s, h) ↦ v
 pub fn encodeStorageEntry(storage_entry: []const u8, writer: anytype) !void {
     // Write value (v)
     try writer.writeAll(storage_entry);
+}
+
+/// Encodes storage key using buildStorageKey helper
+pub fn encodeStorageEntryKey(key: [32]u8, writer: anytype) !void {
+    const storage_key = state_dictionary.buildStorageKey(key);
+    try writer.writeAll(&storage_key);
+}
+
+/// Encodes preimage key using buildPreimageKey helper
+pub fn encodePreimageKey(key: [32]u8, writer: anytype) !void {
+    const preimage_key = state_dictionary.buildPreimageKey(key);
+    try writer.writeAll(&preimage_key);
 }
 
 /// Encodes preimage lookups: C(s, h) ↦ p
@@ -36,16 +50,9 @@ pub fn encodePreimage(pre_image: []const u8, writer: anytype) !void {
 }
 
 /// Encodes preimage timestamps: E_4(l) ⌢ (¬h_4...)
-pub fn encodePreimageKey(key: PreimageLookupKey, writer: anytype) !void {
-    // Write length (l) as 4 bytes
-    try writer.writeInt(u32, key.length, .little);
-
-    // Create modified hash with inverted upper bits
-    var modified_hash: [28]u8 = key.hash[4..].*;
-    for (&modified_hash) |*byte| {
-        byte.* = ~byte.*;
-    }
-    try writer.writeAll(&modified_hash);
+pub fn encodePreimageLookupKey(key: PreimageLookupKey, writer: anytype) !void {
+    const preimage_lookup_key = @import("../state_dictionary.zig").buildPreimageLookupKey(key);
+    try writer.writeAll(&preimage_lookup_key);
 }
 
 /// Encodes preimage lookup:  E(↕[E_4(x) | x <− t])
@@ -105,6 +112,19 @@ test "encodeStorageEntry" {
     try testing.expectEqualSlices(u8, &storage_entry, buffer.items);
 }
 
+test "encodePreimageKey" {
+    const key = [_]u8{0x44} ** 32;
+
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    try encodePreimageKey(key, buffer.writer());
+
+    const expected = [_]u8{ 0xFE, 0xFF, 0xFF, 0xFF } ++ [_]u8{0x44} ** 28;
+
+    try testing.expectEqualSlices(u8, &expected, buffer.items);
+}
+
 test "encodePreimage" {
     const pre_image = [_]u8{ 1, 2, 3, 4, 5 };
 
@@ -114,22 +134,6 @@ test "encodePreimage" {
     try encodePreimage(&pre_image, buffer.writer());
 
     try testing.expectEqualSlices(u8, &pre_image, buffer.items);
-}
-
-test "encodePreimageKey" {
-    const key = PreimageLookupKey{
-        .length = 5,
-        .hash = [_]u8{0xFF} ** 32,
-    };
-
-    var buffer = std.ArrayList(u8).init(testing.allocator);
-    defer buffer.deinit();
-
-    try encodePreimageKey(key, buffer.writer());
-
-    const expected = [_]u8{ 5, 0, 0, 0 } ++ [_]u8{0x00} ** 28;
-
-    try testing.expectEqualSlices(u8, &expected, buffer.items);
 }
 
 test "encodePreimageLookup" {

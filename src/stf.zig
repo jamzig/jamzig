@@ -42,18 +42,53 @@ const Header = types.Header;
 
 const Params = @import("jam_params.zig").Params;
 
-pub fn stateTransition(allocator: Allocator, params: Params, current_state: *const JamState, new_block: Block) !JamState {
-    var new_state: JamState = undefined;
+/// State Transition Function Implementation
+///
+/// This is a naive, sequential implementation of JAM's state transition function
+/// that processes blocks in a straightforward manner, directly updating state
+/// without optimizations for branching, reversals, or concurrent access.
+///
+/// Performance is not a primary concern in this initial implementation as it
+/// assumes a clean, linear import of blocks without any forks or reorganizations.
+/// The focus is on correctness and direct mapping to the protocol specification.
+///
+/// Future iterations will introduce more sophisticated data structures and
+/// algorithms to handle:
+/// - Chain reorganizations and forks
+/// - Efficient state storage and retrieval
+/// - Concurrent block processing
+/// - Memory-efficient state updates
+/// - Rollback capabilities
+///
+/// These optimizations will emerge naturally as the implementation progresses
+/// and the specific performance requirements become clearer through real-world
+/// usage patterns.
+pub fn stateTransition(
+    comptime params: Params,
+    allocator: Allocator,
+    current_state: *const JamState(params),
+    new_block: *const Block,
+) !JamState(params) {
+    // NOTE: challenge with this state transition is to be able to update fields and make sure appropiate
+    // memory is freed when doing so. As such, maybe its better to work with updates or deltas which will also
+    // communicate what has changed. These deltas can then be applied to a JamState, and we can get a summary of what
+    // has been changed.
+
+    var new_state: JamState(params) = try JamState(params).init(allocator);
 
     // Step 1: Time Transition (τ')
     // Purpose: Update the blockchain's internal time based on the new block's header.
     // This step ensures that the blockchain's concept of time progresses with each new block.
     // It's crucial for maintaining the temporal order of events and for time-based protocol rules.
-    new_state.tau = try transitionTime(
-        allocator,
-        &current_state.tau,
-        new_block.header,
-    );
+    if (current_state.tau) |tau| {
+        new_state.tau = try transitionTime(
+            allocator,
+            tau,
+            new_block.header,
+        );
+    } else {
+        return error.UninitializedTau;
+    }
 
     // Step 2: Recent History Transition (β')
     // Purpose: Update the recent history of blocks with information from the new block.
@@ -61,11 +96,11 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
     // - Validating new blocks (e.g., checking parent hashes)
     // - Handling short-term chain reorganizations
     // - Providing context for other protocol operations
-    new_state.beta = try transitionRecentHistory(
-        allocator,
-        &current_state.beta,
-        new_block,
-    );
+    // new_state.beta = try transitionRecentHistory(
+    //     allocator,
+    //     &current_state.beta,
+    //     new_block,
+    // );
 
     // Step 3-5: Safrole Consensus Mechanism Transition (γ', η', ι', κ', λ')
     // Purpose: Update the consensus-related state components based on the Safrole rules.
@@ -77,21 +112,40 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
     // - λ': Updating the set of validators from the previous epoch
     // These updates ensure the proper rotation and management of validators,
     // maintain the chain's randomness, and prepare for future epochs.
-    const safrole_transition = try transitionSafrole(
+    var safrole_transition = try transitionSafrole(
+        params,
         allocator,
-        &current_state.gamma,
-        &current_state.eta,
-        &current_state.iota,
-        &current_state.kappa,
-        &current_state.lambda,
-        &current_state.tau,
+        &current_state.gamma.?,
+        &current_state.eta.?,
+        &current_state.iota.?,
+        &current_state.kappa.?,
+        &current_state.lambda.?,
+        &current_state.tau.?,
         new_block,
     );
-    new_state.gamma = safrole_transition.gamma;
-    new_state.eta = safrole_transition.eta;
-    new_state.iota = safrole_transition.iota;
-    new_state.kappa = safrole_transition.kappa;
-    new_state.lambda = safrole_transition.lambda;
+    // NOTE: only deinit the markers as we are using rest of allocated
+    // fiels in the new state
+    defer safrole_transition.deinit_markers(allocator);
+
+    // Extract state components from post_state
+    new_state.gamma = .{
+        .k = safrole_transition.post_state.gamma_k,
+        .a = safrole_transition.post_state.gamma_a,
+        .s = safrole_transition.post_state.gamma_s,
+        .z = safrole_transition.post_state.gamma_z,
+    };
+    new_state.eta = safrole_transition.post_state.eta;
+    new_state.iota = safrole_transition.post_state.iota;
+    new_state.kappa = safrole_transition.post_state.kappa;
+    new_state.lambda = safrole_transition.post_state.lambda;
+
+    // Store markers if present
+    // if (safrole_transition.epoch_marker) |marker| {
+    //     try new_state.storeEpochMarker(allocator, marker);
+    // }
+    // if (safrole_transition.ticket_marker) |marker| {
+    //     try new_state.storeTicketMarker(allocator, marker);
+    // }
 
     // Step 6: Dispute Resolution Transition (ψ')
     // Purpose: Process and update the state related to disputes and judgments.
@@ -100,14 +154,14 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
     // - Updates to the set of known valid or invalid blocks/transactions
     // - Potential slashing or penalty applications for misbehaving validators
     // It's crucial for maintaining the integrity and security of the network.
-    new_state.psi = try transitionDisputes(
-        allocator,
-        params.validators_count,
-        &current_state.psi,
-        &current_state.kappa,
-        &current_state.lambda,
-        new_block.extrinsic.disputes,
-    );
+    // new_state.psi = try transitionDisputes(
+    //     allocator,
+    //     params.validators_count,
+    //     &current_state.psi,
+    //     &current_state.kappa,
+    //     &current_state.lambda,
+    //     new_block.extrinsic.disputes,
+    // );
 
     // Step 7: Service Accounts Transition (δ')
     // Purpose: Update the state of service accounts, which are similar to smart contracts.
@@ -116,11 +170,11 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
     // - Updates to existing service account states
     // - Potential creation or deletion of service accounts
     // It's essential for maintaining the application layer of the blockchain.
-    new_state.delta = try transitionServiceAccounts(
-        allocator,
-        &current_state.delta,
-        new_block.extrinsic.preimages,
-    );
+    // new_state.delta = try transitionServiceAccounts(
+    //     allocator,
+    //     &current_state.delta,
+    //     new_block.extrinsic.preimages,
+    // );
 
     // Step 8: Core Allocations Transition (ρ')
     // Purpose: Update the state related to core assignments and work packages.
@@ -129,12 +183,12 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
     // - Processing guarantees and assurances for work packages
     // - Updating the status of ongoing work on each core
     // It's crucial for managing the computational resources of the network.
-    new_state.rho = try transitionCoreAllocations(
-        allocator,
-        &current_state.rho,
-        new_block.extrinsic.assurances,
-        new_block.extrinsic.guarantees,
-    );
+    // new_state.rho = try transitionCoreAllocations(
+    //     allocator,
+    //     &current_state.rho,
+    //     new_block.extrinsic.assurances,
+    //     new_block.extrinsic.guarantees,
+    // );
 
     // Step 9-10: Work Report Accumulation (ready', accumulated', δ', χ', ι', φ', beefycommitmap)
     // Purpose: Process completed work reports and accumulate their results.
@@ -146,18 +200,19 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
     // - Creating a BEEFY commitment map for cross-chain validation
     // This step is central to the blockchain's ability to process and apply
     // the results of off-chain computation.
-    const accumulation_transition = try accumulateWorkReports(
-        allocator,
-        &current_state.delta,
-        &current_state.chi,
-        &current_state.iota,
-        &current_state.phi,
-        &new_state.rho,
-    );
-    new_state.delta = accumulation_transition.delta;
-    new_state.chi = accumulation_transition.chi;
-    new_state.iota = accumulation_transition.iota;
-    new_state.phi = accumulation_transition.phi;
+
+    // const accumulation_transition = try accumulateWorkReports(
+    //     allocator,
+    //     &current_state.delta,
+    //     &current_state.chi,
+    //     &current_state.iota,
+    //     &current_state.phi,
+    //     &new_state.rho,
+    // );
+    // new_state.delta = accumulation_transition.delta;
+    // new_state.chi = accumulation_transition.chi;
+    // new_state.iota = accumulation_transition.iota;
+    // new_state.phi = accumulation_transition.phi;
 
     // Step 11: Authorization Updates (α')
     // Purpose: Update the core authorization state and associated queues.
@@ -167,12 +222,13 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
     // - Managing the authorization queue for future blocks
     // It's crucial for controlling access to core resources and managing
     // the flow of work through the system.
-    new_state.alpha = try transitionAuthorizations(
-        allocator,
-        &current_state.alpha,
-        &new_state.phi,
-        new_block.extrinsic.guarantees,
-    );
+
+    // new_state.alpha = try transitionAuthorizations(
+    //     allocator,
+    //     &current_state.alpha,
+    //     &new_state.phi,
+    //     new_block.extrinsic.guarantees,
+    // );
 
     // Step 12: Validator Statistics Updates (π')
     // Purpose: Update performance metrics and statistics for validators.
@@ -182,88 +238,128 @@ pub fn stateTransition(allocator: Allocator, params: Params, current_state: *con
     // - Calculating and storing performance indicators
     // These statistics are crucial for the proper functioning of the
     // proof-of-stake system and for incentivizing good validator behavior.
-    new_state.pi = try transitionValidatorStatistics(
-        allocator,
-        &current_state.pi,
-        new_block,
-        &new_state.kappa,
-    );
+
+    // new_state.pi = try transitionValidatorStatistics(
+    //     allocator,
+    //     &current_state.pi,
+    //     new_block,
+    //     &new_state.kappa,
+    // );
 
     return new_state;
 }
 
 pub fn transitionTime(
     allocator: Allocator,
-    current_tau: *const state.Tau,
+    current_tau: state.Tau,
     header: Header,
 ) !state.Tau {
     _ = allocator;
     _ = current_tau;
-    _ = header;
     // Transition τ based on the new block's header
+    // TODO: do some checking
+    return header.slot;
 }
 
 pub fn transitionRecentHistory(
     allocator: Allocator,
     current_beta: *const state.Beta,
-    new_block: Block,
+    new_block: *const Block,
 ) !state.Beta {
-    _ = allocator;
-    _ = current_beta;
-    _ = new_block;
+    const RecentBlock = @import("recent_blocks.zig").RecentBlock;
     // Transition β with information from the new block
+    var new_beta = try current_beta.deepClone(allocator);
+    try new_beta.import(allocator, try RecentBlock.fromBlock(allocator, new_block));
+    return new_beta;
 }
 
+// TODO: now worth to be a function
+pub fn getBlockEntropy(
+    header: *const types.Header,
+) types.BandersnatchVrfOutput {
+    const vrf = @import("vrf.zig");
+    return vrf.getVrfOutput(&header.entropy_source);
+}
+
+const safrole = @import("safrole.zig");
 pub fn transitionSafrole(
+    comptime params: Params,
     allocator: Allocator,
-    current_gamma: *const state.Gamma,
+    current_gamma: *const state.Gamma(params.validators_count, params.epoch_length),
     current_eta: *const state.Eta,
     current_iota: *const state.Iota,
     current_kappa: *const state.Kappa,
     current_lambda: *const state.Lambda,
     current_tau: *const state.Tau,
-    new_block: Block,
-) !struct { gamma: state.Gamma, eta: state.Eta, iota: state.Iota, kappa: state.Kappa, lambda: state.Lambda } {
-    _ = allocator;
-    _ = current_gamma;
-    _ = current_eta;
-    _ = current_iota;
-    _ = current_kappa;
-    _ = current_lambda;
-    _ = current_tau;
-    _ = new_block;
-    // Transition γ, η, ι, κ, and λ based on Safrole consensus rules
+    new_block: *const Block,
+) !safrole.Result {
+
+    // Verify the entropy source signature from the block header
+    const entropy = getBlockEntropy(
+        &new_block.header,
+    );
+    // Prepare safrole input from block
+    const input = .{
+        .slot = new_block.header.slot,
+        .entropy = entropy,
+        .extrinsic = new_block.extrinsic.tickets,
+    };
+
+    // Prepare current safrole state
+    const safrole_state = .{
+        .tau = current_tau.*,
+        .eta = current_eta.*,
+        .lambda = current_lambda.*,
+        .kappa = current_kappa.*,
+        .gamma_k = current_gamma.k,
+        .iota = current_iota.*,
+        .gamma_a = current_gamma.a,
+        .gamma_s = current_gamma.s,
+        .gamma_z = current_gamma.z,
+    };
+
+    // Call safrole transition
+    return try safrole.transition(
+        allocator,
+        params,
+        safrole_state,
+        input.slot,
+        // TODO: get the entropy out of the entropy source
+        input.entropy,
+        input.extrinsic,
+    );
 }
 
-fn validator_key(validator: types.ValidatorData) types.Ed25519Key {
+fn validator_key(validator: types.ValidatorData) types.Ed25519Public {
     return validator.ed25519;
 }
 
 pub fn transitionDisputes(
+    comptime validators_count: u32,
+    comptime core_count: u16,
     allocator: Allocator,
-    validator_count: usize,
     current_psi: *const state.Psi,
     current_kappa: state.Kappa,
     current_lambda: state.Lambda,
-    current_rho: *state.Rho,
+    current_rho: *state.Rho(core_count),
     current_epoch: types.Epoch,
     xtdisputes: types.DisputesExtrinsic,
 ) !state.Psi {
     // Map current_kappa to extract Edwards public keys
     const current_kappa_keys = try utils.mapAlloc(
         types.ValidatorData,
-        types.Ed25519Key,
+        types.Ed25519Public,
         allocator,
-        current_kappa,
+        current_kappa.items(),
         validator_key,
     );
     defer allocator.free(current_kappa_keys);
 
     const current_lambda_keys = try utils.mapAlloc(
         types.ValidatorData,
-        types.Ed25519Key,
+        types.Ed25519Public,
         allocator,
-        current_lambda,
+        current_lambda.items(),
         validator_key,
     );
     defer allocator.free(current_lambda_keys);
@@ -276,12 +372,12 @@ pub fn transitionDisputes(
         current_psi,
         current_kappa_keys,
         current_lambda_keys,
-        validator_count,
+        validators_count,
         current_epoch,
     );
 
     // Transition ψ based on new disputes
-    var posterior_state = try disputes.processDisputesExtrinsic(current_psi, current_rho, xtdisputes, validator_count);
+    var posterior_state = try disputes.processDisputesExtrinsic(core_count, current_psi, current_rho, xtdisputes, validators_count);
     errdefer posterior_state.deinit();
 
     // Verify correctness of the updated state after processing disputes

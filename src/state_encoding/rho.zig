@@ -3,17 +3,23 @@ const std = @import("std");
 const types = @import("../types.zig");
 const WorkReport = types.WorkReport;
 
+const jam_params = @import("../jam_params.zig");
+
 const encoder = @import("../codec/encoder.zig");
 const codec = @import("../codec.zig");
 
 const pending_reports = @import("../pending_reports.zig");
 const Rho = pending_reports.Rho;
 
-pub fn encode(self: *const Rho, writer: anytype) !void {
+pub fn encode(
+    comptime params: jam_params.Params,
+    rho: *const Rho(params.core_count),
+    writer: anytype,
+) !void {
     // The number of cores (C) is not encoded as it is a constant
 
     // Encode each report entry
-    for (self.reports) |maybe_entry| {
+    for (rho.reports) |maybe_entry| {
         if (maybe_entry) |entry| {
             // Entry exists
             try writer.writeByte(1);
@@ -47,7 +53,9 @@ const createEmptyWorkReport = @import("../tests/fixtures.zig").createEmptyWorkRe
 const TEST_HASH = [_]u8{ 'T', 'E', 'S', 'T' } ++ [_]u8{0} ** 28;
 
 test "encode" {
-    var rho = Rho.init();
+    const TINY = @import("../jam_params.zig").TINY_PARAMS;
+
+    var rho = Rho(TINY.core_count).init();
     const work_report1 = createEmptyWorkReport(TEST_HASH);
     const test_hash2 = [_]u8{ 'T', 'E', 'S', 'T', '2' } ++ [_]u8{0} ** 27;
     const work_report2 = createEmptyWorkReport(test_hash2);
@@ -63,7 +71,7 @@ test "encode" {
     var writer = buffer.writer();
 
     // Encode the Rho state
-    try encode(&rho, &writer);
+    try encode(TINY, &rho, &writer);
 
     // TODO: test the encode output in more detail
     // // Verify the encoded output

@@ -4,14 +4,17 @@ const TestVector = @import("../tests/vectors/libs/safrole.zig").TestVector;
 
 const tests = @import("../tests.zig");
 const safrole = @import("../safrole.zig");
+const safrole_types = @import("../safrole/types.zig");
+
+const adaptor = @import("adaptor.zig");
 
 const diff = @import("../safrole_test/diffz.zig");
 
 pub const Fixtures = struct {
-    pre_state: safrole.types.State,
-    post_state: safrole.types.State,
-    input: safrole.types.Input,
-    output: safrole.types.Output,
+    pre_state: safrole_types.State,
+    post_state: safrole_types.State,
+    input: adaptor.Input,
+    output: adaptor.Output,
 
     allocator: std.mem.Allocator,
 
@@ -30,7 +33,7 @@ pub const Fixtures = struct {
 
     pub fn diffAgainstPostState(
         self: @This(),
-        state: *const safrole.types.State,
+        state: *const safrole_types.State,
     ) ![]const u8 {
         return try diff.diffStates(
             self.allocator,
@@ -41,7 +44,7 @@ pub const Fixtures = struct {
 
     pub fn diffAgainstPostStateAndPrint(
         self: @This(),
-        state: *const safrole.types.State,
+        state: *const safrole_types.State,
     ) !void {
         const diff_result = self.diffAgainstPostState(state) catch |err| {
             std.debug.print("DiffAgainstPostState err {any}\n", .{err});
@@ -81,11 +84,11 @@ pub const Fixtures = struct {
         self.output.deinit(self.allocator);
     }
 
-    pub fn expectPostState(self: @This(), actual_state: *const safrole.types.State) !void {
+    pub fn expectPostState(self: @This(), actual_state: *const safrole_types.State) !void {
         try std.testing.expectEqualDeep(self.post_state, actual_state.*);
     }
 
-    pub fn expectOutput(self: @This(), actual_output: safrole.types.Output) !void {
+    pub fn expectOutput(self: @This(), actual_output: adaptor.Output) !void {
         switch (self.output) {
             .err => |expected_err| {
                 try std.testing.expectEqual(expected_err, actual_output.err);
@@ -96,7 +99,7 @@ pub const Fixtures = struct {
                 if (expected_ok.epoch_mark) |expected_epoch_mark| {
                     const actual_epoch_mark = actual_ok.epoch_mark orelse return error.MissingEpochMark;
                     try std.testing.expectEqualSlices(
-                        safrole.types.BandersnatchKey,
+                        safrole.types.BandersnatchPublic,
                         expected_epoch_mark.validators,
                         actual_epoch_mark.validators,
                     );
@@ -111,8 +114,8 @@ pub const Fixtures = struct {
                     const actual_tickets_mark = actual_ok.tickets_mark orelse return error.MissingTicketsMark;
                     try std.testing.expectEqualSlices(
                         safrole.types.TicketBody,
-                        expected_tickets_mark,
-                        actual_tickets_mark,
+                        expected_tickets_mark.tickets,
+                        actual_tickets_mark.tickets,
                     );
                 } else {
                     try std.testing.expectEqual(
@@ -126,7 +129,7 @@ pub const Fixtures = struct {
 
     /// Expect the output to be null, also double checks the expected output
     /// is null.
-    pub fn expectOkOutputWithNullEpochAndTicketMarkers(self: @This(), actual_output: safrole.types.Output) !void {
+    pub fn expectOkOutputWithNullEpochAndTicketMarkers(self: @This(), actual_output: adaptor.Output) !void {
         switch (actual_output) {
             .err => return error.UnexpectedError,
             .ok => |actual_ok| {

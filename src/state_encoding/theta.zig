@@ -18,7 +18,7 @@ pub fn encode(theta: anytype, writer: anytype) !void {
     for (theta.entries) |slot_entry| {
         // Encode the dependencies set
         // First write number of dependencies
-        try writer.writeAll(encoder.encodeInteger(slot_entry.items.len).as_slice());
+        try codec.writeInteger(slot_entry.items.len, writer);
         for (slot_entry.items) |entry| {
             try encodeEntry(theta.allocator, entry, writer);
         }
@@ -38,7 +38,7 @@ pub fn encodeEntry(allocator: std.mem.Allocator, entry: available_reports.Entry,
 
     // Encode the dependencies
     const dependency_count = entry.dependencies.count();
-    try writer.writeAll(encoder.encodeInteger(dependency_count).as_slice());
+    try codec.writeInteger(dependency_count, writer);
 
     // TODO: this pattern of having a dictionary and needing to sort by key
     // is all over the place, we need a utility for this.
@@ -95,27 +95,21 @@ test "encode" {
 
     const written = fbs.getWritten();
 
-    const expected = // The expected payout
+    const expected = // The expected payload
         [_]u8{0x01} // Number of entries Slot 0
-    ++ [_]u8{0x01} ** 32 ++ [_]u8{0} ** (269 - 32) // Empty Work report
+    ++ [_]u8{0x01} ** 32 ++ [_]u8{0} ** (272 - 32) // Empty Work report
     ++ [_]u8{0x02} // Number of dependencies}
     ++ [_]u8{3} ** 32 // Dependency 2 => sorted
     ++ [_]u8{4} ** 32 // Dependency 1
     ++ [_]u8{0x00} // Number of entries Slot 1
     ++ [_]u8{0x00} // Number of entries Slot 2
-    ++ [_]u8{0x01} // Number of entries Slot 1
-    ++ [_]u8{0x05} ** 32 ++ [_]u8{0} ** (269 - 32) // Empty Work report
+    ++ [_]u8{0x01} // Number of entries Slot 3
+    ++ [_]u8{0x05} ** 32 ++ [_]u8{0} ** (272 - 32) // Empty Work report
     ++ [_]u8{0x01} // Number of dependencies}
     ++ [_]u8{7} ** 32 // Dependency 1
+
+    ++ [_]u8{0} ** 8 // the rest of the epochs
     ;
 
-    try testing.expectEqualSlices(u8, &expected, written[0..expected.len]);
-
-    // Check that the rest of the written memory is all zeros
-    for (written[expected.len..]) |byte| {
-        try testing.expectEqual(@as(u8, 0), byte);
-    }
-
-    // Check that the total length is as expected, just 0 lengths for all the other slots
-    try testing.expectEqual(@as(usize, expected.len + 12 - 4), written.len);
+    try testing.expectEqualSlices(u8, &expected, written);
 }

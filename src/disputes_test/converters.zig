@@ -5,9 +5,9 @@ const types = @import("../types.zig");
 
 const disputes = @import("../disputes.zig");
 
-pub fn convertValidatorData(allocator: std.mem.Allocator, test_data: []tvector.ValidatorData) ![]types.ValidatorData {
-    var result = try allocator.alloc(types.ValidatorData, test_data.len);
-    errdefer allocator.free(result);
+pub fn convertValidatorData(allocator: std.mem.Allocator, test_data: []tvector.ValidatorData) !types.ValidatorSet {
+    var set = try types.ValidatorSet.init(allocator, @intCast(test_data.len));
+    var result = set.items();
 
     for (test_data, 0..) |data, i| {
         result[i] = .{
@@ -18,7 +18,7 @@ pub fn convertValidatorData(allocator: std.mem.Allocator, test_data: []tvector.V
         };
     }
 
-    return result;
+    return set;
 }
 
 pub fn convertPsi(allocator: std.mem.Allocator, test_psi: tvector.DisputesRecords) !state.Psi {
@@ -105,10 +105,10 @@ pub fn convertDisputesExtrinsic(allocator: std.mem.Allocator, test_disputes: tve
 
 const createEmptyWorkReport = @import("../tests/fixtures.zig").createEmptyWorkReport;
 
-pub fn convertRho(allocator: std.mem.Allocator, test_rho: tvector.AvailabilityAssignments) !state.Rho {
+pub fn convertRho(comptime core_count: u16, allocator: std.mem.Allocator, test_rho: tvector.AvailabilityAssignments) !state.Rho(core_count) {
     _ = allocator;
 
-    var rho = state.Rho.init();
+    var rho = state.Rho(core_count).init();
 
     for (test_rho, 0..) |assignment, core| {
         if (assignment) |a| {
