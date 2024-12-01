@@ -309,6 +309,7 @@ pub const GammaS = union(enum) {
     tickets: []TicketBody,
     keys: []BandersnatchPublic,
 
+    // TODO: make the const* to *
     pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
         switch (self.*) {
             .tickets => |tickets| allocator.free(tickets),

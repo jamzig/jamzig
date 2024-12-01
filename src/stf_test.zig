@@ -32,10 +32,10 @@ test "jamtestnet.jamduna: safrole import" {
     const allocator = testing.allocator;
 
     // Genesis state
-    const genesis_state_dict = try jamtestnet_traces.loadStateDictionaryBin(allocator, "src/stf_test/jamtestnet/traces/safrole/jam_duna/traces/genesis.bin");
-    const genesis_jam_state = try state_dict_reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &genesis_state_dict);
-
-    _ = genesis_jam_state;
+    var genesis_state_dict = try jamtestnet_traces.loadStateDictionaryBin(allocator, "src/stf_test/jamtestnet/traces/safrole/jam_duna/traces/genesis.bin");
+    defer genesis_state_dict.deinit();
+    var genesis_jam_state = try state_dict_reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &genesis_state_dict);
+    defer genesis_jam_state.deinit(allocator);
 
     // Get ordered block files
     var jam_state = try buildGenesisState(JAMDUNA_PARAMS, allocator, @embedFile("stf_test/jamtestnet/traces/safrole/jam_duna/state_snapshots/genesis.json"));
