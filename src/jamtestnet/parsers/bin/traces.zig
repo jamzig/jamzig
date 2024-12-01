@@ -38,6 +38,6 @@ pub fn loadStateDictionaryBin(allocator: std.mem.Allocator, file_path: []const u
 
 test "loadStateDictionaryBin" {
     const allocator = std.testing.allocator;
-    var dict = try loadStateDictionaryBin(allocator, "src/stf_test/jamtestnet/traces/safrole/jam_duna/traces/genesis.bin");
+    var dict = try loadStateDictionaryBin(allocator, "src/jamtestnet/data/traces/safrole/jam_duna/traces/genesis.bin");
     defer dict.deinit();
 }

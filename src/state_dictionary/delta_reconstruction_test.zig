@@ -80,7 +80,7 @@ test "reconstruct delta preimage entry" {
     );
 
     // Test reconstruction
-    try delta_reconstruction.reconstructPreimageEntry(allocator, &delta, key, &value);
+    try delta_reconstruction.reconstructPreimageEntry(allocator, &delta, null, key, &value);
 
     // Verify
     const account = delta.accounts.get(service_id) orelse return error.AccountNotFound;

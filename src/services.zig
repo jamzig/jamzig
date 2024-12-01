@@ -134,7 +134,7 @@ pub const ServiceAccount = struct {
         return self.preimages.get(hash);
     }
 
-    pub fn integratePreimageLookup(self: *ServiceAccount, hash: Hash, length: u32, timeslot: Timeslot) !void {
+    pub fn integratePreimageLookup(self: *ServiceAccount, hash: Hash, length: u32, timeslot: ?Timeslot) !void {
         const key = PreimageLookupKey{ .hash = hash, .length = length };
         const lookup = self.preimage_lookups.get(key) orelse PreimageLookup{
             .status = .{ timeslot, null, null },
@@ -190,8 +190,8 @@ pub const ServiceAccount = struct {
         // a_l
         var plkeys = self.preimage_lookups.keyIterator();
         var a_l: u64 = 0;
-        while (plkeys.next()) |key| {
-            a_l += 81 + key.length;
+        while (plkeys.next()) |plkey| {
+            a_l += 81 + plkey.length;
         }
 
         var svals = self.storage.valueIterator();
@@ -255,7 +255,9 @@ pub const Delta = struct {
         if (self.getAccount(index)) |account| {
             return account;
         }
-        const account = ServiceAccount.init(self.allocator);
+        var account = ServiceAccount.init(self.allocator);
+        errdefer account.deinit();
+
         try self.putAccount(index, account);
         return self.getAccount(index).?;
     }

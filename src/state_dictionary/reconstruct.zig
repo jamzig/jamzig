@@ -133,7 +133,7 @@ pub fn reconstructState(
                     log.debug("Initializing delta state", .{});
                     jam_state.delta = state.Delta.init(allocator);
                 }
-                try delta_reconstruction.reconstructPreimageEntry(allocator, &jam_state.delta.?, key, value);
+                try delta_reconstruction.reconstructPreimageEntry(allocator, &jam_state.delta.?, jam_state.tau, key, value);
             },
             .delta_lookup => {
                 log.debug("Processing delta lookup entry", .{});

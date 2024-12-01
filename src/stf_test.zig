@@ -6,6 +6,7 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const state_dict = @import("state_dictionary.zig");
 const codec = @import("codec.zig");
+const services = @import("services.zig");
 
 const jam_params = @import("jam_params.zig");
 
@@ -34,6 +35,16 @@ test "jamtestnet.jamduna: safrole import" {
     // Reonstruct state from state dict
     var jam_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &genesis_state_dict);
     defer jam_state.deinit(allocator);
+
+    // NOTE: missing pre_image_lookups in the state dicts will add manuall
+
+    // get the service account
+    const service_account = jam_state.delta.?.accounts.get(0x00).?;
+    const storage_count = service_account.storage.count();
+    const preimages_count = service_account.preimages.count();
+    std.debug.print("\nService Account Stats:\n", .{});
+    std.debug.print("  Storage entries: {d}\n", .{storage_count});
+    std.debug.print("  Preimages entries: {d}\n\n", .{preimages_count});
 
     var parent_state_dict = try jam_state.buildStateMerklizationDictionary(allocator);
     defer parent_state_dict.deinit();

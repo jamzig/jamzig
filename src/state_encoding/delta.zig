@@ -11,12 +11,12 @@ pub fn encodeServiceAccountBase(account: *const ServiceAccount, writer: anytype)
     // Write code hash (a_c)
     try writer.writeAll(&account.code_hash);
 
-    const storage_footprint = account.storageFootprint();
-
     // Write 8-byte values in sequence (a_b, a_g, a_m, a_l)
     try writer.writeInt(u64, account.balance, .little); // a_b
     try writer.writeInt(u64, account.min_gas_accumulate, .little); // a_g
     try writer.writeInt(u64, account.min_gas_on_transfer, .little); // a_m
+
+    const storage_footprint = account.storageFootprint();
     try writer.writeInt(u64, storage_footprint.a_l, .little); // a_l
 
     // Write 4-byte items count (a_i)

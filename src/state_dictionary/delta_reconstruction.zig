@@ -3,7 +3,11 @@ const state = @import("../state.zig");
 const types = @import("../types.zig");
 const state_decoding = @import("../state_decoding.zig");
 const state_dictionary = @import("../state_dictionary.zig");
+const services = @import("../services.zig");
+
 const Blake2b256 = std.crypto.hash.blake2.Blake2b(256);
+
+const log = std.log.scoped(.state_dictionary_reconstruct);
 
 /// Reconstructs base service account data from key type 255
 pub fn reconstructServiceAccountBase(
@@ -54,6 +58,7 @@ pub fn reconstructStorageEntry(
 pub fn reconstructPreimageEntry(
     allocator: std.mem.Allocator,
     delta: *state.Delta,
+    tau: ?types.TimeSlot,
     key: [32]u8,
     value: []const u8,
 ) !void {
@@ -66,7 +71,8 @@ pub fn reconstructPreimageEntry(
     // to rebuild the state. But it's messy.
 
     // Get or create the account
-    var account = try delta.getOrCreateAccount(dkey.service_index);
+    var account: *services.ServiceAccount = //
+        try delta.getOrCreateAccount(dkey.service_index);
 
     // Create owned copy of value and store with full hash
     const owned_value = try allocator.dupe(u8, value);
@@ -83,6 +89,19 @@ pub fn reconstructPreimageEntry(
     // we have to decode the value to add it the account preimages, but we also do
     // not have access to the hash
     try account.preimages.put(hash_of_value, owned_value);
+
+    // GP0.5.0 @ 9.2.1 The state of the lookup system natu-
+    // rally satisfies a number of invariants. Firstly, any preim-
+    // age value must correspond to its hash.
+
+    if (tau == null) {
+        log.warn("tau not set yet", .{});
+    }
+    try account.integratePreimageLookup(
+        hash_of_value,
+        @intCast(value.len),
+        tau, // NOTE: we place null here for now
+    );
 }
 
 pub fn reconstructPreimageLookupEntry(
@@ -148,7 +167,7 @@ test "reconstructPreimageEntry with hash reconstruction" {
     );
 
     // Test reconstruction
-    try reconstructPreimageEntry(allocator, &delta, key, value);
+    try reconstructPreimageEntry(allocator, &delta, null, key, value);
 
     // Verify preimage entry
     const account = delta.accounts.get(service_id) orelse return error.AccountNotFound;
