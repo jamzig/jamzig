@@ -80,6 +80,9 @@ pub const State = struct {
     /// which is a cryptographic commitment to the current state of ticket
     /// submissions.
     gamma_z: GammaZ,
+
+    /// [ψ_o'] Posterior offenders sequence.
+    post_offenders: []Ed25519Key,
 };
 
 pub const Input = struct {

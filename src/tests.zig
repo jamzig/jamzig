@@ -71,3 +71,4 @@ pub const convert = @import("tests/convert/safrole.zig");
 pub const stateFromTestVector = convert.stateFromTestVector;
 pub const inputFromTestVector = convert.inputFromTestVector;
 pub const outputFromTestVector = convert.outputFromTestVector;
+pub const postOffendersFromPreState = convert.postOffendersFromPreState;

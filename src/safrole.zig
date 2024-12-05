@@ -4,6 +4,7 @@ const ArrayList = std.ArrayList;
 pub const types = @import("types.zig");
 pub const safrole_types = @import("safrole/types.zig");
 pub const entropy = @import("safrole/entropy.zig");
+pub const state = @import("state.zig");
 
 const crypto = @import("crypto.zig");
 
@@ -56,6 +57,7 @@ pub fn transition(
     slot: types.TimeSlot,
     bandersnatch_vrf_output: types.BandersnatchVrfOutput,
     ticket_extrinsic: types.TicketsExtrinsic,
+    offenders: []types.Ed25519Public,
 ) Error!Result {
     // Equation 41: H_t ∈ N_T, P(H)_t < H_t ∧ H_t · P ≤ T
     if (slot <= pre_state.tau) {
@@ -167,7 +169,7 @@ pub fn transition(
         const iota = post_state.iota;
 
         post_state.kappa = gamma_k;
-        post_state.gamma_k = phiZeroOutOffenders(try iota.deepClone(allocator));
+        post_state.gamma_k = phiZeroOutOffenders(try iota.deepClone(allocator), offenders);
         post_state.lambda = kappa;
         lamda.deinit(allocator);
 
@@ -366,9 +368,18 @@ fn extractBandersnatchKeys(allocator: std.mem.Allocator, gamma_k: types.GammaK) 
 }
 
 // 58. PHI: Zero out any offenders on post_state.iota
-fn phiZeroOutOffenders(data: types.ValidatorSet) types.ValidatorSet {
+fn phiZeroOutOffenders(data: types.ValidatorSet, offenders: []types.Ed25519Public) types.ValidatorSet {
     // TODO: (58) Zero out any offenders on post_state.iota, The origin of
     // the offenders is explained in section 10.
+    for (data.items()) |*validator_data| {
+        // check if in offenders list
+        for (offenders) |*offender| {
+            if (std.mem.eql(u8, offender, &validator_data.*.ed25519)) {
+                std.debug.print("Validator data to 0", .{});
+                validator_data.* = std.mem.zeroes(types.ValidatorData);
+            }
+        }
+    }
     return data;
 }
 

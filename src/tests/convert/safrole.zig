@@ -29,6 +29,7 @@ pub fn inputFromTestVector(allocator: Allocator, from: *const tv_lib_safrole.Inp
         .slot = from.slot,
         .entropy = convertOpaqueHash(from.entropy),
         .extrinsic = undefined,
+        .post_offenders = undefined, // NOTE: has to be set seperately from pre_state
     };
 
     to.extrinsic = try allocator.alloc(types.TicketEnvelope, from.extrinsic.len);
@@ -38,6 +39,15 @@ pub fn inputFromTestVector(allocator: Allocator, from: *const tv_lib_safrole.Inp
     }
 
     return to;
+}
+
+pub fn postOffendersFromPreState(allocator: Allocator, pre_state: *const tv_lib_safrole.State) Error![]types.Ed25519Public {
+    // Convert the ed25519 keys from the pre-state's kappa validators
+    const offenders = try allocator.alloc(types.Ed25519Public, pre_state.post_offenders.len);
+    for (pre_state.post_offenders, offenders) |ed25519public, *offender| {
+        offender.* = ed25519public.bytes;
+    }
+    return offenders;
 }
 
 pub fn outputFromTestVector(allocator: Allocator, from: *const tv_lib_safrole.Output) Error!adaptor.Output {

@@ -160,7 +160,10 @@ pub fn buildFixtures(allocator: std.mem.Allocator, name: []const u8) !Fixtures {
 
     // Assume these are populated from your JSON parsing
     const pre_state = try tests.stateFromTestVector(allocator, &tv.pre_state);
-    const input = try tests.inputFromTestVector(allocator, &tv.input);
+
+    // NOTE: split up, due to update in safrole test vectors, may need to restructure
+    var input = try tests.inputFromTestVector(allocator, &tv.input);
+    input.post_offenders = try tests.postOffendersFromPreState(allocator, &tv.pre_state);
 
     const post_state = try tests.stateFromTestVector(allocator, &tv.post_state);
     const output = try tests.outputFromTestVector(allocator, &tv.output);
