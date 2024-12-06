@@ -17,7 +17,7 @@ pub fn format(
     for (self.reports, 0..) |report, i| {
         if (report) |r| {
             try writer.print("    Core {d}: {{\n", .{i});
-            try writer.print("      hash: {s}\n", .{std.fmt.fmtSliceHexLower(&r.hash)});
+            try writer.print("      hash: {s}\n", .{std.fmt.fmtSliceHexLower(&r.hash())});
             try writer.print("      timeslot: {d}\n", .{r.timeslot});
             try writer.writeAll("    }\n");
         }

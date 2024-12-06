@@ -10,7 +10,7 @@ const jam_params = @import("../jam_params.zig");
 const readInteger = @import("utils.zig").readInteger;
 
 pub fn decode(comptime params: jam_params.Params, allocator: std.mem.Allocator, reader: anytype) !Rho(params.core_count) {
-    var rho = Rho(params.core_count).init();
+    var rho = Rho(params.core_count).init(allocator);
 
     // For each core
     for (&rho.reports) |*maybe_entry| {
@@ -150,7 +150,7 @@ test "decode rho - roundtrip" {
     const params = @import("../jam_params.zig").TINY_PARAMS;
 
     // Create original rho state
-    var original = Rho(core_count).init();
+    var original = Rho(core_count).init(testing.allocator);
 
     // Add a report
     const hash = [_]u8{1} ** 32;
