@@ -37,7 +37,7 @@ const log = std.log.scoped(.pending_reports);
 pub const RhoEntry = struct {
     assignment: types.AvailabilityAssignment,
     core: u16,
-    cached_hash: ?WorkReportHash,
+    cached_hash: ?WorkReportHash = null,
 
     const Blake2b256 = std.crypto.hash.blake2.Blake2b256;
 

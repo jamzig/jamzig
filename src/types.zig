@@ -142,6 +142,13 @@ pub const WorkExecResult = union(enum(u8)) {
             else => {},
         }
     }
+
+    pub fn decode(self: *const @This(), _: anytype, reader: anytype) !void {
+        // TODO: we need a decode as well
+        _ = self;
+        _ = reader;
+        @panic("Unimplemented");
+    }
 };
 
 pub const WorkResult = struct {

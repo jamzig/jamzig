@@ -24,16 +24,8 @@ pub fn encode(
             // Entry exists
             try writer.writeByte(1);
 
-            // Encode hash
-            try writer.writeAll(&entry.hash);
-
             // Encode work report
-            try codec.serialize(WorkReport, .{}, writer, entry.work_report);
-
-            // Encode timeslot
-            var buf: [4]u8 = undefined;
-            std.mem.writeInt(u32, &buf, entry.timeslot, .little);
-            try writer.writeAll(&buf);
+            try codec.serialize(types.AvailabilityAssignment, .{}, writer, entry.assignment);
         } else {
             // No entry
             try writer.writeByte(0);
