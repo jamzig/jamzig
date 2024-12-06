@@ -32,20 +32,47 @@ const RefineContext = types.RefineContext;
 const WorkPackageSpec = types.WorkPackageSpec;
 const CoreIndex = types.CoreIndex;
 
+const log = std.log.scoped(.pending_reports);
+
 pub const RhoEntry = struct {
     assignment: types.AvailabilityAssignment,
+    core: u16,
     cached_hash: ?WorkReportHash,
 
-    pub fn init(assignment: types.AvailabilityAssignment) @This() {
+    const Blake2b256 = std.crypto.hash.blake2.Blake2b256;
+
+    pub fn init(core: u16, assignment: types.AvailabilityAssignment) @This() {
         return .{
             .assignment = assignment,
+            .core = core,
             .cached_hash = null,
         };
     }
 
+    pub fn hash_uncached(self: *const @This(), allocator: std.mem.Allocator) !WorkReportHash {
+        // Create an ArrayList to store the serialized data
+        var buffer = std.ArrayList(u8).init(allocator);
+        defer buffer.deinit();
+
+        // Get a writer interface to the buffer
+        const writer = buffer.writer();
+
+        // Write the core index (as u16/CoreIndex) in little-endian
+        try writer.writeInt(u16, self.core, .little);
+
+        const codec = @import("codec.zig");
+        try codec.serialize(WorkReport, .{}, writer, self.assignment.report);
+
+        // Create final hash from the concatenated data
+        var result: WorkReportHash = undefined;
+        Blake2b256.hash(buffer.items, &result, .{});
+
+        return result;
+    }
+
     pub fn hash(self: *@This(), allocator: std.mem.Allocator) !WorkReportHash {
         if (self.cached_hash == null) {
-            self.cached_hash = try self.assignment.report.hash(allocator);
+            self.cached_hash = try self.hash_uncached(allocator);
         }
         return self.cached_hash.?;
     }
@@ -81,7 +108,7 @@ pub fn Rho(comptime core_count: u16) type {
             if (core >= core_count) {
                 @panic("Core index out of bounds");
             }
-            self.reports[core] = RhoEntry.init(assignment);
+            self.reports[core] = RhoEntry.init(@intCast(core), assignment);
         }
 
         pub fn getReport(self: *const @This(), core: usize) ?types.AvailabilityAssignment {
@@ -99,16 +126,27 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn clearFromCore(self: *@This(), work_report_hash: WorkReportHash) !bool {
-            for (&self.reports) |*report| {
+            log.debug("clearFromCore: searching for hash: {any}", .{std.fmt.fmtSliceHexLower(&work_report_hash)});
+
+            for (&self.reports, 0..) |*report, index| {
                 if (report.*) |*entry| {
                     const hash = try entry.hash(self.allocator);
+                    log.debug("core {d}: comparing entry hash: {any}", .{
+                        index,
+                        std.fmt.fmtSliceHexLower(&hash),
+                    });
+
                     if (std.mem.eql(u8, &hash, &work_report_hash)) {
+                        log.debug("core {d}: found matching hash, clearing entry", .{index});
                         entry.deinit(self.allocator);
                         report.* = null;
                         return true;
                     }
+                } else {
+                    log.debug("core {d}: empty entry", .{index});
                 }
             }
+            log.debug("clearFromCore: hash not found", .{});
             return false;
         }
 

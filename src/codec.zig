@@ -211,7 +211,7 @@ fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocat
                         return @unionInit(T, field.name, {});
                     } else {
                         // Recursively deserialize the active field
-                        const field_value: []u8 = try recursiveDeserializeLeaky(field.type, params, allocator, reader);
+                        const field_value: []const u8 = try recursiveDeserializeLeaky(field.type, params, allocator, reader);
                         return @unionInit(T, field.name, field_value);
                     }
                 }
@@ -258,6 +258,7 @@ fn deserializeArray(comptime T: type, comptime len: usize, allocator: std.mem.Al
 
 // TODO; should value be passed by pointer here?
 pub fn serialize(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
+    // TODO: since using writer, it is not leaky anymore
     try recursiveSerializeLeaky(T, params, writer, value);
 }
 
@@ -353,6 +354,7 @@ pub fn recursiveSerializeLeaky(comptime T: type, comptime params: anytype, write
 
             // NOTE: some unions have custom logic for encoding
             if (@hasDecl(T, "encode")) {
+                trace(@src(), "   calling custom encode on union field: {s}", .{@typeName(T)});
                 return try @call(.auto, @field(T, "encode"), .{ &value, params, writer });
             }
 
