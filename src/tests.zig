@@ -5,6 +5,7 @@ comptime {
     _ = @import("tests/vectors/pvm.zig");
     _ = @import("tests/vectors/safrole.zig");
     _ = @import("tests/vectors/trie.zig");
+    _ = @import("tests/vectors/libs/history.zig");
 
     _ = @import("codec.zig");
     _ = @import("codec_test.zig");
