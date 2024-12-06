@@ -387,7 +387,13 @@ pub fn transitionDisputes(
     );
 
     // Transition ψ based on new disputes
-    var posterior_state = try disputes.processDisputesExtrinsic(core_count, current_psi, current_rho, xtdisputes, validators_count);
+    var posterior_state = try disputes.processDisputesExtrinsic(
+        core_count,
+        current_psi,
+        current_rho,
+        xtdisputes,
+        validators_count,
+    );
     errdefer posterior_state.deinit();
 
     // Verify correctness of the updated state after processing disputes

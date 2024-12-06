@@ -120,6 +120,28 @@ pub const WorkExecResult = union(enum(u8)) {
     panic: void = 2,
     bad_code: void = 3,
     code_oversize: void = 4,
+
+    pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
+        // First write the tag byte based on the union variant
+        const tag: u8 = switch (self.*) {
+            .ok => 0,
+            .out_of_gas => 1,
+            .panic => 2,
+            .bad_code => 3,
+            .code_oversize => 4,
+        };
+        try writer.writeByte(tag);
+
+        // Write additional data for the ok variant only
+        switch (self.*) {
+            .ok => |data| {
+                const codec = @import("codec.zig");
+                try codec.writeInteger(@intCast(data.len), writer);
+                try writer.writeAll(data);
+            },
+            else => {},
+        }
+    }
 };
 
 pub const WorkResult = struct {
@@ -164,6 +186,31 @@ pub const WorkReport = struct {
     auth_output: []u8,
     segment_root_lookup: SegmentRootLookup,
     results: []WorkResult, // SIZE(1..4)
+
+    // TODO: do some caching of the generated hash
+    pub fn hash(self: *const WorkReport, alloc: std.mem.Allocator) !types.WorkReportHash {
+        // Create an ArrayList to store the serialized data
+        var buffer = std.ArrayList(u8).init(alloc);
+        defer buffer.deinit();
+
+        // Get a writer interface to the buffer
+        const writer = buffer.writer();
+
+        // Serialize the WorkReport into the buffer
+        //
+        const codec = @import("codec.zig");
+        try codec.serialize(WorkReport, .{}, writer, self.*);
+
+        // Create a hash from the serialized data
+        var result: types.OpaqueHash = undefined;
+
+        // Use SHA-256 since OpaqueHash is defined as ByteArray32 (32 bytes)
+        var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+        hasher.update(buffer.items);
+        hasher.final(&result);
+
+        return result;
+    }
 
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){

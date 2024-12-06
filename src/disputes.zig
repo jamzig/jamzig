@@ -17,55 +17,32 @@ pub const DisputesExtrinsic = types.DisputesExtrinsic;
 
 pub const Rho = @import("state.zig").Rho;
 
-// TODO: check if zig has ordered sets, this will make encoding faster
 pub const Psi = struct {
-    good_set: std.AutoHashMap(Hash, void),
-    bad_set: std.AutoHashMap(Hash, void),
-    wonky_set: std.AutoHashMap(Hash, void),
-    punish_set: std.AutoHashMap(PublicKey, void), // NOTE: offenders
+    good_set: std.AutoArrayHashMap(Hash, void),
+    bad_set: std.AutoArrayHashMap(Hash, void),
+    wonky_set: std.AutoArrayHashMap(Hash, void),
+    punish_set: std.AutoArrayHashMap(PublicKey, void),
 
     pub fn init(allocator: Allocator) Psi {
-        // TODO: check if there are better ways of storing these
-        // which makes it easier to return keys
         return Psi{
-            .good_set = std.AutoHashMap(Hash, void).init(allocator),
-            .bad_set = std.AutoHashMap(Hash, void).init(allocator),
-            .wonky_set = std.AutoHashMap(Hash, void).init(allocator),
-            .punish_set = std.AutoHashMap(PublicKey, void).init(allocator),
+            .good_set = std.AutoArrayHashMap(Hash, void).init(allocator),
+            .bad_set = std.AutoArrayHashMap(Hash, void).init(allocator),
+            .wonky_set = std.AutoArrayHashMap(Hash, void).init(allocator),
+            .punish_set = std.AutoArrayHashMap(PublicKey, void).init(allocator),
         };
     }
 
-    pub fn offendersIterator(self: *const @This()) std.HashMap.KeyIterator {
-        return self.punish_set.keyIterator();
+    // Get offenders slice - no allocation, direct access to storage
+    pub fn offendersSlice(self: *const Psi) []const PublicKey {
+        return self.punish_set.keys();
     }
 
-    // TODO: fix this, this iteration is ugly and slow
-    pub fn offenders(self: *const @This(), allocator: std.mem.Allocator) ![]PublicKey {
-        var off = try allocator.alloc(PublicKey, self.punish_set.count());
-
-        var iterator = self.punish_set.keyIterator();
-        var i: usize = 0;
-        while (iterator.next()) |offender| : (i += 1) {
-            off[i] = offender.*;
-        }
-
-        return off;
+    // Get offenders with allocation (when ownership is needed)
+    pub fn offendersOwned(self: *const Psi, allocator: Allocator) ![]PublicKey {
+        return try allocator.dupe(PublicKey, self.punish_set.keys());
     }
 
-    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-        try @import("state_json/disputes.zig").jsonStringify(self, jw);
-    }
-
-    pub fn format(
-        self: *const @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        try @import("state_format/psi.zig").format(self, fmt, options, writer);
-    }
-
-    // TODO: this should used unmanaged
+    // Deep clone functionality
     pub fn deepClone(self: *const Psi) !Psi {
         return Psi{
             .good_set = try self.good_set.clone(),
@@ -81,31 +58,48 @@ pub const Psi = struct {
         self.wonky_set.deinit();
         self.punish_set.deinit();
     }
+
+    // JSON stringify implementation
+    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
+        try @import("state_json/disputes.zig").jsonStringify(self, jw);
+    }
+
+    // Format implementation
+    pub fn format(
+        self: *const @This(),
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try @import("state_format/psi.zig").format(self, fmt, options, writer);
+    }
 };
 
-// The disputes extrinsic, ED , may contain one or more verdicts v as a
-// compilation of judgments coming from exactly two-thirds plus one of either
-// the active validator set or the previous epoch’s validator set, i.e. the
-// Ed25519 keys of κ or λ.
-pub fn processDisputesExtrinsic(comptime core_count: u32, current_state: *const Psi, current_rho: *Rho(core_count), extrinsic: DisputesExtrinsic, validator_count: usize) !Psi {
+// Process disputes extrinsic implementation
+pub fn processDisputesExtrinsic(
+    comptime core_count: u32,
+    current_state: *const Psi,
+    current_rho: *Rho(core_count),
+    extrinsic: DisputesExtrinsic,
+    validator_count: usize,
+) !Psi {
     var state = try current_state.deepClone();
 
-    // Process verdicts: V Gp0.4.1 (107) (108)
+    // Process verdicts
     for (extrinsic.verdicts) |verdict| {
         const positive_judgments = countPositiveJudgments(verdict);
         if (positive_judgments == validator_count * 2 / 3 + 1) {
             try state.good_set.put(verdict.target, {});
         } else if (positive_judgments == 0) {
             try state.bad_set.put(verdict.target, {});
-            _ = current_rho.clearFromCore(verdict.target);
+            _ = try current_rho.clearFromCore(verdict.target);
         } else if (positive_judgments == validator_count / 3) {
             try state.wonky_set.put(verdict.target, {});
-            _ = current_rho.clearFromCore(verdict.target);
+            _ = try current_rho.clearFromCore(verdict.target);
         }
     }
 
-    // The offender markers must contain exactly the keys
-    // of all the new offenders.
+    // Clear punish set before processing new offenders
     state.punish_set.clearRetainingCapacity();
 
     // Process culprits

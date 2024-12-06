@@ -350,6 +350,12 @@ pub fn recursiveSerializeLeaky(comptime T: type, comptime params: anytype, write
         },
         .@"union" => |unionInfo| {
             trace(@src(), "handling union field: {s}", .{@typeName(T)});
+
+            // NOTE: some unions have custom logic for encoding
+            if (@hasDecl(T, "encode")) {
+                return try @call(.auto, @field(T, "encode"), .{ &value, params, writer });
+            }
+
             const tag = std.meta.activeTag(value);
             const tag_value = @intFromEnum(tag);
             try writer.writeAll(encoder.encodeInteger(tag_value).as_slice());

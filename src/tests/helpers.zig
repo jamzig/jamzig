@@ -1,9 +1,26 @@
 const std = @import("std");
 
-pub fn expectHashMapEqual(comptime K: type, comptime V: type, expected: std.AutoHashMap(K, V), actual: std.AutoHashMap(K, V)) !void {
+pub fn expectHashMapEqual(
+    comptime Map: type,
+    comptime K: type,
+    comptime V: type,
+    expected: Map,
+    actual: Map,
+) !void {
+    // Compile-time check that Map has required hashmap interface
+    comptime {
+        if (!@hasDecl(Map, "count") or
+            !@hasDecl(Map, "iterator") or
+            !@hasDecl(Map, "get") or
+            !@hasDecl(Map, "contains"))
+        {
+            @compileError("Type " ++ @typeName(Map) ++ " does not implement required hashmap interface");
+        }
+    }
+
     if (expected.count() != actual.count()) {
         std.debug.print("HashMap counts do not match: expected {} != actual {}\n", .{ expected.count(), actual.count() });
-        try printHashMapDifferences(K, V, expected, actual);
+        try printHashMapDifferences(Map, K, V, expected, actual);
         return error.HashMapNotEqual;
     }
 
@@ -11,13 +28,19 @@ pub fn expectHashMapEqual(comptime K: type, comptime V: type, expected: std.Auto
     while (it.next()) |entry| {
         const actual_value = actual.get(entry.key_ptr.*);
         if (actual_value == null or actual_value.? != entry.value_ptr.*) {
-            try printHashMapDifferences(K, V, expected, actual);
+            try printHashMapDifferences(Map, K, V, expected, actual);
             return error.HashMapNotEqual;
         }
     }
 }
 
-fn printHashMapDifferences(comptime K: type, comptime V: type, expected: std.AutoHashMap(K, V), actual: std.AutoHashMap(K, V)) !void {
+fn printHashMapDifferences(
+    comptime Map: type,
+    comptime K: type,
+    comptime V: type,
+    expected: Map,
+    actual: Map,
+) !void {
     // Collect all unique keys
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();

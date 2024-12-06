@@ -22,32 +22,26 @@ pub fn convertValidatorData(allocator: std.mem.Allocator, test_data: []tvector.V
 }
 
 pub fn convertPsi(allocator: std.mem.Allocator, test_psi: tvector.DisputesRecords) !state.Psi {
-    var good_set = std.AutoHashMap(disputes.Hash, void).init(allocator);
+    var psi = state.Psi.init(allocator);
+    errdefer psi.deinit();
+
     for (test_psi.good) |hash| {
-        try good_set.put(hash.bytes, {});
+        try psi.good_set.put(hash.bytes, {});
     }
 
-    var bad_set = std.AutoHashMap(disputes.Hash, void).init(allocator);
     for (test_psi.bad) |hash| {
-        try bad_set.put(hash.bytes, {});
+        try psi.bad_set.put(hash.bytes, {});
     }
 
-    var wonky_set = std.AutoHashMap(disputes.Hash, void).init(allocator);
     for (test_psi.wonky) |hash| {
-        try wonky_set.put(hash.bytes, {});
+        try psi.wonky_set.put(hash.bytes, {});
     }
 
-    var punish_set = std.AutoHashMap(disputes.PublicKey, void).init(allocator);
     for (test_psi.offenders) |key| {
-        try punish_set.put(key.bytes, {});
+        try psi.punish_set.put(key.bytes, {});
     }
 
-    return state.Psi{
-        .good_set = good_set,
-        .bad_set = bad_set,
-        .wonky_set = wonky_set,
-        .punish_set = punish_set,
-    };
+    return psi;
 }
 
 pub fn convertDisputesExtrinsic(allocator: std.mem.Allocator, test_disputes: tvector.DisputesXt) !types.DisputesExtrinsic {
@@ -106,11 +100,11 @@ pub fn convertDisputesExtrinsic(allocator: std.mem.Allocator, test_disputes: tve
 const createEmptyWorkReport = @import("../tests/fixtures.zig").createEmptyWorkReport;
 
 pub fn convertRho(comptime core_count: u16, allocator: std.mem.Allocator, test_rho: tvector.AvailabilityAssignments) !state.Rho(core_count) {
-    var rho = state.Rho(core_count).init();
+    var rho = state.Rho(core_count).init(allocator);
     for (test_rho, 0..) |assignment, core| {
         if (assignment) |a| {
             const converted = try convertAvailabilityAssignment(allocator, a);
-            rho.setReport(core, converted.report.package_spec.hash, converted.report, converted.timeout);
+            rho.setReport(core, converted);
         }
     }
     return rho;

@@ -17,9 +17,9 @@ pub fn runDisputeTest(allocator: std.mem.Allocator, comptime params: Params, tes
     defer expected_psi.deinit();
 
     var current_rho = try converters.convertRho(params.core_count, allocator, test_vector.pre_state.rho);
-    defer current_rho.deinit(allocator);
+    defer current_rho.deinit();
     var expected_rho = try converters.convertRho(params.core_count, allocator, test_vector.post_state.rho);
-    defer expected_rho.deinit(allocator);
+    defer expected_rho.deinit();
 
     var extrinsic_disputes = try converters.convertDisputesExtrinsic(allocator, test_vector.input.disputes);
     defer extrinsic_disputes.deinit(allocator);
@@ -68,19 +68,18 @@ pub fn runDisputeTest(allocator: std.mem.Allocator, comptime params: Params, tes
         .ok => |expected_marks| {
             if (transition_result) |transitioned_psi| {
                 // push all expected marks in an AutoHashMap
-                var expected_marks_map = std.AutoHashMap(disputes.PublicKey, void).init(allocator);
+                var expected_marks_map = std.AutoArrayHashMap(disputes.PublicKey, void).init(allocator);
                 defer expected_marks_map.deinit();
 
                 for (expected_marks.offenders_mark) |mark| {
                     try expected_marks_map.put(mark.bytes, {});
                 }
 
-                try helpers.expectHashMapEqual(disputes.PublicKey, void, expected_marks_map, transitioned_psi.punish_set);
-
+                try helpers.expectHashMapEqual(@TypeOf(expected_marks_map), disputes.PublicKey, void, expected_marks_map, transitioned_psi.punish_set);
                 // Compare the rest of the fields
-                try helpers.expectHashMapEqual(disputes.PublicKey, void, expected_psi.good_set, transitioned_psi.good_set);
-                try helpers.expectHashMapEqual(disputes.PublicKey, void, expected_psi.bad_set, transitioned_psi.bad_set);
-                try helpers.expectHashMapEqual(disputes.PublicKey, void, expected_psi.wonky_set, transitioned_psi.wonky_set);
+                try helpers.expectHashMapEqual(@TypeOf(expected_psi.good_set), disputes.Hash, void, expected_psi.good_set, transitioned_psi.good_set);
+                try helpers.expectHashMapEqual(@TypeOf(expected_psi.bad_set), disputes.Hash, void, expected_psi.bad_set, transitioned_psi.bad_set);
+                try helpers.expectHashMapEqual(@TypeOf(expected_psi.wonky_set), disputes.Hash, void, expected_psi.wonky_set, transitioned_psi.wonky_set);
 
                 // Compare the two Rho states
                 try std.testing.expectEqualDeep(expected_rho, current_rho);
