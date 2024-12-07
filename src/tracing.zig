@@ -2,52 +2,21 @@
 /// This module enables structured logging with support for nested operations, configurable scopes,
 /// and different log levels.
 ///
-/// Features:
-/// - Four log levels (debug, info, warn, err) with distinct ANSI colors
-/// - Hierarchical operation tracking within named scopes
-/// - Automatic indentation based on operation nesting depth
-/// - Thread-local indent tracking
-///
-/// Example usage:
-/// ```zig
-/// const scope = scoped(.networking);
-/// const span = scope.span(.connect);
-/// defer span.deinit();
-///
-/// span.info("Connecting to {s}...", .{host});
-///
-/// const auth_span = span.child(.authenticate);
-/// defer auth_span.deinit();
-/// auth_span.debug("Starting authentication...", .{});
-/// ```
-///
-/// The system consists of three main types:
-///
-/// LogLevel: An enum defining log levels and their associated ANSI color codes
-/// - debug (cyan)
-/// - info (green)
-/// - warn (yellow)
-/// - err (red)
-///
-/// TracingScope: Represents a high-level logging category
-/// - Acts as a factory for creating Span instances
-///
-/// Span: Represents a specific operation within a scope
-/// - Supports hierarchical parent-child relationships
-/// - Automatically logs entry/exit
-/// - Provides leveled logging methods (debug, info, warn, err)
-/// - Maintains operation path for context in log messages
-///
-/// Log output format:
-/// [indent][color][scope.operation.suboperation] message[reset]\n
-///
-/// Note: Spans should typically be created with defer for automatic cleanup:
-/// ```zig
-/// const span = scope.span(.operation);
-/// defer span.deinit();
-/// // ... operation code ...
-/// ```
 const std = @import("std");
+const build_options = @import("build_options");
+
+// Get enabled scopes from build options
+pub const boption_enabled_scopes = if (@hasDecl(build_options, "enable_tracing_scopes"))
+    build_options.enable_tracing_scopes
+else
+    @as([]const []const u8, &[_][]const u8{});
+
+pub const boption_enabled_level = if (@hasDecl(build_options, "enable_tracing_level"))
+    LogLevel.fromString(build_options.enable_tracing_level) catch @panic("Invalid tracing_level value")
+else
+    LogLevel.info;
+
+// Allowed log levels
 
 pub const LogLevel = enum {
     trace,
@@ -55,6 +24,15 @@ pub const LogLevel = enum {
     info,
     warn,
     err,
+
+    pub fn fromString(str: []const u8) !LogLevel {
+        inline for (@typeInfo(LogLevel).@"enum".fields) |field| {
+            if (std.mem.eql(u8, str, field.name)) {
+                return @enumFromInt(field.value);
+            }
+        }
+        return error.InvalidLogLevel;
+    }
 
     pub fn format(self: LogLevel) []const u8 {
         return switch (self) {
@@ -81,7 +59,13 @@ pub const TracingScope = struct {
     }
 
     pub fn span(self: *const Self, operation: @Type(.enum_literal)) Span {
-        return Span.init(self, operation, null);
+        const is_enabled = if (boption_enabled_scopes.len == 0) true else blk: {
+            for (boption_enabled_scopes) |enabled_scope| {
+                if (std.mem.eql(u8, enabled_scope, self.name)) break :blk true;
+            }
+            break :blk false;
+        };
+        return Span.init(self, operation, null, is_enabled, boption_enabled_level);
     }
 };
 
@@ -90,21 +74,30 @@ pub const Span = struct {
     operation: []const u8,
     parent: ?*const Span,
     start_indent: usize,
+    enabled: bool,
+    min_level: LogLevel,
 
     const Self = @This();
 
-    pub fn init(scope: *const TracingScope, operation: @Type(.enum_literal), parent: ?*const Span) Self {
+    pub fn init(
+        scope: *const TracingScope,
+        operation: @Type(.enum_literal),
+        parent: ?*const Span,
+        enabled: bool,
+        min_level: LogLevel,
+    ) Self {
         const span = Self{
             .scope = scope,
             .operation = @tagName(operation),
             .parent = parent,
             .start_indent = indent_level,
+            .enabled = enabled,
+            .min_level = min_level,
         };
 
         // Print enter marker with arrow
         if (parent == null) {
-            span.printIndent();
-            std.debug.print("\x1b[1m{s} →\x1b[22m\n", .{span.operation});
+            span.debug("\x1b[1m{s} →\x1b[22m\n", .{span.operation});
         }
 
         indent_level += 1;
@@ -112,36 +105,45 @@ pub const Span = struct {
     }
 
     pub fn child(self: *const Self, operation: @Type(.enum_literal)) Span {
-        return Span.init(self.scope, operation, self);
+        return Span.init(self.scope, operation, self, self.enabled, self.min_level);
     }
 
     pub fn deinit(self: *const Self) void {
         indent_level = self.start_indent;
         // Only print exit marker for top-level spans
         if (self.parent == null) {
-            self.printIndent();
-            std.debug.print("← {s}\n", .{self.operation});
+            self.debug("← {s}\n", .{self.operation});
         }
     }
 
     pub inline fn trace(self: *const Self, comptime fmt: []const u8, args: anytype) void {
-        self.log(.trace, fmt, args);
+        if (@intFromEnum(LogLevel.trace) >= @intFromEnum(self.min_level)) {
+            self.log(.trace, fmt, args);
+        }
     }
 
     pub inline fn debug(self: *const Self, comptime fmt: []const u8, args: anytype) void {
-        self.log(.debug, fmt, args);
+        if (@intFromEnum(LogLevel.debug) >= @intFromEnum(self.min_level)) {
+            self.log(.debug, fmt, args);
+        }
     }
 
     pub inline fn info(self: *const Self, comptime fmt: []const u8, args: anytype) void {
-        self.log(.info, fmt, args);
+        if (@intFromEnum(LogLevel.info) >= @intFromEnum(self.min_level)) {
+            self.log(.info, fmt, args);
+        }
     }
 
     pub inline fn warn(self: *const Self, comptime fmt: []const u8, args: anytype) void {
-        self.log(.warn, fmt, args);
+        if (@intFromEnum(LogLevel.warn) >= @intFromEnum(self.min_level)) {
+            self.log(.warn, fmt, args);
+        }
     }
 
     pub inline fn err(self: *const Self, comptime fmt: []const u8, args: anytype) void {
-        self.log(.err, fmt, args);
+        if (@intFromEnum(LogLevel.err) >= @intFromEnum(self.min_level)) {
+            self.log(.err, fmt, args);
+        }
     }
 
     fn printIndent(_: *const Self) void {
@@ -152,9 +154,10 @@ pub const Span = struct {
     }
 
     inline fn log(self: *const Self, level: LogLevel, comptime fmt: []const u8, args: anytype) void {
+        if (!self.enabled or @intFromEnum(level) < @intFromEnum(self.min_level)) return;
+
         self.printIndent();
 
-        // For non-trace levels, use bullet points
         std.debug.print("{s} ", .{level.format()});
         std.debug.print(fmt ++ "\x1b[0m\n", args);
     }

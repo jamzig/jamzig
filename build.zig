@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const tracing_scopes = b.option([][]const u8, "tracing-scope", "Enable detailed tracing by scope") orelse &[_][]const u8{};
-    const tracing_source_location = b.option([][]const u8, "tracing-source", "Enable detailed tracing by source location") orelse &[_][]const u8{};
+    const tracing_level = b.option([]const u8, "tracing-level", "Tracing log level default is info") orelse &[_]u8{};
 
     const tracy = b.option([]const u8, "tracy", "Enable Tracy integration. Supply path to Tracy source");
     const tracy_callstack = b.option(bool, "tracy-callstack", "Include callstack information with Tracy data. Does nothing if -Dtracy is not provided") orelse (tracy != null);
@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) !void {
 
     const build_options = b.addOptions();
     build_options.addOption([]const []const u8, "enable_tracing_scopes", tracing_scopes);
-    build_options.addOption([]const []const u8, "enable_tracing_source_location", tracing_source_location);
+    build_options.addOption([]const u8, "enable_tracing_level", tracing_level);
 
     build_options.addOption(bool, "enable_tracy", tracy != null);
     build_options.addOption(bool, "enable_tracy_callstack", tracy_callstack);
