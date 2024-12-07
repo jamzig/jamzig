@@ -1,7 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const trace = @import("../../tracing.zig").src;
+const tracing = @import("../../tracing.zig");
+const trace = tracing.scoped(.convert_generic);
 
 pub fn convert(comptime ToType: type, conversionFunctions: anytype, allocator: anytype, from: anytype) !ToType {
     return try convertField(
@@ -109,7 +110,6 @@ fn convertField(conversionFunctions: anytype, allocator: anytype, fromValue: any
                     }
                     return to;
                 } else {
-                    // @compileLog("Calling conversion function for type: ", @typeName(FromType), " to ", @typeName(ToType));
                     return try callConversionFunction(conversionFunctions, allocator, fromValue, ToType);
                 }
             },
@@ -163,52 +163,73 @@ fn getTypeNameInfo(comptime T: type) struct { typeNameWithoutPath: []const u8, g
 /// This a generic function to free an generic converted object using the allocator.
 pub fn free(allocator: Allocator, obj: anytype) void {
     const T = @TypeOf(obj);
-    trace(@src(), "Freeing object of type: {s}\n", .{@typeName(T)});
+    const span = trace.span(.free);
+    defer span.deinit();
+
+    span.debug("Freeing object of type: {s}", .{@typeName(T)});
+
     switch (@typeInfo(T)) {
         .@"struct" => |structInfo| {
-            trace(@src(), "Freeing struct fields\n", .{});
+            const struct_span = span.child(.struct_fields);
+            defer struct_span.deinit();
+
             inline for (structInfo.fields) |field| {
-                trace(@src(), "Freeing field: {s}\n", .{field.name});
+                struct_span.debug("Freeing field: {s}", .{field.name});
                 free(allocator, @field(obj, field.name));
             }
         },
         .pointer => |ptrInfo| {
             if (ptrInfo.size == .Slice) {
-                trace(@src(), "Freeing slice elements\n", .{});
+                const slice_span = span.child(.slice);
+                defer slice_span.deinit();
+
+                slice_span.debug("Freeing slice elements", .{});
                 for (obj) |item| {
                     free(allocator, item);
                 }
-                trace(@src(), "Freeing slice\n", .{});
+                slice_span.debug("Freeing slice", .{});
                 allocator.free(obj);
             } else if (ptrInfo.size == .One) {
-                trace(@src(), "Freeing single pointer\n", .{});
+                const ptr_span = span.child(.single_pointer);
+                defer ptr_span.deinit();
+
+                ptr_span.debug("Freeing single pointer", .{});
                 free(allocator, obj.*);
                 allocator.destroy(obj);
             } else {
-                trace(@src(), "Unsupported pointer size\n", .{});
+                span.warn("Unsupported pointer size", .{});
             }
         },
         .optional => {
-            trace(@src(), "Freeing optional\n", .{});
+            const opt_span = span.child(.optional);
+            defer opt_span.deinit();
+
             if (obj) |value| {
+                opt_span.debug("Freeing optional value", .{});
                 free(allocator, value);
             } else {
-                trace(@src(), "Optional is null, nothing to free\n", .{});
+                opt_span.debug("Optional is null, nothing to free", .{});
             }
         },
         .array => {
-            trace(@src(), "Freeing array elements\n", .{});
+            const arr_span = span.child(.array);
+            defer arr_span.deinit();
+
+            arr_span.debug("Freeing array elements", .{});
             for (obj, 0..) |item, index| {
-                trace(@src(), "Freeing array element at index: {d}\n", .{index});
+                arr_span.debug("Freeing array element at index: {d}", .{index});
                 free(allocator, item);
             }
         },
         .@"union" => |unionInfo| {
             if (unionInfo.tag_type) |_| {
-                trace(@src(), "Freeing tagged union\n", .{});
+                const union_span = span.child(.tagged_union);
+                defer union_span.deinit();
+
+                union_span.debug("Freeing tagged union", .{});
                 switch (obj) {
                     inline else => |field| {
-                        trace(@src(), "Freeing union field {any}\n", .{field});
+                        union_span.debug("Freeing union field", .{});
                         free(allocator, field);
                     },
                 }
@@ -217,8 +238,8 @@ pub fn free(allocator: Allocator, obj: anytype) void {
             }
         },
         else => {
-            trace(@src(), "No specific free action for type: {s}\n", .{@typeName(T)});
+            span.debug("No specific free action for type: {s}", .{@typeName(T)});
         },
     }
-    trace(@src(), "Finished freeing object of type: {s}\n", .{@typeName(T)});
+    span.debug("Finished freeing object", .{});
 }
