@@ -1,3 +1,29 @@
+// +------+------+---------+--------------------------------+
+// | Reg  | Size | Name    | Purpose                        |
+// +------+------+---------+--------------------------------+
+// | r0   | 64   | zero    | Invalid jump sentinel          |
+// |      |      |         | (2^32 - 2^16)                  |
+// +------+------+---------+--------------------------------+
+// | r1   | 64   | rodata  | Read-only section base         |
+// |      |      |         | (2^32 - 2Z_Q - Z_I)           |
+// +------+------+---------+--------------------------------+
+// | r7   | 64   | data    | - Writable data section base   |
+// |      |      |         | (2^32 - Z_Q - Z_I)            |
+// |      |      |         | - Host call return status      |
+// |      |      |         | - Host call first parameter    |
+// +------+------+---------+--------------------------------+
+// | r8   | 64   | args    | - Argument length             |
+// |      |      |         | - Host call parameter         |
+// +------+------+---------+--------------------------------+
+// | r9   | 64   |         | - Host call parameter         |
+// +------+------+---------+--------------------------------+
+// | r10  | 64   | ret_hi  | - Return data (upper portion)  |
+// |      |      |         | - Host call parameter         |
+// +------+------+---------+--------------------------------+
+// | r11  | 64   | ret_lo  | - Return data (lower portion)  |
+// |      |      |         | - Host call parameter         |
+// +------+------+---------+--------------------------------+
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Instruction = @import("./pvm/instruction.zig").Instruction;
@@ -6,6 +32,8 @@ const Decoder = @import("./pvm/decoder.zig").Decoder;
 const InstructionWithArgs = @import("./pvm/decoder.zig").InstructionWithArgs;
 
 const updatePc = @import("./pvm/utils.zig").updatePc;
+
+const trace = @import("tracing.zig").scoped(.pvm);
 
 pub const PVMErrorData = union(enum) {
     // when a page fault occurs we whould return the lowest address which caused the fault
@@ -132,16 +160,41 @@ pub const PVM = struct {
         }
     }
 
-    pub fn decompilePrint(self: *PVM) !void {
+    pub fn debugWriteDecompiled(self: *PVM, writer: anytype) !void {
         const decoder = Decoder.init(self.program.code, self.program.mask);
         var pc: u32 = 0;
 
         while (pc < self.program.code.len) {
             const i = try decoder.decodeInstruction(pc);
-
-            std.debug.print("{d:0>4}: {any}\n", .{ pc, i });
+            try writer.print("{d:0>4}: {any}\n", .{ pc, i });
             pc += i.skip_l() + 1;
         }
+    }
+
+    // TODO: rename to debugPrintDecompiled
+    pub fn decompilePrint(self: *PVM) void {
+        self.debugWriteDecompiled(std.io.getStdErr().writer()) catch |err| {
+            std.debug.print("Failed to print decompiled code: {}\n", .{err});
+        };
+    }
+
+    pub fn debugWriteRegisters(self: *const PVM, writer: anytype) !void {
+        const reg_names = [_][]const u8{ "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2" };
+        try writer.writeAll("\nRegister values:\n");
+        for (self.registers, 0..) |reg, i| {
+            try writer.print("r{d:<2} ({s:<4}): 0x{X:0>8} ({d})\n", .{
+                i,
+                reg_names[i],
+                reg,
+                reg,
+            });
+        }
+    }
+
+    pub fn debugPrintRegisters(self: *const PVM) void {
+        self.debugWriteRegisters(std.io.getStdErr().writer()) catch |err| {
+            std.debug.print("Failed to print registers: {}\n", .{err});
+        };
     }
 
     fn getGasCost(instruction: InstructionWithArgs) u32 {
