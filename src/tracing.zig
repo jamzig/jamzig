@@ -53,19 +53,22 @@ pub const TracingScope = struct {
     const Self = @This();
 
     pub fn init(comptime scope: @Type(.enum_literal)) Self {
-        return Self{
+        return comptime Self{
             .name = @tagName(scope),
         };
     }
 
-    pub fn span(self: *const Self, operation: @Type(.enum_literal)) Span {
-        const is_enabled = if (boption_enabled_scopes.len == 0) true else blk: {
+    pub fn span(comptime self: *const Self, operation: @Type(.enum_literal)) SpanUnion {
+        const is_enabled = comptime if (boption_enabled_scopes.len == 0) true else blk: {
             for (boption_enabled_scopes) |enabled_scope| {
                 if (std.mem.eql(u8, enabled_scope, self.name)) break :blk true;
             }
             break :blk false;
         };
-        return Span.init(self, operation, null, is_enabled, boption_enabled_level);
+        return if (is_enabled)
+            SpanUnion{ .Enabled = Span.init(self, operation, null, true, boption_enabled_level) }
+        else
+            SpanUnion{ .Disabled = DisabledSpan{} };
     }
 };
 
@@ -163,8 +166,72 @@ pub const Span = struct {
     }
 };
 
+pub const SpanUnion = union(enum) {
+    Enabled: Span,
+    Disabled: DisabledSpan,
+
+    pub fn deinit(self: *const SpanUnion) void {
+        switch (self.*) {
+            .Enabled => |span| span.deinit(),
+            .Disabled => {},
+        }
+    }
+
+    pub fn child(self: *const SpanUnion, operation: @Type(.enum_literal)) SpanUnion {
+        return switch (self.*) {
+            .Enabled => |span| SpanUnion{ .Enabled = span.child(operation) },
+            .Disabled => SpanUnion{ .Disabled = DisabledSpan{} },
+        };
+    }
+
+    pub inline fn trace(self: *const SpanUnion, comptime fmt: []const u8, args: anytype) void {
+        switch (self.*) {
+            .Enabled => |span| span.trace(fmt, args),
+            .Disabled => {},
+        }
+    }
+
+    pub inline fn debug(self: *const SpanUnion, comptime fmt: []const u8, args: anytype) void {
+        switch (self.*) {
+            .Enabled => |span| span.debug(fmt, args),
+            .Disabled => {},
+        }
+    }
+
+    pub inline fn info(self: *const SpanUnion, comptime fmt: []const u8, args: anytype) void {
+        switch (self.*) {
+            .Enabled => |span| span.info(fmt, args),
+            .Disabled => {},
+        }
+    }
+
+    pub inline fn warn(self: *const SpanUnion, comptime fmt: []const u8, args: anytype) void {
+        switch (self.*) {
+            .Enabled => |span| span.warn(fmt, args),
+            .Disabled => {},
+        }
+    }
+
+    pub inline fn err(self: *const SpanUnion, comptime fmt: []const u8, args: anytype) void {
+        switch (self.*) {
+            .Enabled => |span| span.err(fmt, args),
+            .Disabled => {},
+        }
+    }
+};
+
+pub const DisabledSpan = struct {
+    // Empty struct since we don't need to store any state
+
+    pub inline fn trace(_: *const DisabledSpan, comptime _: []const u8, _: anytype) void {}
+    pub inline fn debug(_: *const DisabledSpan, comptime _: []const u8, _: anytype) void {}
+    pub inline fn info(_: *const DisabledSpan, comptime _: []const u8, _: anytype) void {}
+    pub inline fn warn(_: *const DisabledSpan, comptime _: []const u8, _: anytype) void {}
+    pub inline fn err(_: *const DisabledSpan, comptime _: []const u8, _: anytype) void {}
+};
+
 pub fn scoped(comptime scope: @Type(.enum_literal)) TracingScope {
-    return TracingScope.init(scope);
+    return comptime TracingScope.init(scope);
 }
 
 test "TracingScope initialization" {
