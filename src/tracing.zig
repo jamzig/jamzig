@@ -17,6 +17,7 @@ else
     LogLevel.info;
 
 threadlocal var current_depth: usize = 0;
+threadlocal var current_span: ?*Span = null;
 
 pub const LogLevel = enum {
     trace,
@@ -64,7 +65,7 @@ pub const TracingScope = struct {
             break :blk false;
         };
         return if (is_enabled)
-            SpanUnion{ .Enabled = Span.init(self, operation, null, true, boption_enabled_level) }
+            SpanUnion{ .Enabled = Span.init(self, operation, current_span, true, boption_enabled_level) }
         else
             SpanUnion{ .Disabled = DisabledSpan{} };
     }
@@ -107,6 +108,7 @@ pub const Span = struct {
         if (self.depth) |depth| {
             current_depth = depth;
         }
+        current_span = self.parent;
     }
 
     pub inline fn trace(self: *Self, comptime fmt: []const u8, args: anytype) void {
@@ -147,11 +149,14 @@ pub const Span = struct {
         }
 
         if (!self.materialized) {
+            // count the materialized spans, this
+            // is our new depth
             var cursor = self;
+            current_depth = 0;
             while (cursor.parent) |p| {
                 if (p.materialized) {
                     current_depth += 1;
-                } else break;
+                }
                 cursor = p;
             }
 
@@ -174,6 +179,8 @@ pub const Span = struct {
             self.printSpanPath();
             std.debug.print("\n", .{});
         }
+
+        current_span = self;
 
         // Print indentation
         var i: usize = 0;

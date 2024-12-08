@@ -57,12 +57,7 @@ pub fn deserialize(
     var fbs = std.io.fixedBufferStream(data);
     const reader = fbs.reader();
 
-    const deserialize_span = span.child(.recursive_deserialize);
-    defer deserialize_span.deinit();
-    deserialize_span.debug("Starting recursive deserialization", .{});
-
     result.value = try recursiveDeserializeLeaky(T, params, result.arena.allocator(), reader);
-    deserialize_span.debug("Completed recursive deserialization", .{});
 
     span.debug("Successfully deserialized type {s}", .{@typeName(T)});
     return result;
@@ -131,7 +126,8 @@ pub fn readInteger(reader: anytype) !u64 {
 fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, reader: anytype) !T {
     const span = trace.span(.recursive_deserialize);
     defer span.deinit();
-    span.debug("Deserializing type: {s}", .{@typeName(T)});
+
+    span.debug("Start deserializing type: {s}", .{@typeName(T)});
 
     switch (@typeInfo(T)) {
         .bool => {
