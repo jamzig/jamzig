@@ -64,6 +64,10 @@ pub const RefineContext = struct {
     lookup_anchor: HeaderHash,
     lookup_anchor_slot: TimeSlot,
     prerequisites: []OpaqueHash,
+
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.prerequisites);
+    }
 };
 
 pub const ImportSpec = struct {
@@ -111,11 +115,52 @@ pub const WorkPackage = struct {
 };
 
 pub const WorkExecResult = union(enum(u8)) {
-    ok: []u8 = 0,
+    ok: []const u8 = 0,
     out_of_gas: void = 1,
     panic: void = 2,
     bad_code: void = 3,
     code_oversize: void = 4,
+
+    pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
+        // First write the tag byte based on the union variant
+        const tag: u8 = switch (self.*) {
+            .ok => 0,
+            .out_of_gas => 1,
+            .panic => 2,
+            .bad_code => 3,
+            .code_oversize => 4,
+        };
+        try writer.writeByte(tag);
+
+        // Write additional data for the ok variant only
+        switch (self.*) {
+            .ok => |data| {
+                const codec = @import("codec.zig");
+                try codec.writeInteger(@intCast(data.len), writer);
+                try writer.writeAll(data);
+            },
+            else => {},
+        }
+    }
+
+    pub fn decode(_: anytype, reader: anytype, alloc: std.mem.Allocator) !@This() {
+        const tag = try reader.readByte();
+
+        return switch (tag) {
+            0 => blk: {
+                const codec = @import("codec.zig");
+                const len = try codec.readInteger(reader);
+                const data = try alloc.alloc(u8, len);
+                try reader.readNoEof(data);
+                break :blk WorkExecResult{ .ok = data };
+            },
+            1 => WorkExecResult{ .out_of_gas = {} },
+            2 => WorkExecResult{ .panic = {} },
+            3 => WorkExecResult{ .bad_code = {} },
+            4 => WorkExecResult{ .code_oversize = {} },
+            else => error.InvalidTag,
+        };
+    }
 };
 
 pub const WorkResult = struct {
@@ -124,6 +169,13 @@ pub const WorkResult = struct {
     payload_hash: OpaqueHash,
     gas: Gas,
     result: WorkExecResult,
+
+    pub fn deinit(self: *const WorkResult, allocator: std.mem.Allocator) void {
+        switch (self.result) {
+            .ok => |data| allocator.free(data),
+            else => {},
+        }
+    }
 };
 
 pub const WorkPackageSpec = struct {
@@ -133,6 +185,10 @@ pub const WorkPackageSpec = struct {
     exports_root: ExportsRoot,
     exports_count: U16,
 };
+
+pub const AvailabilityAssignment = struct { report: WorkReport, timeout: U32 };
+
+pub const AvailabilityAssignments = []?AvailabilityAssignment;
 
 pub const SegmentRootLookupItem = struct {
     work_package_hash: WorkPackageHash,
@@ -160,6 +216,18 @@ pub const WorkReport = struct {
             .segment_root_lookup = try allocator.dupe(SegmentRootLookupItem, self.segment_root_lookup),
             .results = try allocator.dupe(WorkResult, self.results),
         };
+    }
+
+    pub fn deinit(self: *const WorkReport, allocator: std.mem.Allocator) void {
+        allocator.free(self.auth_output);
+        allocator.free(self.segment_root_lookup);
+
+        for (self.results) |*result| {
+            result.deinit(allocator);
+        }
+        allocator.free(self.results);
+
+        self.context.deinit(allocator);
     }
 };
 

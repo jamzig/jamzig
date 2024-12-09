@@ -100,7 +100,7 @@ pub fn reconstructPreimageEntry(
     try account.integratePreimageLookup(
         hash_of_value,
         @intCast(value.len),
-        tau, // NOTE: we place null here for now
+        tau,
     );
 }
 

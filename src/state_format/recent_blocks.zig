@@ -12,12 +12,12 @@ pub fn format(
 
     try writer.writeAll("RecentHistory{\n");
     try writer.print("  max_blocks: {d}\n", .{self.max_blocks});
-    
+
     for (self.blocks.items, 0..) |block, i| {
         try writer.print("  Block {d}:\n", .{i});
         try writer.print("    header_hash: {s}\n", .{std.fmt.fmtSliceHexLower(&block.header_hash)});
         try writer.print("    state_root: {s}\n", .{std.fmt.fmtSliceHexLower(&block.state_root)});
-        
+
         try writer.writeAll("    beefy_mmr: [");
         for (block.beefy_mmr) |maybe_hash| {
             if (maybe_hash) |hash| {
@@ -29,8 +29,11 @@ pub fn format(
         try writer.writeAll("]\n");
 
         try writer.writeAll("    work_reports: [");
-        for (block.work_reports) |hash| {
-            try writer.print("{s} ", .{std.fmt.fmtSliceHexLower(&hash)});
+        for (block.work_reports) |report| {
+            try writer.writeAll("                 {");
+            try writer.print("                      hash: {s} ", .{std.fmt.fmtSliceHexLower(&report.hash)});
+            try writer.print("                      exports_root: {s} ", .{std.fmt.fmtSliceHexLower(&report.exports_root)});
+            try writer.writeAll("                 }");
         }
         try writer.writeAll("]\n");
     }

@@ -4,6 +4,7 @@ const RecentHistory = @import("recent_blocks.zig").RecentHistory;
 
 const BlockInfo = @import("recent_blocks.zig").BlockInfo;
 const RecentBlock = @import("recent_blocks.zig").RecentBlock;
+const ReportedWorkPackage = @import("recent_blocks.zig").ReportedWorkPackage;
 
 const Hash = @import("recent_blocks.zig").Hash;
 const HistoryTestVector = @import("tests/vectors/libs/history.zig").HistoryTestVector;
@@ -66,9 +67,12 @@ test "recent blocks: parsing all test cases" {
 /// Transforms the test vector input into a RecentBlock, which can be used to call our
 /// Beta (recent blocks) implementation.
 fn fromTestVectorInputToRecentBlock(allocator: std.mem.Allocator, input: tvector.Input) !RecentBlock {
-    var work_packages = try allocator.alloc(Hash, input.work_packages.len);
+    var work_packages = try allocator.alloc(ReportedWorkPackage, input.work_packages.len);
     for (input.work_packages, 0..) |wp, i| {
-        work_packages[i] = wp.bytes;
+        work_packages[i] = ReportedWorkPackage{
+            .hash = wp.hash.bytes,
+            .exports_root = wp.exports_root.bytes,
+        };
     }
     return RecentBlock{
         .header_hash = input.header_hash.bytes,
@@ -86,7 +90,7 @@ fn fromTestVectorBlockInfo(allocator: std.mem.Allocator, block_info: tvector.Blo
         .header_hash = block_info.header_hash.bytes,
         .state_root = block_info.state_root.bytes,
         .beefy_mmr = try allocator.alloc(?Hash, block_info.mmr.peaks.len),
-        .work_reports = try allocator.alloc(Hash, block_info.reported.len),
+        .work_reports = try allocator.alloc(ReportedWorkPackage, block_info.reported.len),
     };
     for (block_info.mmr.peaks, 0..) |peak, i| {
         if (peak) |p| {
@@ -96,7 +100,10 @@ fn fromTestVectorBlockInfo(allocator: std.mem.Allocator, block_info: tvector.Blo
         }
     }
     for (block_info.reported, 0..) |report, i| {
-        block.work_reports[i] = report.bytes;
+        block.work_reports[i] = ReportedWorkPackage{
+            .hash = report.hash.bytes,
+            .exports_root = report.exports_root.bytes,
+        };
     }
     return block;
 }
@@ -122,7 +129,7 @@ fn compareBlocks(expected: BlockInfo, actual: BlockInfo, block_idx: usize) !void
         return error.BeefyMmrMismatch;
     };
 
-    std.testing.expectEqualSlices(Hash, expected.work_reports, actual.work_reports) catch {
+    std.testing.expectEqualSlices(ReportedWorkPackage, expected.work_reports, actual.work_reports) catch {
         return error.WorkReportHashesMismatch;
     };
 }

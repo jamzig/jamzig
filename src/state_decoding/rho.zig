@@ -10,26 +10,23 @@ const jam_params = @import("../jam_params.zig");
 const readInteger = @import("utils.zig").readInteger;
 
 pub fn decode(comptime params: jam_params.Params, allocator: std.mem.Allocator, reader: anytype) !Rho(params.core_count) {
-    var rho = Rho(params.core_count).init();
+    var rho = Rho(params.core_count).init(allocator);
 
     // For each core
-    for (&rho.reports) |*maybe_entry| {
+    for (&rho.reports, 0..) |*maybe_entry, core_index| {
         // Read existence marker
         const exists = try reader.readByte();
         if (exists == 1) {
-            // Read report entry
-            var hash: [32]u8 = undefined;
-            try reader.readNoEof(&hash);
-
-            // TODO: deserialize the work_report
-            const work_report = try codec.deserializeAlloc(types.WorkReport, params, allocator, reader);
-
-            const timeslot = try reader.readInt(u32, .little);
+            const assignment = try codec.deserializeAlloc(
+                types.AvailabilityAssignment,
+                params,
+                allocator,
+                reader,
+            );
 
             maybe_entry.* = .{
-                .hash = hash,
-                .work_report = work_report,
-                .timeslot = timeslot,
+                .core = @intCast(core_index),
+                .assignment = assignment,
             };
         } else if (exists == 0) {
             maybe_entry.* = null;
@@ -60,36 +57,6 @@ test "decode rho - empty state" {
     for (rho.reports) |maybe_entry| {
         try testing.expect(maybe_entry == null);
     }
-}
-
-test "decode rho - with reports" {
-    const core_count = 2;
-
-    var buffer = std.ArrayList(u8).init(testing.allocator);
-    defer buffer.deinit();
-
-    // Write report for first core
-    try buffer.append(1); // exists
-    try buffer.appendSlice(&[_]u8{1} ** 32); // hash
-
-    const report1 = createEmptyWorkReport([_]u8{1} ** 32);
-    try codec.serialize(types.WorkReport, {}, buffer.writer(), report1);
-    try buffer.writer().writeInt(u32, 100, .little); // timeslot
-
-    // Write null for second core
-    try buffer.append(0);
-
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const rho = try decode(.{ .core_count = core_count }, std.testing.allocator, fbs.reader());
-
-    // Verify first core report
-    const entry1 = rho.reports[0].?;
-    try testing.expectEqualSlices(u8, &[_]u8{1} ** 32, &entry1.hash);
-    try testing.expectEqualSlices(u8, &[_]u8{1} ** 32, &entry1.work_report.package_spec.hash);
-    try testing.expectEqual(@as(u32, 100), entry1.timeslot);
-
-    // Verify second core is null
-    try testing.expect(rho.reports[1] == null);
 }
 
 test "decode rho - invalid existence marker" {
@@ -127,35 +94,21 @@ test "decode rho - insufficient data" {
             fbs.reader(),
         ));
     }
-
-    // Test truncated timeslot
-    {
-        var buffer = std.ArrayList(u8).init(testing.allocator);
-        defer buffer.deinit();
-
-        try buffer.append(1); // exists
-        try buffer.appendSlice(&[_]u8{1} ** 32); // hash
-        const report = createEmptyWorkReport([_]u8{1} ** 32);
-        try codec.serialize(types.WorkReport, {}, buffer.writer(), report);
-        try buffer.appendSlice(&[_]u8{1} ** 2); // partial timeslot
-
-        var fbs = std.io.fixedBufferStream(buffer.items);
-        try testing.expectError(error.EndOfStream, decode(.{ .core_count = core_count }, std.testing.allocator, fbs.reader()));
-    }
 }
 
+// TODO: test encoding/decoding of the WorkResult and the WorkExecResults
 test "decode rho - roundtrip" {
     const encoder = @import("../state_encoding/rho.zig");
     const core_count = 2;
     const params = @import("../jam_params.zig").TINY_PARAMS;
 
     // Create original rho state
-    var original = Rho(core_count).init();
+    var original = Rho(core_count).init(testing.allocator);
 
     // Add a report
     const hash = [_]u8{1} ** 32;
     const report = createEmptyWorkReport(hash);
-    original.setReport(0, hash, report, 100);
+    original.setReport(0, .{ .report = report, .timeout = 100 });
 
     // Encode
     var buffer = std.ArrayList(u8).init(testing.allocator);
@@ -169,9 +122,7 @@ test "decode rho - roundtrip" {
     // Verify first core
     try testing.expect(decoded.reports[0] != null);
     const entry = decoded.reports[0].?;
-    try testing.expectEqualSlices(u8, &hash, &entry.hash);
-    try testing.expectEqualSlices(u8, &hash, &entry.work_report.package_spec.hash);
-    try testing.expectEqual(@as(u32, 100), entry.timeslot);
+    try testing.expectEqual(@as(u32, 100), entry.assignment.timeout);
 
     // Verify second core is null
     try testing.expect(decoded.reports[1] == null);

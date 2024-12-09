@@ -111,9 +111,16 @@ pub fn initPVMFromTestVector(allocator: Allocator, test_vector: *const PVMFixtur
     return pvm;
 }
 
-pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !bool {
+pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path: []const u8) !bool {
     var pvm = try initPVMFromTestVector(allocator, test_vector);
     defer pvm.deinit();
+
+    // Create buffers for debug output
+    var debug_registers_buffer = std.ArrayList(u8).init(allocator);
+    defer debug_registers_buffer.deinit();
+
+    // Write debug info to buffers
+    try pvm.debugWriteRegisters(debug_registers_buffer.writer());
 
     const result = pvm.run();
 
@@ -155,7 +162,6 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
     // Check if PC matches
     if (pvm.pc != test_vector.expected_pc) {
         std.debug.print("PC mismatch: expected {}, got {}\n", .{ test_vector.expected_pc, pvm.pc });
-        std.debug.print("{any}", .{test_vector});
         test_passed = false;
     }
 
@@ -183,18 +189,36 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture) !boo
         test_passed = false;
     }
 
+    if (!test_passed) {
+        // Read and dump the test vector file to stderr
+        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+            std.debug.print("Failed to open test vector file '{s}': {}\n", .{ path, err });
+            return false;
+        };
+        defer file.close();
+
+        const content = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch |err| {
+            std.debug.print("Failed to read test vector file: {}\n", .{err});
+            return false;
+        };
+        defer allocator.free(content);
+
+        std.debug.print("\nTest vector file '{s}' contents:\n{s}\n", .{ path, content });
+
+        std.debug.print("\nInitial register values:\n{s}", .{debug_registers_buffer.items});
+        std.debug.print("\nDecompilation of the program:\n\n", .{});
+        pvm.decompilePrint();
+    }
+
     return test_passed;
 }
 
 pub fn runTestFixtureFromPath(allocator: Allocator, path: []const u8) !bool {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
     const vector = try PMVLib.PVMTestVector.build_from(allocator, path);
     defer vector.deinit();
 
     const fixture = try PVMFixture.from_vector(allocator, &vector.value);
     defer fixture.deinit(allocator);
 
-    return runTestFixture(allocator, &fixture);
+    return runTestFixture(allocator, &fixture, path);
 }

@@ -14,8 +14,8 @@ test "JamStateJSON" {
     const string = try json.stringifyAlloc(
         allocator,
         state,
-        .{},
-        // .{ .whitespace = .indent_1 },
+        // .{},
+        .{ .whitespace = .indent_1 },
     );
     defer allocator.free(string);
 

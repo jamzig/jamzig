@@ -40,6 +40,15 @@ pub fn inputFromTestVector(allocator: Allocator, from: *const tv_lib_safrole.Inp
     return to;
 }
 
+pub fn postOffendersFromPreState(allocator: Allocator, pre_state: *const tv_lib_safrole.State) Error![]types.Ed25519Public {
+    // Convert the ed25519 keys from the pre-state's kappa validators
+    const offenders = try allocator.alloc(types.Ed25519Public, pre_state.post_offenders.len);
+    for (pre_state.post_offenders, offenders) |ed25519public, *offender| {
+        offender.* = ed25519public.bytes;
+    }
+    return offenders;
+}
+
 pub fn outputFromTestVector(allocator: Allocator, from: *const tv_lib_safrole.Output) Error!adaptor.Output {
     return switch (from.*) {
         .err => |err| adaptor.Output{ .err = try convertOutputError(err) },

@@ -99,3 +99,24 @@ test "safrole/tiny/enact-epoch-change-with-no-tickets-4" {
     try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
     try fixtures.expectOutput(result.output);
 }
+
+test "safrole/tiny/enact-epoch-change-with-padding-1" {
+    const allocator = std.testing.allocator;
+
+    const fixtures = try safrole_fixtures.buildFixtures(
+        allocator,
+        "tiny/enact-epoch-change-with-padding-1.json",
+    );
+    defer fixtures.deinit();
+
+    var result = try safrole.transition(
+        allocator,
+        tiny_params,
+        fixtures.pre_state,
+        fixtures.input,
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
+    try fixtures.expectOutput(result.output);
+}
