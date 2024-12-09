@@ -12,7 +12,17 @@ const jam_params = @import("jam_params.zig");
 
 const jamtestnet = @import("jamtestnet.zig");
 
+const trace = @import("tracing.zig").scoped(.stf_test);
+
 test "jamtestnet.jamduna: safrole import" {
+    const span = trace.span(.jamduna);
+    defer span.deinit();
+
+    if (true) {
+        span.warn("disabled test, waiting for update from jamduna team", .{});
+        return;
+    }
+
     // we derive from the normal settings
     const JAMDUNA_PARAMS = jam_params.Params{
         .epoch_length = 12,
