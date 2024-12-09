@@ -3,6 +3,7 @@ const testing = std.testing;
 const recent_blocks = @import("../recent_blocks.zig");
 const RecentHistory = recent_blocks.RecentHistory;
 const BlockInfo = recent_blocks.BlockInfo;
+const ReportedWorkPackage = recent_blocks.ReportedWorkPackage;
 const Hash = recent_blocks.Hash;
 const decoder = @import("../codec/decoder.zig");
 const mmr = @import("../merkle_mountain_ranges.zig");
@@ -45,11 +46,12 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !RecentHistory {
 
         // Read work reports
         const reports_len = try readInteger(reader);
-        const work_reports = try allocator.alloc(Hash, reports_len);
+        const work_reports = try allocator.alloc(ReportedWorkPackage, reports_len);
         errdefer allocator.free(work_reports);
 
         for (work_reports) |*report| {
-            try reader.readNoEof(report);
+            try reader.readNoEof(&report.hash);
+            try reader.readNoEof(&report.exports_root);
         }
 
         // Create BlockInfo and add to history
@@ -105,6 +107,7 @@ test "decode beta - with blocks" {
     // Write work reports (length 1)
     try buffer.append(1);
     try buffer.appendSlice(&[_]u8{4} ** 32);
+    try buffer.appendSlice(&[_]u8{5} ** 32);
 
     var fbs = std.io.fixedBufferStream(buffer.items);
     var history = try decode(allocator, fbs.reader());
@@ -120,7 +123,8 @@ test "decode beta - with blocks" {
     try testing.expectEqual(@as(usize, 1), block.beefy_mmr.len);
     try testing.expectEqualSlices(u8, &[_]u8{2} ** 32, &block.beefy_mmr[0].?);
     try testing.expectEqual(@as(usize, 1), block.work_reports.len);
-    try testing.expectEqualSlices(u8, &[_]u8{4} ** 32, &block.work_reports[0]);
+    try testing.expectEqualSlices(u8, &[_]u8{4} ** 32, &block.work_reports[0].hash);
+    try testing.expectEqualSlices(u8, &[_]u8{5} ** 32, &block.work_reports[0].exports_root);
 }
 
 test "decode beta - roundtrip" {
@@ -136,7 +140,12 @@ test "decode beta - roundtrip" {
         .header_hash = [_]u8{1} ** 32,
         .state_root = [_]u8{2} ** 32,
         .beefy_mmr = try allocator.dupe(?Hash, &[_]?Hash{[_]u8{3} ** 32}),
-        .work_reports = try allocator.dupe(Hash, &[_]Hash{[_]u8{4} ** 32}),
+        .work_reports = try allocator.dupe(ReportedWorkPackage, &[_]ReportedWorkPackage{
+            ReportedWorkPackage{
+                .hash = [_]u8{4} ** 32,
+                .exports_root = [_]u8{5} ** 32,
+            },
+        }),
     };
     try original.addBlockInfo(block_info);
 
@@ -160,7 +169,7 @@ test "decode beta - roundtrip" {
     try testing.expectEqualSlices(u8, &orig_block.state_root, &dec_block.state_root);
     try testing.expectEqual(orig_block.beefy_mmr.len, dec_block.beefy_mmr.len);
     try testing.expectEqualSlices(u8, &orig_block.beefy_mmr[0].?, &dec_block.beefy_mmr[0].?);
-    try testing.expectEqualSlices([32]u8, orig_block.work_reports, dec_block.work_reports);
+    try testing.expectEqualSlices(ReportedWorkPackage, orig_block.work_reports, dec_block.work_reports);
 }
 
 test "decode beta - error cases" {

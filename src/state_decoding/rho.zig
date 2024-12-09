@@ -17,21 +17,16 @@ pub fn decode(comptime params: jam_params.Params, allocator: std.mem.Allocator, 
         // Read existence marker
         const exists = try reader.readByte();
         if (exists == 1) {
-            // Read report entry
-            var hash: [32]u8 = undefined;
-            try reader.readNoEof(&hash);
-
-            // TODO: deserialize the work_report
-            const work_report = try codec.deserializeAlloc(types.WorkReport, params, allocator, reader);
-
-            const timeout = try reader.readInt(u32, .little);
+            const assignment = try codec.deserializeAlloc(
+                types.AvailabilityAssignment,
+                params,
+                allocator,
+                reader,
+            );
 
             maybe_entry.* = .{
                 .core = @intCast(core_index),
-                .assignment = .{
-                    .report = work_report,
-                    .timeout = timeout,
-                },
+                .assignment = assignment,
             };
         } else if (exists == 0) {
             maybe_entry.* = null;
@@ -99,23 +94,9 @@ test "decode rho - insufficient data" {
             fbs.reader(),
         ));
     }
-
-    // Test truncated timeslot
-    {
-        var buffer = std.ArrayList(u8).init(testing.allocator);
-        defer buffer.deinit();
-
-        try buffer.append(1); // exists
-        try buffer.appendSlice(&[_]u8{1} ** 32); // hash
-        const report = createEmptyWorkReport([_]u8{1} ** 32);
-        try codec.serialize(types.WorkReport, {}, buffer.writer(), report);
-        try buffer.appendSlice(&[_]u8{1} ** 2); // partial timeslot
-
-        var fbs = std.io.fixedBufferStream(buffer.items);
-        try testing.expectError(error.EndOfStream, decode(.{ .core_count = core_count }, std.testing.allocator, fbs.reader()));
-    }
 }
 
+// TODO: test encoding/decoding of the WorkResult and the WorkExecResults
 test "decode rho - roundtrip" {
     const encoder = @import("../state_encoding/rho.zig");
     const core_count = 2;

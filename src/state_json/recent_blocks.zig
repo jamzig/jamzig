@@ -25,11 +25,13 @@ pub fn jsonStringify(self: *const Beta, jw: anytype) !void {
         }
         try jw.endArray();
         try jw.objectField("work_reports");
-        try jw.beginArray();
-        for (block.work_reports) |hash| {
-            try jw.write(std.fmt.fmtSliceHexLower(&hash));
+        try jw.beginObject();
+        for (block.work_reports) |reports| {
+            try jw.objectField("hash");
+            try jw.write(std.fmt.fmtSliceHexLower(&reports.hash));
+            try jw.write(std.fmt.fmtSliceHexLower(&reports.exports_root));
         }
-        try jw.endArray();
+        try jw.endObject();
         try jw.endObject();
     }
     try jw.endArray();

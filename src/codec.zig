@@ -252,6 +252,15 @@ fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocat
             defer union_span.deinit();
             union_span.debug("Deserializing union type: {s}", .{@typeName(T)});
 
+            if (@hasDecl(T, "decode")) {
+                union_span.debug("Using custom decode method", .{});
+                return try @call(.auto, @field(T, "decode"), .{
+                    params,
+                    reader,
+                    allocator,
+                });
+            }
+
             const tag_value = try readInteger(reader);
             union_span.debug("Read union tag value: {d}", .{tag_value});
 

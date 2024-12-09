@@ -3,6 +3,7 @@ const encoder = @import("../codec/encoder.zig");
 
 const recent_blocks = @import("../recent_blocks.zig");
 const RecentHistory = recent_blocks.RecentHistory;
+const ReportedWorkPackage = recent_blocks.ReportedWorkPackage;
 
 pub fn encode(self: *const RecentHistory, writer: anytype) !void {
     // Encode the number of blocks
@@ -22,8 +23,9 @@ pub fn encode(self: *const RecentHistory, writer: anytype) !void {
 
         // Encode work reports
         try writer.writeAll(encoder.encodeInteger(block.work_reports.len).as_slice());
-        for (block.work_reports) |report_hash| {
-            try writer.writeAll(&report_hash);
+        for (block.work_reports) |report| {
+            try writer.writeAll(&report.hash);
+            try writer.writeAll(&report.exports_root);
         }
     }
 }
@@ -49,7 +51,12 @@ test "encode" {
         .header_hash = [_]u8{1} ** 32,
         .state_root = [_]u8{2} ** 32,
         .beefy_mmr = try allocator.dupe(?Hash, &.{[_]u8{3} ** 32}),
-        .work_reports = try allocator.dupe(Hash, &.{[_]u8{4} ** 32}),
+        .work_reports = try allocator.dupe(ReportedWorkPackage, &[_]ReportedWorkPackage{
+            ReportedWorkPackage{
+                .hash = [_]u8{4} ** 32,
+                .exports_root = [_]u8{5} ** 32,
+            },
+        }),
     };
 
     try recent_history.addBlockInfo(block);
@@ -59,7 +66,7 @@ test "encode" {
 
     try encode(&recent_history, fbs.writer());
 
-    const encoded = fbs.getWritten();
+    const encoded: []u8 = fbs.getWritten();
 
     // Check the number of blocks (should be 1)
     try testing.expectEqual(@as(u8, 1), encoded[0]);
@@ -72,12 +79,13 @@ test "encode" {
 
     // Check the state root
     // 32 bytes for state root, 1 byte for work reports length, 32 bytes for work report hash
-    const state_root_start = encoded.len - 32 - 1 - 32;
+    const state_root_start = encoded.len - 32 - 1 - 32 - 32;
     try testing.expectEqualSlices(u8, &block.state_root, encoded[state_root_start .. state_root_start + 32]);
 
     // Check the number of work reports (should be 1)
-    try testing.expectEqual(@as(u8, 1), encoded[encoded.len - 1 - 32]);
+    try testing.expectEqual(@as(u8, 1), encoded[encoded.len - 1 - 32 - 32]);
 
-    // Check the work report hash
-    try testing.expectEqualSlices(u8, &block.work_reports[0], encoded[encoded.len - 32 ..]);
+    // Check the work report hashes
+    try testing.expectEqualSlices(u8, &block.work_reports[0].hash, encoded[encoded.len - 64 ..][0..32]);
+    try testing.expectEqualSlices(u8, &block.work_reports[0].exports_root, encoded[encoded.len - 32 ..][0..32]);
 }

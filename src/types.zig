@@ -143,11 +143,23 @@ pub const WorkExecResult = union(enum(u8)) {
         }
     }
 
-    pub fn decode(self: *const @This(), _: anytype, reader: anytype) !void {
-        // TODO: we need a decode as well
-        _ = self;
-        _ = reader;
-        @panic("Unimplemented");
+    pub fn decode(_: anytype, reader: anytype, alloc: std.mem.Allocator) !@This() {
+        const tag = try reader.readByte();
+
+        return switch (tag) {
+            0 => blk: {
+                const codec = @import("codec.zig");
+                const len = try codec.readInteger(reader);
+                const data = try alloc.alloc(u8, len);
+                try reader.readNoEof(data);
+                break :blk WorkExecResult{ .ok = data };
+            },
+            1 => WorkExecResult{ .out_of_gas = {} },
+            2 => WorkExecResult{ .panic = {} },
+            3 => WorkExecResult{ .bad_code = {} },
+            4 => WorkExecResult{ .code_oversize = {} },
+            else => error.InvalidTag,
+        };
     }
 };
 
