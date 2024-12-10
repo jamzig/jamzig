@@ -299,10 +299,18 @@ pub const TicketsMark = struct {
 pub const ValidatorSet = struct {
     validators: []ValidatorData,
 
+    pub fn validators_size(params: jam_params.Params) usize {
+        return params.validators_count;
+    }
+
     pub fn init(allocator: std.mem.Allocator, validators_count: u32) !@This() {
         return @This(){
             .validators = try allocator.alloc(ValidatorData, validators_count),
         };
+    }
+
+    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.validators);
     }
 
     pub fn len(self: @This()) usize {
@@ -317,10 +325,6 @@ pub const ValidatorSet = struct {
         return @This(){
             .validators = try allocator.dupe(ValidatorData, self.validators),
         };
-    }
-
-    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.validators);
     }
 
     pub fn merge(self: *@This(), other: @This()) !void {
@@ -376,6 +380,14 @@ pub const Iota = ValidatorSet;
 pub const GammaS = union(enum) {
     tickets: []TicketBody,
     keys: []BandersnatchPublic,
+
+    pub fn tickets_size(params: jam_params.Params) usize {
+        return params.epoch_length;
+    }
+
+    pub fn keys_size(params: jam_params.Params) usize {
+        return params.epoch_length;
+    }
 
     // TODO: make the const* to *
     pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {

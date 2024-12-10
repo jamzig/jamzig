@@ -22,3 +22,6 @@
 [submodule "src/stf_test/jamtestnet"]
 	path = src/jamtestnet/data
 	url = https://github.com/jam-duna/jamtestnet.git
+[submodule "src/jamtestvectors/data"]
+	path = src/jamtestvectors/data
+	url = https://github.com/w3f/jamtestvectors/

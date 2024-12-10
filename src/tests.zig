@@ -1,4 +1,7 @@
 comptime {
+    _ = @import("jamtestvectors/parser.zig");
+    _ = @import("jamtestvectors/safrole.zig");
+
     _ = @import("tests/vectors/codec.zig");
     _ = @import("tests/vectors/disputes.zig");
     _ = @import("tests/vectors/erasure_coding.zig");

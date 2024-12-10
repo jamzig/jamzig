@@ -275,6 +275,26 @@ fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocat
                         return @unionInit(T, field.name, {});
                     } else {
                         field_span.debug("Deserializing field value of type: {s}", .{@typeName(field.type)});
+
+                        const field_type = field.type;
+                        if (@hasDecl(T, field.name ++ "_size")) {
+                            field_span.debug("Field has size function", .{});
+                            const size_fn = @field(T, field.name ++ "_size");
+                            const size = @call(.auto, size_fn, .{params});
+                            field_span.debug("Size function returned: {d}", .{size});
+
+                            const slice = try allocator.alloc(std.meta.Child(field_type), size);
+                            field_span.trace("Allocated slice of size {d}", .{size});
+
+                            for (slice, 0..) |*item, i| {
+                                const item_span = field_span.child(.slice_item);
+                                defer item_span.deinit();
+                                item_span.debug("Deserializing item {d} of {d}", .{ i + 1, size });
+                                item.* = try recursiveDeserializeLeaky(std.meta.Child(field_type), params, allocator, reader);
+                            }
+                            return @unionInit(T, field.name, slice);
+                        }
+
                         const field_value = try recursiveDeserializeLeaky(field.type, params, allocator, reader);
                         return @unionInit(T, field.name, field_value);
                     }
