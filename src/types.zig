@@ -537,9 +537,9 @@ pub const Fault = struct {
 };
 
 pub const DisputesExtrinsic = struct {
-    verdicts: []const Verdict,
-    culprits: []const Culprit,
-    faults: []const Fault,
+    verdicts: []Verdict,
+    culprits: []Culprit,
+    faults: []Fault,
 
     pub fn deepClone(self: *const @This(), allocator: std.mem.Allocator) !@This() {
         var verdicts = try allocator.alloc(Verdict, self.verdicts.len);

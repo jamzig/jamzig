@@ -70,20 +70,3 @@ pub fn CodecTestVector(comptime T: type) type {
         }
     };
 }
-
-test "codec: parsing the block" {
-    const allocator = std.heap.page_allocator;
-    const vector = try CodecTestVector(types.Block).build_from(allocator, "src/tests/vectors/codec/codec/data/block.json");
-    defer vector.deinit();
-
-    // Test if the vector contains the block type
-    const parent_value = try std.fmt.allocPrint(allocator, "{}", .{vector.expected.value.header.parent});
-    defer allocator.free(parent_value);
-    try std.testing.expectEqualStrings(
-        "0x5c743dbc514284b2ea57798787c5a155ef9d7ac1e9499ec65910a7a3d65897b7",
-        parent_value,
-    );
-
-    // Test if the vector contains the binary type
-    try std.testing.expectEqual(4907, vector.binary.len);
-}

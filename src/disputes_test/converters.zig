@@ -126,7 +126,7 @@ fn convertWorkReport(allocator: std.mem.Allocator, test_report: tvector.WorkRepo
             .service_id = result.service_id,
             .code_hash = result.code_hash.bytes,
             .payload_hash = result.payload_hash.bytes,
-            .gas = result.gas,
+            .accumulate_gas = result.gas,
             .result = switch (result.result) {
                 .ok => |data| .{ .ok = brk: {
                     const clone = try allocator.dupe(u8, data.bytes);

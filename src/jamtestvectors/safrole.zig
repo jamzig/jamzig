@@ -23,7 +23,7 @@ pub const Input = struct {
     extrinsic: types.TicketsExtrinsic,
 
     pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.extrinsic);
+        self.extrinsic.deinit(allocator);
     }
 };
 
