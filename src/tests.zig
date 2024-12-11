@@ -1,6 +1,7 @@
 comptime {
     _ = @import("jamtestvectors/loader.zig");
     _ = @import("jamtestvectors/safrole.zig");
+    _ = @import("jamtestvectors/codec.zig");
 
     _ = @import("tests/vectors/disputes.zig");
     _ = @import("tests/vectors/erasure_coding.zig");
