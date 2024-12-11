@@ -65,6 +65,17 @@ pub const RefineContext = struct {
     lookup_anchor_slot: TimeSlot,
     prerequisites: []OpaqueHash,
 
+    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return @This(){
+            .anchor = self.anchor,
+            .state_root = self.state_root,
+            .beefy_root = self.beefy_root,
+            .lookup_anchor = self.lookup_anchor,
+            .lookup_anchor_slot = self.lookup_anchor_slot,
+            .prerequisites = try allocator.dupe(OpaqueHash, self.prerequisites),
+        };
+    }
+
     pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
         allocator.free(self.prerequisites);
     }
@@ -142,6 +153,13 @@ pub const WorkExecResult = union(enum(u8)) {
     bad_code: void = 3,
     code_oversize: void = 4,
 
+    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return switch (self) {
+            .ok => |data| WorkExecResult{ .ok = try allocator.dupe(u8, data) },
+            else => self,
+        };
+    }
+
     pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
         switch (self.*) {
             .ok => |value| allocator.free(value),
@@ -198,6 +216,16 @@ pub const WorkResult = struct {
     accumulate_gas: Gas,
     result: WorkExecResult,
 
+    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return @This(){
+            .service_id = self.service_id,
+            .code_hash = self.code_hash,
+            .payload_hash = self.payload_hash,
+            .accumulate_gas = self.accumulate_gas,
+            .result = try self.result.deepClone(allocator),
+        };
+    }
+
     pub fn deinit(self: *const WorkResult, allocator: std.mem.Allocator) void {
         self.result.deinit(allocator);
     }
@@ -211,9 +239,38 @@ pub const WorkPackageSpec = struct {
     exports_count: U16,
 };
 
-pub const AvailabilityAssignment = struct { report: WorkReport, timeout: U32 };
+pub const AvailabilityAssignment = struct {
+    report: WorkReport,
+    timeout: U32,
 
-pub const AvailabilityAssignments = []?AvailabilityAssignment;
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+        self.report.deinit(allocator);
+    }
+
+    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return @This(){
+            .report = try self.report.deepClone(allocator),
+            .timeout = self.timeout,
+        };
+    }
+};
+
+pub const AvailabilityAssignments = struct {
+    items: []?AvailabilityAssignment,
+
+    pub fn items_size(params: jam_params.Params) usize {
+        return params.core_count;
+    }
+
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+        for (self.items) |assignment| {
+            if (assignment) |item| {
+                item.report.deinit(allocator);
+            }
+        }
+        allocator.free(self.items);
+    }
+};
 
 pub const SegmentRootLookupItem = struct {
     work_package_hash: WorkPackageHash,
@@ -234,16 +291,23 @@ pub const WorkReport = struct {
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){
             .package_spec = self.package_spec,
-            .context = self.context,
+            .context = try self.context.deepClone(allocator),
             .core_index = self.core_index,
             .authorizer_hash = self.authorizer_hash,
             .auth_output = try allocator.dupe(u8, self.auth_output),
             .segment_root_lookup = try allocator.dupe(SegmentRootLookupItem, self.segment_root_lookup),
-            .results = try allocator.dupe(WorkResult, self.results),
+            .results = blk: {
+                const cloned_results = try allocator.alloc(WorkResult, self.results.len);
+                for (self.results, cloned_results) |result, *cloned| {
+                    cloned.* = try result.deepClone(allocator);
+                }
+                break :blk cloned_results;
+            },
         };
     }
 
     pub fn deinit(self: *const WorkReport, allocator: std.mem.Allocator) void {
+        self.context.deinit(allocator);
         allocator.free(self.auth_output);
         allocator.free(self.segment_root_lookup);
 
@@ -251,8 +315,6 @@ pub const WorkReport = struct {
             result.deinit(allocator);
         }
         allocator.free(self.results);
-
-        self.context.deinit(allocator);
     }
 };
 
@@ -437,6 +499,20 @@ pub const GammaS = union(enum) {
 pub const GammaA = []TicketBody;
 pub const GammaZ = BlsPublic;
 
+pub const OffendersMark = struct {
+    items: []Ed25519Public, // SIZE(0..validators_count)
+
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.items);
+    }
+
+    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return @This(){
+            .items = try allocator.dupe(Ed25519Public, self.offenders),
+        };
+    }
+};
+
 pub const Header = struct {
     parent: HeaderHash,
     parent_state_root: StateRoot,
@@ -534,6 +610,33 @@ pub const Fault = struct {
     vote: bool,
     key: Ed25519Public,
     signature: Ed25519Signature,
+};
+
+pub const DisputesRecords = struct {
+    // Good verdicts (psi_g)
+    good: []WorkReportHash,
+    // Bad verdicts (psi_b)
+    bad: []WorkReportHash,
+    // Wonky verdicts (psi_w)
+    wonky: []WorkReportHash,
+    // Offenders (psi_o)
+    offenders: []Ed25519Public,
+
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.good);
+        allocator.free(self.bad);
+        allocator.free(self.wonky);
+        allocator.free(self.offenders);
+    }
+
+    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return @This(){
+            .good = try allocator.dupe(WorkReportHash, self.good),
+            .bad = try allocator.dupe(WorkReportHash, self.bad),
+            .wonky = try allocator.dupe(WorkReportHash, self.wonky),
+            .offenders = try allocator.dupe(Ed25519Public, self.offenders),
+        };
+    }
 };
 
 pub const DisputesExtrinsic = struct {

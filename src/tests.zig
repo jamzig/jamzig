@@ -3,8 +3,8 @@ comptime {
     _ = @import("jamtestvectors/safrole.zig");
     _ = @import("jamtestvectors/codec.zig");
     _ = @import("jamtestvectors/trie.zig");
+    _ = @import("jamtestvectors/disputes.zig");
 
-    _ = @import("tests/vectors/disputes.zig");
     _ = @import("tests/vectors/erasure_coding.zig");
     _ = @import("tests/vectors/pvm.zig");
     _ = @import("tests/vectors/libs/history.zig");

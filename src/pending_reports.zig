@@ -102,7 +102,7 @@ pub const RhoEntry = struct {
         defer span.deinit();
         span.debug("Deinitializing RhoEntry for core {d}", .{self.core});
 
-        self.assignment.report.deinit(allocator);
+        self.assignment.deinit(allocator);
     }
 };
 

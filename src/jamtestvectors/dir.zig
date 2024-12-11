@@ -20,9 +20,26 @@ pub fn TestVectorList(comptime T: type) type {
             };
         }
 
+        pub fn test_cases(self: *Self) []const T {
+            return self.vectors.items;
+        }
+
         pub fn deinit(self: *Self) void {
-            for (self.vectors.items) |*vector| {
-                vector.deinit(self.allocator);
+            if (@hasDecl(T, "deinit")) {
+                const info = @typeInfo(@TypeOf(T.deinit));
+                if (info == .@"fn" and info.@"fn".params.len > 1) {
+                    // deinit takes an argument (likely allocator)
+                    for (self.vectors.items) |*vector| {
+                        vector.deinit(self.allocator);
+                    }
+                } else {
+                    // deinit takes no arguments beyond self
+                    for (self.vectors.items) |*vector| {
+                        vector.deinit();
+                    }
+                }
+            } else {
+                std.log.warn("TestVectorList: type " ++ @typeName(T) ++ " does not have a deinit method");
             }
             self.vectors.deinit();
         }
@@ -34,7 +51,6 @@ pub fn TestVectorList(comptime T: type) type {
     };
 }
 
-/// Build a list of test vectors from an ordered file list
 pub fn scan(
     comptime T: type,
     comptime params: Params,
