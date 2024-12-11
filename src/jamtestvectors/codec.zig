@@ -1,5 +1,5 @@
 const std = @import("std");
-pub const types = @import("./libs/codec.zig");
+pub const json_types = @import("./json_types/codec.zig");
 
 pub fn CodecTestVector(comptime T: type) type {
     return struct {

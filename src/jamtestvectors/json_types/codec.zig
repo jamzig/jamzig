@@ -1,8 +1,8 @@
 const std = @import("std");
-const types = @import("types.zig");
+const hex = @import("hex_bytes.zig");
 
-pub const HexBytes = types.hex.HexBytes;
-pub const HexBytesFixed = types.hex.HexBytesFixed;
+pub const HexBytes = hex.HexBytes;
+pub const HexBytesFixed = hex.HexBytesFixed;
 
 pub const U8 = u8;
 pub const U16 = u16;

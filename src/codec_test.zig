@@ -2,9 +2,9 @@ const std = @import("std");
 const testing = std.testing;
 
 const codec = @import("codec.zig");
-const codec_test = @import("tests/vectors/codec.zig");
+const codec_test = @import("jamtestvectors/codec.zig");
 
-const convert = @import("tests/convert/codec.zig");
+const convert = @import("jamtestvectors/json_convert/codec.zig");
 
 const types = @import("types.zig");
 const jam_params = @import("jam_params.zig");
@@ -56,7 +56,7 @@ fn testDecodeAndCompare(comptime test_case: TestCase) !void {
     defer allocator.free(bin_path);
 
     const DomainType = @field(types, test_case.domain_type);
-    const VectorType = @field(codec_test.types, test_case.domain_type);
+    const VectorType = @field(codec_test.json_types, test_case.domain_type);
 
     var decoded = try loader.loadAndDeserializeTestVector(DomainType, TINY_PARAMS, allocator, bin_path);
     defer decoded.deinit(allocator);

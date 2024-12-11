@@ -1,6 +1,6 @@
 const std = @import("std");
-const tv_types = @import("../vectors/libs/types.zig");
-const tv_lib_codec = @import("../vectors/libs/codec.zig");
+const tv_types = @import("../json_types/types.zig");
+const tv_lib_codec = @import("../json_types/codec.zig");
 
 const lib_codec = @import("../../types.zig");
 
@@ -175,7 +175,7 @@ fn convertWorkItem(allocator: Allocator, from: tv_lib_codec.WorkItem) !lib_codec
         .service = from.service,
         .code_hash = from.code_hash.bytes,
         .payload = try allocator.dupe(u8, from.payload.bytes),
-        .gas_limit = from.gas_limit,
+        .refine_gas_limit = from.gas_limit,
         .import_segments = try allocator.dupe(lib_codec.ImportSpec, from.import_segments),
         .extrinsic = try allocator.dupe(lib_codec.ExtrinsicSpec, from.extrinsic),
         .export_count = from.export_count,
