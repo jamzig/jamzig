@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const OrderedFiles = @import("../tests/ordered_files.zig");
-const parser = @import("parser.zig");
+const loader = @import("loader.zig");
 
 const Params = @import("../jam_params.zig").Params;
 
@@ -54,7 +54,7 @@ pub fn scan(
             continue;
         }
 
-        const vector = try parser.parseTestVector(T, params, allocator, entry.path);
+        const vector = try loader.loadAndDeserializeTestVector(T, params, allocator, entry.path);
         try vectors.append(vector);
     }
 

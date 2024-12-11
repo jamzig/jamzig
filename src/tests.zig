@@ -1,12 +1,11 @@
 comptime {
-    _ = @import("jamtestvectors/parser.zig");
+    _ = @import("jamtestvectors/loader.zig");
     _ = @import("jamtestvectors/safrole.zig");
 
     _ = @import("tests/vectors/codec.zig");
     _ = @import("tests/vectors/disputes.zig");
     _ = @import("tests/vectors/erasure_coding.zig");
     _ = @import("tests/vectors/pvm.zig");
-    _ = @import("tests/vectors/safrole.zig");
     _ = @import("tests/vectors/trie.zig");
     _ = @import("tests/vectors/libs/history.zig");
 
@@ -15,7 +14,6 @@ comptime {
     _ = @import("codec/blob_dict.zig");
 
     _ = @import("safrole_test.zig");
-    _ = @import("safrole/types_test.zig");
     _ = @import("safrole_test/diffz.zig");
 
     _ = @import("ring_vrf_test.zig");
@@ -69,10 +67,3 @@ comptime {
 pub const tv_types = @import("tests/vectors/libs/types.zig");
 
 pub const hexStringToBytes = tv_types.hex.hexStringToBytes;
-
-// Safrole
-pub const convert = @import("tests/convert/safrole.zig");
-pub const stateFromTestVector = convert.stateFromTestVector;
-pub const inputFromTestVector = convert.inputFromTestVector;
-pub const outputFromTestVector = convert.outputFromTestVector;
-pub const postOffendersFromPreState = convert.postOffendersFromPreState;
