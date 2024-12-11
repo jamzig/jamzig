@@ -45,6 +45,48 @@ const TypeMapping = struct {
             .code_oversize => lib_codec.WorkExecResult.code_oversize,
         };
     }
+    pub fn AvailAssurance(allocator: Allocator, from: []const tv_lib_codec.AvailAssurance) !lib_codec.AssurancesExtrinsic {
+        var e: lib_codec.AssurancesExtrinsic = undefined;
+        e.data = try allocator.alloc(lib_codec.AvailAssurance, from.len);
+        for (from, e.data) |fr, *to| {
+            to.* = try convertAvailAssurance(allocator, fr);
+        }
+        return e;
+    }
+    pub fn ReportGuarantee(allocator: Allocator, from: []const tv_lib_codec.ReportGuarantee) !lib_codec.GuaranteesExtrinsic {
+        var e: lib_codec.GuaranteesExtrinsic = undefined;
+        e.data = try allocator.alloc(lib_codec.ReportGuarantee, from.len);
+        for (from, e.data) |fr, *to| {
+            to.* = try convertReportGuarantee(allocator, fr);
+        }
+        return e;
+    }
+    pub fn Preimage(allocator: Allocator, from: []const tv_lib_codec.Preimage) !lib_codec.PreimagesExtrinsic {
+        var e: lib_codec.PreimagesExtrinsic = undefined;
+        e.data = try allocator.alloc(lib_codec.Preimage, from.len);
+        for (from, e.data) |fr, *to| {
+            to.* = try convertPreimage(allocator, fr);
+        }
+        return e;
+    }
+
+    pub fn TicketEnvelope(allocator: Allocator, from: []const tv_lib_codec.TicketEnvelope) !lib_codec.TicketsExtrinsic {
+        var e: lib_codec.TicketsExtrinsic = undefined;
+        e.data = try allocator.alloc(lib_codec.TicketEnvelope, from.len);
+        for (from, e.data) |fr, *to| {
+            to.* = convertTicketEnvelope(fr);
+        }
+        return e;
+    }
+
+    pub fn WorkItem(allocator: Allocator, from: []const tv_lib_codec.WorkItem) !lib_codec.WorkItemsExtrinsic {
+        var e: lib_codec.WorkItemsExtrinsic = undefined;
+        e.data = try allocator.alloc(lib_codec.WorkItem, from.len);
+        for (from, e.data) |fr, *to| {
+            to.* = try convertWorkItem(allocator, fr);
+        }
+        return e;
+    }
 };
 
 /// Convert a `testvecor.Header` to a `codec.Header`.
@@ -70,5 +112,72 @@ fn convertTicketBody(from: tv_lib_codec.TicketBody) lib_codec.TicketBody {
     return lib_codec.TicketBody{
         .id = convertHexBytesFixedToArray(32, from.id),
         .attempt = from.attempt,
+    };
+}
+
+fn convertAvailAssurance(allocator: Allocator, from: tv_lib_codec.AvailAssurance) !lib_codec.AvailAssurance {
+    // anchor: OpaqueHash,
+    // bitfield: []u8, // SIZE(avail_bitfield_bytes)
+    // validator_index: ValidatorIndex,
+    // signature: Ed25519Signature,
+    return lib_codec.AvailAssurance{
+        .anchor = from.anchor.bytes,
+        .bitfield = try allocator.dupe(u8, from.bitfield.bytes),
+        .validator_index = from.validator_index,
+        .signature = from.signature.bytes,
+    };
+}
+
+fn convertValidatorSignature(from: tv_lib_codec.ValidatorSignature) lib_codec.ValidatorSignature {
+    return lib_codec.ValidatorSignature{
+        .validator_index = from.validator_index,
+        .signature = from.signature.bytes,
+    };
+}
+
+fn convertReportGuarantee(allocator: Allocator, from: tv_lib_codec.ReportGuarantee) !lib_codec.ReportGuarantee {
+    // report: WorkReport,
+    // slot: TimeSlot,
+    // signatures: []ValidatorSignature,
+    const signatures = try allocator.alloc(lib_codec.ValidatorSignature, from.signatures.len);
+    for (from.signatures, signatures) |f, *s| {
+        s.* = convertValidatorSignature(f);
+    }
+
+    return .{
+        .report = try convert(
+            tv_lib_codec.WorkReport,
+            lib_codec.WorkReport,
+            allocator,
+            from.report,
+        ),
+        .slot = from.slot,
+        .signatures = signatures,
+    };
+}
+
+fn convertPreimage(allocator: Allocator, from: tv_lib_codec.Preimage) !lib_codec.Preimage {
+    return lib_codec.Preimage{
+        .requester = from.requester,
+        .blob = try allocator.dupe(u8, from.blob.bytes),
+    };
+}
+
+fn convertTicketEnvelope(from: tv_lib_codec.TicketEnvelope) lib_codec.TicketEnvelope {
+    return lib_codec.TicketEnvelope{
+        .attempt = from.attempt,
+        .signature = from.signature.bytes,
+    };
+}
+
+fn convertWorkItem(allocator: Allocator, from: tv_lib_codec.WorkItem) !lib_codec.WorkItem {
+    return lib_codec.WorkItem{
+        .service = from.service,
+        .code_hash = from.code_hash.bytes,
+        .payload = try allocator.dupe(u8, from.payload.bytes),
+        .gas_limit = from.gas_limit,
+        .import_segments = try allocator.dupe(lib_codec.ImportSpec, from.import_segments),
+        .extrinsic = try allocator.dupe(lib_codec.ExtrinsicSpec, from.extrinsic),
+        .export_count = from.export_count,
     };
 }

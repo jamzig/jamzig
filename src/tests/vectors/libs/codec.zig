@@ -26,7 +26,7 @@ pub const ServiceId = U32;
 pub const Gas = U64;
 pub const ValidatorIndex = U16;
 pub const CoreIndex = U16;
-pub const TicketAttempt = u1; // as the range is 0..1
+pub const TicketAttempt = u8; // as the range is 0..1
 
 // Crypto types matching ASN
 pub const BlsPublic = HexBytesFixed(144);
@@ -85,7 +85,8 @@ pub const WorkItem = struct {
     service: ServiceId,
     code_hash: OpaqueHash,
     payload: HexBytes,
-    gas_limit: Gas,
+    refine_gas_limit: Gas,
+    accumulate_gas_limit: Gas,
     import_segments: []ImportSpec,
     extrinsic: []ExtrinsicSpec,
     export_count: U16,
@@ -153,7 +154,7 @@ pub const WorkResult = struct {
     service_id: ServiceId,
     code_hash: OpaqueHash,
     payload_hash: OpaqueHash,
-    gas: Gas,
+    accumulate_gas: Gas,
     result: WorkExecResult,
 };
 
