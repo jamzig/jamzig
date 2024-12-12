@@ -8,6 +8,8 @@ const disputes = @import("disputes.zig");
 
 const stf = @import("stf.zig");
 
+const BASE_PATH = "src/jamtestvectors/data/disputes/";
+
 const runDisputeTest = @import("disputes_test/runner.zig").runDisputeTest;
 
 fn printStateDiff(allocator: std.mem.Allocator, pre_state: *const tvector.State, post_state: *const tvector.State) !void {
@@ -27,7 +29,7 @@ pub const TINY_PARAMS = @import("jam_params.zig").TINY_PARAMS;
 
 test "tiny/progress_with_no_verdicts-1.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_no_verdicts-1.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_no_verdicts-1.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -42,7 +44,7 @@ test "tiny/progress_with_no_verdicts-1.json" {
 
 test "tiny/progress_with_bad_signatures-1.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_bad_signatures-1.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_bad_signatures-1.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -58,7 +60,7 @@ test "tiny/progress_with_bad_signatures-1.json" {
 
 test "tiny/progress_with_bad_signatures-2.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_bad_signatures-2.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_bad_signatures-2.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -73,7 +75,7 @@ test "tiny/progress_with_bad_signatures-2.json" {
 
 test "tiny/progress_with_culprits-1.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_culprits-1.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_culprits-1.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -88,7 +90,7 @@ test "tiny/progress_with_culprits-1.json" {
 
 test "tiny/progress_with_culprits-2.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_culprits-2.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_culprits-2.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -103,7 +105,7 @@ test "tiny/progress_with_culprits-2.json" {
 
 test "tiny/progress_with_culprits-3.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_culprits-3.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_culprits-3.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -117,7 +119,7 @@ test "tiny/progress_with_culprits-3.json" {
 
 test "tiny/progress_with_culprits-4.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_culprits-4.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_culprits-4.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -132,7 +134,7 @@ test "tiny/progress_with_culprits-4.json" {
 
 test "tiny/progress_with_culprits-5.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_culprits-5.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_culprits-5.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -148,7 +150,7 @@ test "tiny/progress_with_culprits-5.json" {
 
 test "tiny/progress_with_culprits-6.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_culprits-6.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_culprits-6.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -163,7 +165,7 @@ test "tiny/progress_with_culprits-6.json" {
 
 test "tiny/progress_with_culprits-7.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_culprits-7.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_culprits-7.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -178,7 +180,7 @@ test "tiny/progress_with_culprits-7.json" {
 
 test "tiny/progress_with_faults-1.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_faults-1.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_faults-1.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -193,7 +195,7 @@ test "tiny/progress_with_faults-1.json" {
 
 test "tiny/progress_with_faults-2.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_faults-2.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_faults-2.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -208,7 +210,7 @@ test "tiny/progress_with_faults-2.json" {
 
 test "tiny/progress_with_faults-3.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_faults-3.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_faults-3.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -223,7 +225,7 @@ test "tiny/progress_with_faults-3.json" {
 
 test "tiny/progress_with_faults-4.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_faults-4.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_faults-4.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -238,7 +240,7 @@ test "tiny/progress_with_faults-4.json" {
 
 test "tiny/progress_with_faults-5.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_faults-5.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_faults-5.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -253,7 +255,7 @@ test "tiny/progress_with_faults-5.json" {
 
 test "tiny/progress_with_faults-6.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_faults-6.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_faults-6.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -268,7 +270,7 @@ test "tiny/progress_with_faults-6.json" {
 
 test "tiny/progress_with_faults-7.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_faults-7.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_faults-7.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -283,7 +285,7 @@ test "tiny/progress_with_faults-7.json" {
 
 test "tiny/progress_with_verdict_signatures_from_previous_set-1.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdict_signatures_from_previous_set-1.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_verdict_signatures_from_previous_set-1.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -298,7 +300,7 @@ test "tiny/progress_with_verdict_signatures_from_previous_set-1.json" {
 
 test "tiny/progress_with_verdict_signatures_from_previous_set-2.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdict_signatures_from_previous_set-2.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_verdict_signatures_from_previous_set-2.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -313,7 +315,7 @@ test "tiny/progress_with_verdict_signatures_from_previous_set-2.json" {
 
 test "tiny/progress_with_verdicts-1.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdicts-1.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_verdicts-1.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -328,7 +330,7 @@ test "tiny/progress_with_verdicts-1.json" {
 
 test "tiny/progress_with_verdicts-2.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdicts-2.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_verdicts-2.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -343,7 +345,7 @@ test "tiny/progress_with_verdicts-2.json" {
 
 test "tiny/progress_with_verdicts-3.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdicts-3.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_verdicts-3.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -358,7 +360,7 @@ test "tiny/progress_with_verdicts-3.json" {
 
 test "tiny/progress_with_verdicts-4.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdicts-4.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_verdicts-4.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -373,7 +375,7 @@ test "tiny/progress_with_verdicts-4.json" {
 
 test "tiny/progress_with_verdicts-5.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdicts-5.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_verdicts-5.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -388,7 +390,7 @@ test "tiny/progress_with_verdicts-5.json" {
 
 test "tiny/progress_with_verdicts-6.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_with_verdicts-6.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_with_verdicts-6.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -404,7 +406,7 @@ test "tiny/progress_with_verdicts-6.json" {
 // This test is the only one which will change the rho, the rest is Phi.only
 test "tiny/progress_invalidates_avail_assignments-1.json" {
     const allocator = std.testing.allocator;
-    const test_bin = "src/tests/vectors/disputes/disputes/tiny/progress_invalidates_avail_assignments-1.bin";
+    const test_bin = BASE_PATH ++ "tiny/progress_invalidates_avail_assignments-1.bin";
     const test_vector = try tvector.TestCase.build_from(TINY_PARAMS, allocator, test_bin);
     defer test_vector.deinit(allocator);
 
@@ -439,32 +441,32 @@ test "XXX" {
     const allocator = std.testing.allocator;
 
     const full_test_files = [_][]const u8{
-        "src/tests/vectors/disputes/disputes/full/progress_invalidates_avail_assignments-1.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_bad_signatures-1.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_bad_signatures-2.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_culprits-1.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_culprits-2.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_culprits-3.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_culprits-4.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_culprits-5.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_culprits-6.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_culprits-7.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_faults-1.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_faults-2.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_faults-3.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_faults-4.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_faults-5.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_faults-6.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_faults-7.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_no_verdicts-1.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_verdict_signatures_from_previous_set-1.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_verdict_signatures_from_previous_set-2.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_verdicts-1.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_verdicts-2.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_verdicts-3.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_verdicts-4.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_verdicts-5.bin",
-        "src/tests/vectors/disputes/disputes/full/progress_with_verdicts-6.bin",
+        BASE_PATH ++ "full/progress_invalidates_avail_assignments-1.bin",
+        BASE_PATH ++ "full/progress_with_bad_signatures-1.bin",
+        BASE_PATH ++ "full/progress_with_bad_signatures-2.bin",
+        BASE_PATH ++ "full/progress_with_culprits-1.bin",
+        BASE_PATH ++ "full/progress_with_culprits-2.bin",
+        BASE_PATH ++ "full/progress_with_culprits-3.bin",
+        BASE_PATH ++ "full/progress_with_culprits-4.bin",
+        BASE_PATH ++ "full/progress_with_culprits-5.bin",
+        BASE_PATH ++ "full/progress_with_culprits-6.bin",
+        BASE_PATH ++ "full/progress_with_culprits-7.bin",
+        BASE_PATH ++ "full/progress_with_faults-1.bin",
+        BASE_PATH ++ "full/progress_with_faults-2.bin",
+        BASE_PATH ++ "full/progress_with_faults-3.bin",
+        BASE_PATH ++ "full/progress_with_faults-4.bin",
+        BASE_PATH ++ "full/progress_with_faults-5.bin",
+        BASE_PATH ++ "full/progress_with_faults-6.bin",
+        BASE_PATH ++ "full/progress_with_faults-7.bin",
+        BASE_PATH ++ "full/progress_with_no_verdicts-1.bin",
+        BASE_PATH ++ "full/progress_with_verdict_signatures_from_previous_set-1.bin",
+        BASE_PATH ++ "full/progress_with_verdict_signatures_from_previous_set-2.bin",
+        BASE_PATH ++ "full/progress_with_verdicts-1.bin",
+        BASE_PATH ++ "full/progress_with_verdicts-2.bin",
+        BASE_PATH ++ "full/progress_with_verdicts-3.bin",
+        BASE_PATH ++ "full/progress_with_verdicts-4.bin",
+        BASE_PATH ++ "full/progress_with_verdicts-5.bin",
+        BASE_PATH ++ "full/progress_with_verdicts-6.bin",
     };
 
     for (full_test_files) |test_file| {

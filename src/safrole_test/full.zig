@@ -8,7 +8,7 @@ const assert = std.debug.assert;
 
 pub const FULL_PARAMS = @import("../jam_params.zig").FULL_PARAMS;
 
-const TEST_VECTOR_DIR = "src/tests/vectors/safrole/safrole/full";
+const TEST_VECTOR_DIR = "src/jamtestvectors/data/safrole/full";
 
 fn testSafroleVector(allocator: std.mem.Allocator, file_name: []const u8) !void {
     var fixture = try fixtures.buildFixtures(FULL_PARAMS, allocator, file_name);
