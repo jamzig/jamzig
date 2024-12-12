@@ -68,7 +68,7 @@ pub const PVMTestVector = struct {
 
 test "pvm: parsing the inst_add test vector" {
     const allocator = std.testing.allocator;
-    const vector = try PVMTestVector.build_from(allocator, "src/tests/vectors/pvm/pvm/pvm/programs/inst_add.json");
+    const vector = try PVMTestVector.build_from(allocator, "src/jamtestvectors/pvm/pvm/programs/inst_add.json");
     defer vector.deinit();
 
     try std.testing.expectEqualStrings("inst_add", vector.value.name);

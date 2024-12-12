@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const PMVLib = @import("../tests/vectors/libs/pvm.zig");
+const PMVLib = @import("../jamtestvectors/pvm.zig");
 
 const PVM = @import("../pvm.zig").PVM;
 

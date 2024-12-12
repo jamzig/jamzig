@@ -1,6 +1,3 @@
-[submodule "src/tests/vectors/pvm/pvm"]
-	path = src/tests/vectors/pvm/pvm
-	url = https://github.com/w3f/jamtestvectors.git
 [submodule "src/tests/vectors/history"]
 	path = src/tests/vectors/history
 	url = https://github.com/w3f/jamtestvectors.git
@@ -12,4 +9,7 @@
 	url = https://github.com/jam-duna/jamtestnet.git
 [submodule "src/jamtestvectors/data"]
 	path = src/jamtestvectors/data
+	url = https://github.com/w3f/jamtestvectors/
+[submodule "src/jamtestvectors/pvm"]
+	path = src/jamtestvectors/pvm
 	url = https://github.com/w3f/jamtestvectors/
