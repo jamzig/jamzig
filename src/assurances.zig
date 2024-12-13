@@ -1,13 +1,88 @@
 const std = @import("std");
 const types = @import("types.zig");
 const state = @import("state.zig");
+const crypto = std.crypto;
+
+/// A wrapper type that guarantees an AssuranceExtrinsic has been validated
+pub const ValidatedAssuranceExtrinsic = struct {
+    inner: types.AssurancesExtrinsic,
+
+    const Error = error{
+        InvalidBitfieldSize,
+        DuplicateValidatorIndex,
+        NotSortedValidatorIndex,
+        InvalidSignature,
+        InvalidPublicKey,
+        InvalidAnchorHash,
+    };
+
+    /// Validates the AssuranceExtrinsic according to protocol rules
+    pub fn validate(
+        comptime params: @import("jam_params.zig").Params,
+        extrinsic: types.AssurancesExtrinsic,
+        parent_hash: types.HeaderHash,
+        kappa: types.ValidatorSet,
+    ) Error!@This() {
+        if (extrinsic.data.len == 0) {
+            return .{ .inner = extrinsic };
+        }
+
+        var prev_validator_idx: usize = -1;
+        for (extrinsic.data) |assurance| {
+            // Validate bitfield size
+            if (assurance.bitfield.len != params.avail_bitfield_bytes) {
+                return Error.InvalidBitfieldSize;
+            }
+
+            // Ensure strictly increasing validator indices
+            if (assurance.validator_index == prev_validator_idx) {
+                return Error.DuplicateValidatorIndex;
+            } else if (assurance.validator_index < prev_validator_idx) {
+                return Error.NotSortedValidatorIndex;
+            }
+            prev_validator_idx = assurance.validator_index;
+
+            // Validate anchor hash matches parent
+            if (!std.mem.eql(u8, &assurance.anchor, &parent_hash)) {
+                return Error.InvalidAnchorHash;
+            }
+
+            // Validate signature
+            // The message is: "$jam_available" ++ H(E(anchor, bitfield))
+            const prefix = "jam_available";
+            var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+            hasher.update(prefix);
+            hasher.update(&assurance.anchor);
+            hasher.update(assurance.bitfield);
+            var hash: [32]u8 = undefined;
+            hasher.final(&hash);
+
+            if (assurance.validator_index >= kappa.validators.len) {
+                return Error.InvalidValidatorIndex;
+            }
+
+            const public_key = kappa.validators[assurance.validator_index].ed25519;
+            const validator_pub_key = crypto.sign.Ed25519.PublicKey.fromBytes(public_key) catch {
+                return Error.InvalidPublicKey;
+            };
+
+            const signature = crypto.sign.Ed25519.Signature.fromBytes(assurance.signature);
+
+            signature.verify(&hash, validator_pub_key) catch {
+                return Error.InvalidSignature;
+            };
+        }
+
+        return ValidatedAssuranceExtrinsic{ .inner = extrinsic };
+    }
+};
 
 /// Process a block's assurance extrinsic to determine which work reports have
 /// become available based on validator assurances
 pub fn processAssuranceExtrinsic(
     comptime params: @import("jam_params.zig").Params,
     allocator: std.mem.Allocator,
-    assurances_extrinsic: types.AssurancesExtrinsic, // assume this is validator TODO: use type system
+    assurances_extrinsic: ValidatedAssuranceExtrinsic,
     pending_reports: *state.Rho(params.core_count),
 ) ![]types.WorkReport {
     // Track which cores have super-majority assurance
