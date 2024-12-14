@@ -1,15 +1,11 @@
 const std = @import("std");
-const disputes = @import("../jamtestvectors/disputes.zig");
 
 const tmpfile = @import("tmpfile");
 
-pub const Error = error{OutOfMemory};
-
-// TODO: use the testing/diff.zig
-pub fn diffStates(
+pub fn diffBasedOnFormat(
     allocator: std.mem.Allocator,
-    before: *const disputes.State,
-    after: *const disputes.State,
+    before: anytype,
+    after: anytype,
 ) ![]u8 {
 
     // Print both before and after states
@@ -48,4 +44,13 @@ pub fn diffStates(
     }
     // Return the owned slice, to be freed by caller
     return result.stdout;
+}
+
+pub fn printDiffBasedOnFormatToStdErr(
+    allocator: std.mem.Allocator,
+    before: anytype,
+    after: anytype,
+) !void {
+    const diff = try diffBasedOnFormat(allocator, before, after);
+    std.debug.print("{s}", .{diff});
 }

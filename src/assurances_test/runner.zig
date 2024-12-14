@@ -4,6 +4,7 @@ const tvector = @import("../jamtestvectors/assurances.zig");
 const assurances = @import("../assurances.zig");
 const types = @import("../types.zig");
 const helpers = @import("../tests/helpers.zig");
+const diff = @import("../tests/diff.zig");
 const Params = @import("../jam_params.zig").Params;
 
 pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, test_case: tvector.TestCase) !void {
@@ -71,12 +72,22 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
                 // Verify outputs match expected results
                 try std.testing.expectEqual(available_reports.len, expected_marks.reported.len);
                 for (available_reports, expected_marks.reported) |actual, expected| {
-                    try std.testing.expectEqualDeep(actual.report, expected);
+                    std.testing.expectEqualDeep(actual.report, expected) catch {
+                        try diff.printDiffBasedOnFormatToStdErr(allocator, actual.report, expected);
+                        return error.ReportMismatch;
+                    };
                 }
 
                 // Verify state matches expected state
-                try std.testing.expectEqualDeep(state_rho, &expected_assignments);
-                try std.testing.expectEqualDeep(state_kappa, &expected_validators);
+                std.testing.expectEqualDeep(state_rho, &expected_assignments) catch {
+                    try diff.printDiffBasedOnFormatToStdErr(allocator, state_rho, &expected_assignments);
+                    return error.StateRhoMismatch;
+                };
+
+                std.testing.expectEqualDeep(state_kappa, &expected_validators) catch {
+                    try diff.printDiffBasedOnFormatToStdErr(allocator, state_kappa, &expected_validators);
+                    return error.StateKappaMismatch;
+                };
             } else |err| {
                 std.debug.print("UnexpectedError: {any}\n", .{err});
                 return error.UnexpectedError;
