@@ -89,34 +89,13 @@ pub fn Alpha(comptime core_count: u16) type {
             return false;
         }
 
-        pub fn debugPrint(self: *const @This(), writer: anytype) !void {
-            try writer.print(@typeName(@This()) ++ "State:\n", .{});
-            for (0..core_count) |c| {
-                try writer.print("Core {d}:\n", .{c});
-                try writer.print("  Pool: ", .{});
-                for (self.pools[c].constSlice()) |auth| {
-                    try writer.print("{x} ", .{std.fmt.fmtSliceHexLower(&auth)});
-                }
-                try writer.print("\n  Queue: ", .{});
-                for (self.queues[c].constSlice()) |auth| {
-                    try writer.print("{x} ", .{std.fmt.fmtSliceHexLower(&auth)});
-                }
-                try writer.print("\n", .{});
-            }
-        }
-
         pub fn format(
             self: @This(),
             comptime fmt: []const u8,
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            _ = fmt;
-            _ = options;
-            try writer.print(@typeName(@This()) ++ "{{ pools: {d} pools, queues: {d} queues }}", .{
-                self.pools.len,
-                self.queues.len,
-            });
+            try @import("state_format/authorization.zig").format(core_count, self, fmt, options, writer);
         }
     };
 }
