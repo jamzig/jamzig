@@ -1,7 +1,8 @@
 const std = @import("std");
+const tfmt = @import("../types/fmt.zig");
 
 pub fn format(
-    psi: anytype,
+    self: *const @import("../disputes.zig").Psi,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,
@@ -9,29 +10,50 @@ pub fn format(
     _ = fmt;
     _ = options;
 
-    try writer.writeAll("Psi {\n");
-    try writer.writeAll("  good_set: {\n");
-    for (psi.good_set.keys()) |key| {
-        try writer.print("    {x}\n", .{key});
-    }
-    try writer.writeAll("  },\n");
+    var indented_writer = tfmt.IndentedWriter(@TypeOf(writer)).init(writer);
+    var iw = indented_writer.writer();
 
-    try writer.writeAll("  bad_set: {\n");
-    for (psi.bad_set.keys()) |key| {
-        try writer.print("    {x}\n", .{key});
-    }
-    try writer.writeAll("  },\n");
+    try iw.writeAll("Psi {\n");
+    iw.context.indent();
+    defer iw.context.outdent();
 
-    try writer.writeAll("  wonky_set: {\n");
-    for (psi.wonky_set.keys()) |key| {
-        try writer.print("    {x}\n", .{key});
+    // Format good_set
+    try iw.writeAll("good_set: {\n");
+    iw.context.indent();
+    for (self.good_set.keys()) |key| {
+        try tfmt.formatValue(key, iw);
+        try iw.writeAll(",\n");
     }
-    try writer.writeAll("  },\n");
+    iw.context.outdent();
+    try iw.writeAll("}\n");
 
-    try writer.writeAll("  punish_set: {\n");
-    for (psi.punish_set.keys()) |key| {
-        try writer.print("    {x}\n", .{key});
+    // Format bad_set
+    try iw.writeAll("bad_set: {\n");
+    iw.context.indent();
+    for (self.bad_set.keys()) |key| {
+        try tfmt.formatValue(key, iw);
+        try iw.writeAll(",\n");
     }
-    try writer.writeAll("  }\n");
-    try writer.writeAll("}");
+    iw.context.outdent();
+    try iw.writeAll("}\n");
+
+    // Format wonky_set
+    try iw.writeAll("wonky_set: {\n");
+    iw.context.indent();
+    for (self.wonky_set.keys()) |key| {
+        try tfmt.formatValue(key, iw);
+        try iw.writeAll(",\n");
+    }
+    iw.context.outdent();
+    try iw.writeAll("}\n");
+
+    // Format punish_set
+    try iw.writeAll("punish_set: {\n");
+    iw.context.indent();
+    for (self.punish_set.keys()) |key| {
+        try tfmt.formatValue(key, iw);
+        try iw.writeAll(",\n");
+    }
+    iw.context.outdent();
+    try iw.writeAll("}\n");
 }
