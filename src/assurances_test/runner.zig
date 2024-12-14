@@ -70,22 +70,26 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
                 defer allocator.free(available_reports);
 
                 // Verify outputs match expected results
-                try std.testing.expectEqual(available_reports.len, expected_marks.reported.len);
+                if (available_reports.len != expected_marks.reported.len) {
+                    std.debug.print("\nMismatch in number of reports:\n  Expected: {d}\n  Got: {d}\n", .{
+                        expected_marks.reported.len,
+                        available_reports.len,
+                    });
+                    return error.ReportCountMismatch;
+                }
+
                 for (available_reports, expected_marks.reported) |actual, expected| {
-                    std.testing.expectEqualDeep(actual.report, expected) catch {
-                        try diff.printDiffBasedOnFormatToStdErr(allocator, actual.report, expected);
+                    diff.expectFormattedEqual(allocator, actual.report, expected) catch {
                         return error.ReportMismatch;
                     };
                 }
 
                 // Verify state matches expected state
-                std.testing.expectEqualDeep(state_rho, &expected_assignments) catch {
-                    try diff.printDiffBasedOnFormatToStdErr(allocator, state_rho, &expected_assignments);
+                diff.expectFormattedEqual(allocator, state_rho, &expected_assignments) catch {
                     return error.StateRhoMismatch;
                 };
 
-                std.testing.expectEqualDeep(state_kappa, &expected_validators) catch {
-                    try diff.printDiffBasedOnFormatToStdErr(allocator, state_kappa, &expected_validators);
+                diff.expectFormattedEqual(allocator, state_kappa, &expected_validators) catch {
                     return error.StateKappaMismatch;
                 };
             } else |err| {

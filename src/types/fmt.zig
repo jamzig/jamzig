@@ -25,13 +25,14 @@ pub fn IndentedWriter(comptime T: type) type {
         }
 
         pub fn indentedWrite(self: *Self, bytes: []const u8) Error!usize {
+            var written: usize = 0;
             for (bytes) |byte| {
                 if (self.at_start) {
                     try self.writeIndent();
                     self.at_start = false;
                 }
 
-                _ = try self.wrapped.write(&[_]u8{byte});
+                written += try self.wrapped.write(&[_]u8{byte});
                 // Only set at_start to true when we actually see a newline
                 if (byte == '\n') {
                     self.at_start = true;
@@ -41,7 +42,7 @@ pub fn IndentedWriter(comptime T: type) type {
             // We need to return the number of bytes written as expected
             // by the caller. This is not the actual number of bytes written but an indicator
             // that we finished writing. This happens when we have written all bytes.
-            return bytes.len;
+            return written;
         }
 
         pub fn writeIndent(self: *Self) Error!void {
@@ -77,6 +78,7 @@ pub fn formatHex(value: anytype, writer: anytype) !void {
         buf[1] = charset[c & 15];
         try writer.writeAll(&buf);
     }
+    try writer.print(" (len: {d})", .{value.len});
 }
 
 pub fn formatValue(value: anytype, writer: anytype) !void {
@@ -111,15 +113,25 @@ pub fn formatValue(value: anytype, writer: anytype) !void {
                     }
                 }
             }
-            try writer.writeAll("\n");
             writer.context.outdent();
         },
         .pointer => |ptr| {
             if (ptr.child == u8 and ptr.size == .Slice) {
                 try formatHex(value, writer);
             } else {
-                for (value) |item| {
-                    try formatValue(item, writer);
+                if (value.len > 0) {
+                    try writer.writeAll("[\n");
+                    writer.context.indent();
+                    for (value, 0..) |item, idx| {
+                        try writer.print("{d}: ", .{idx});
+                        writer.context.indent();
+                        try formatValue(item, writer);
+                        writer.context.outdent();
+                    }
+                    writer.context.outdent();
+                    try writer.writeAll("]");
+                } else {
+                    try writer.writeAll("[ <empty> ]");
                 }
             }
         },
@@ -128,7 +140,7 @@ pub fn formatValue(value: anytype, writer: anytype) !void {
                 try formatHex(&value, writer);
             } else {
                 try writer.writeAll("[\n");
-                writer.indent();
+                writer.context.indent();
                 for (value, 0..) |item, i| {
                     try formatValue(item, writer);
                     if (i < value.len - 1) try writer.writeAll(",");
