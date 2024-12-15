@@ -105,7 +105,9 @@ pub fn formatHex(value: anytype, writer: anytype) !void {
 
 const ContainerType = enum {
     list, // ArrayList, ArrayListUnmanaged, BoundedArray
-    hash_map, // HashMap variants including ArrayHashMap
+    multi_array_list,
+    hash_map, // HashMap variants
+    array_hash_map, // ArrayHashMap
     none,
 };
 
@@ -113,20 +115,35 @@ fn detectStdMemAllocator(comptime T: type) bool {
     return std.mem.indexOf(u8, @typeName(T), "mem.Allocator") != null;
 }
 
+const ContainerMapping = struct {
+    pattern: []const u8,
+    container_type: ContainerType,
+};
+
 fn detectContainerType(comptime T: type) ContainerType {
     const type_name = @typeName(T);
-    if (comptime std.mem.indexOf(u8, type_name, "HashMap") != null or
-        std.mem.indexOf(u8, type_name, "ArrayHashMap") != null)
-    {
-        return .hash_map;
+
+    const mappings = [_]ContainerMapping{
+        .{ .pattern = "ArrayList", .container_type = .list },
+        .{ .pattern = "MultiArrayList", .container_type = .multi_array_list },
+        .{ .pattern = "BoundedArray", .container_type = .list },
+        .{ .pattern = "HashMap", .container_type = .hash_map },
+        .{ .pattern = "ArrayHashMap", .container_type = .hash_map },
+    };
+
+    var min_pos: usize = std.math.maxInt(usize);
+    var detected_type: ContainerType = .none;
+
+    inline for (mappings) |mapping| {
+        if (std.mem.indexOf(u8, type_name, mapping.pattern)) |pos| {
+            if (pos < min_pos) {
+                min_pos = pos;
+                detected_type = mapping.container_type;
+            }
+        }
     }
 
-    if (std.mem.indexOf(u8, type_name, "ArrayList") != null or
-        std.mem.indexOf(u8, type_name, "BoundedArray") != null)
-    {
-        return .list;
-    }
-    return .none;
+    return detected_type;
 }
 
 fn formatContainer(comptime T: type, value: anytype, writer: anytype) !bool {
@@ -172,6 +189,11 @@ fn formatContainer(comptime T: type, value: anytype, writer: anytype) !bool {
             }
             return true;
         },
+        .multi_array_list => {
+            // NOTE: ignore for now, this type
+            // pops up when using an ArrayHashMap
+            return true;
+        },
         .hash_map => {
             try writer.print("{s} (count: {d})\n", .{
                 @typeName(T),
@@ -202,6 +224,40 @@ fn formatContainer(comptime T: type, value: anytype, writer: anytype) !bool {
                 writer.context.indent();
                 try writer.writeAll("<empty hashmap>\n");
                 writer.context.outdent();
+            }
+            return true;
+        },
+        .array_hash_map => {
+            // Print the type name and length
+            try writer.print("{s} (len: {d})\n", .{
+                @typeName(T),
+                value.count(),
+            });
+
+            if (value.count() > 0) {
+                try writer.writeAll("[\n");
+                writer.context.indent();
+
+                // Get an iterator to access key-value pairs in insertion order
+                var iterator = value.iterator();
+                var index: usize = 0;
+
+                // Iterate through each key-value pair in the map
+                while (iterator.next()) |entry| {
+                    // Format each entry with its index, key, and value
+                    try writer.print("{d}: ", .{index});
+                    try formatValue(entry.key_ptr.*, writer);
+                    try writer.writeAll(" => ");
+                    try formatValue(entry.value_ptr.*, writer);
+                    try writer.writeAll("\n");
+
+                    index += 1;
+                }
+
+                writer.context.outdent();
+                try writer.writeAll("]\n");
+            } else {
+                try writer.writeAll("[ <empty> ]\n");
             }
             return true;
         },
