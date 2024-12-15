@@ -33,18 +33,7 @@ pub fn format(
             try iw.print("slot {d}:\n", .{slot});
             iw.context.indent();
 
-            var it = slot_entries.iterator();
-            while (it.next()) |entry| {
-                try iw.writeAll("entry:\n");
-                iw.context.indent();
-                try iw.writeAll("work_report_hash: ");
-                try tfmt.formatValue(entry.key_ptr.*, iw);
-                try iw.writeAll("\n");
-                try iw.writeAll("segment_root: ");
-                try tfmt.formatValue(entry.value_ptr.*, iw);
-                try iw.writeAll("\n");
-                iw.context.outdent();
-            }
+            try tfmt.formatValue(slot_entries, iw);
 
             iw.context.outdent();
         }
