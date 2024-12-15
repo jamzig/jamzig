@@ -183,7 +183,11 @@ fn formatContainer(comptime T: type, value: anytype, writer: anytype) !bool {
                 writer.context.outdent();
                 try writer.writeAll("]\n");
             } else {
-                try writer.writeAll("[ <empty> ]\n");
+                try writer.writeAll("[\n");
+                writer.context.indent();
+                try writer.writeAll("<empty>\n");
+                writer.context.outdent();
+                try writer.writeAll("]\n");
             }
             return true;
         },
@@ -311,7 +315,11 @@ pub fn formatValue(value: anytype, writer: anytype) !void {
                             writer.context.outdent();
                             try writer.writeAll("]\n");
                         } else {
-                            try writer.writeAll("[ <empty> ]\n");
+                            try writer.writeAll("[\n");
+                            writer.context.indent();
+                            try writer.writeAll("<empty>\n");
+                            writer.context.outdent();
+                            try writer.writeAll("]\n");
                         }
                     },
                     .One => {
@@ -339,9 +347,8 @@ pub fn formatValue(value: anytype, writer: anytype) !void {
             } else {
                 try writer.writeAll("[\n");
                 writer.context.indent();
-                for (
-                    value,
-                ) |item| {
+                for (value, 0..) |item, idx| {
+                    try writer.print("{d}: ", .{idx});
                     try formatValue(item, writer);
                 }
                 writer.context.outdent();

@@ -29,21 +29,9 @@ pub fn format(
     if (total_entries > 0) {
         try iw.writeAll("queues:\n");
         iw.context.indent();
-        for (self.queue, 0..) |core_queue, core_idx| {
-            if (core_queue.items.len > 0) {
-                try iw.print("core {d}:\n", .{core_idx});
-                iw.context.indent();
-                for (core_queue.items, 0..) |entry, entry_idx| {
-                    try iw.print("entry {d}:\n", .{entry_idx});
-                    iw.context.indent();
-                    try iw.writeAll("hash: ");
-                    try tfmt.formatValue(entry, iw);
-                    try iw.writeAll("\n");
-                    iw.context.outdent();
-                }
-                iw.context.outdent();
-            }
-        }
+
+        try tfmt.formatValue(self.queue, iw);
+
         iw.context.outdent();
     } else {
         try iw.writeAll("queues: <empty>\n");
