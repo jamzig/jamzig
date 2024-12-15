@@ -4,6 +4,7 @@ const tvector = @import("../jamtestvectors/assurances.zig");
 const assurances = @import("../assurances.zig");
 const types = @import("../types.zig");
 const helpers = @import("../tests/helpers.zig");
+const diff = @import("../tests/diff.zig");
 const Params = @import("../jam_params.zig").Params;
 
 pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, test_case: tvector.TestCase) !void {
@@ -69,14 +70,28 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
                 defer allocator.free(available_reports);
 
                 // Verify outputs match expected results
-                try std.testing.expectEqual(available_reports.len, expected_marks.reported.len);
+                if (available_reports.len != expected_marks.reported.len) {
+                    std.debug.print("\nMismatch in number of reports:\n  Expected: {d}\n  Got: {d}\n", .{
+                        expected_marks.reported.len,
+                        available_reports.len,
+                    });
+                    return error.ReportCountMismatch;
+                }
+
                 for (available_reports, expected_marks.reported) |actual, expected| {
-                    try std.testing.expectEqualDeep(actual.report, expected);
+                    diff.expectFormattedEqual(allocator, actual.report, expected) catch {
+                        return error.ReportMismatch;
+                    };
                 }
 
                 // Verify state matches expected state
-                try std.testing.expectEqualDeep(state_rho, &expected_assignments);
-                try std.testing.expectEqualDeep(state_kappa, &expected_validators);
+                diff.expectFormattedEqual(allocator, state_rho, &expected_assignments) catch {
+                    return error.StateRhoMismatch;
+                };
+
+                diff.expectFormattedEqual(allocator, state_kappa, &expected_validators) catch {
+                    return error.StateKappaMismatch;
+                };
             } else |err| {
                 std.debug.print("UnexpectedError: {any}\n", .{err});
                 return error.UnexpectedError;
