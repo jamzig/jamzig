@@ -18,25 +18,6 @@ pub fn format(
     iw.context.indent();
 
     try tfmt.formatValue(self.*, iw);
-    //
-    // const total_accounts = self.accounts.count();
-    // try iw.print("total_accounts: {d}\n", .{total_accounts});
-    //
-    // if (total_accounts > 0) {
-    //     try iw.writeAll("accounts:\n");
-    //     iw.context.indent();
-    //     var it = self.accounts.iterator();
-    //     while (it.next()) |entry| {
-    //         try iw.print("service {d}:\n", .{entry.key_ptr.*});
-    //         iw.context.indent();
-    //         try tfmt.formatValue(entry.value_ptr.*, iw);
-    //         try iw.writeAll("\n");
-    //         iw.context.outdent();
-    //     }
-    //     iw.context.outdent();
-    // } else {
-    //     try iw.writeAll("accounts: <empty>\n");
-    // }
 }
 
 // Test helper to demonstrate formatting

@@ -199,7 +199,9 @@ fn formatContainer(comptime T: type, value: anytype, writer: anytype) !bool {
                 }
                 writer.context.outdent();
             } else {
-                try writer.writeAll("<empty>");
+                writer.context.indent();
+                try writer.writeAll("<empty hashmap>\n");
+                writer.context.outdent();
             }
             return true;
         },
