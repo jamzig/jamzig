@@ -12,25 +12,9 @@ pub fn formatPi(
     _ = options;
 
     var indented_writer = tfmt.IndentedWriter(@TypeOf(writer)).init(writer);
-    var iw = indented_writer.writer();
+    const iw = indented_writer.writer();
 
-    try iw.writeAll("Pi:\n");
-    iw.context.indent();
-    defer iw.context.outdent();
-
-    // Format current epoch stats
-    try iw.writeAll("current_epoch_stats:");
-    try tfmt.formatValue(self.current_epoch_stats.items, iw);
-    try iw.writeByte('\n');
-    try iw.writeByte('\n');
-
-    // Format previous epoch stats
-    try iw.writeAll("previous_epoch_stats:");
-    try tfmt.formatValue(self.previous_epoch_stats.items, iw);
-    try iw.writeByte('\n');
-
-    // Format meta info
-    try iw.print("validator_count: {d}\n", .{self.validator_count});
+    try tfmt.formatValue(self.*, iw);
 }
 
 test "format Pi state" {
