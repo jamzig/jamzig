@@ -218,6 +218,7 @@ pub fn formatValue(value: anytype, writer: anytype) !void {
     // never format our allocators
     if (detectStdMemAllocator(T)) {
         span.debug("Skipping allocator formatting", .{});
+        try writer.writeAll("<std.mem.Allocator omitted>");
         return;
     }
 
@@ -239,7 +240,6 @@ pub fn formatValue(value: anytype, writer: anytype) !void {
                 try writer.writeAll(field.name);
                 try writer.writeAll(": ");
                 try formatValue(@field(value, field.name), writer);
-                try writer.writeAll("\n");
             }
             writer.context.outdent();
         },
