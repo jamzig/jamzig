@@ -41,6 +41,7 @@ comptime {
 
     _ = @import("state_format/pi.zig");
     _ = @import("state_format/accumulated_reports.zig"); // TODO: rename to xi
+    _ = @import("state_format/available_reports.zig"); // TODO: rename to theta
     _ = @import("state_format/chi.zig");
     _ = @import("state_format/authorization.zig"); // TODO: rename to alpha
     _ = @import("state_format/phi.zig");

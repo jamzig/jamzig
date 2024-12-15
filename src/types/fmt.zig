@@ -133,14 +133,16 @@ fn formatContainer(comptime T: type, value: anytype, writer: anytype) !bool {
     switch (comptime detectContainerType(T)) {
         .list => {
             // Handle array-like containers (ArrayList, BoundedArray)
-            const items = if (@hasDecl(T, "items"))
+            const items = if (@hasField(T, "items"))
+                value.items
+            else if (@hasDecl(T, "items"))
                 value.items()
             else if (@hasDecl(T, "constrained"))
                 value.constrained()
             else if (@hasDecl(T, "constSlice"))
                 value.constSlice()
             else
-                @compileError("Container type: " ++ @typeName(T) ++ " does not have items or constrained method");
+                @compileError("Container type: " ++ @typeName(T) ++ " does not have items field or items/constrained/constSlice method");
 
             if (@hasDecl(T, "capacity")) {
                 try writer.print("{s} (len: {d}, capacity: {d})\n", .{
@@ -346,7 +348,13 @@ pub fn formatValue(value: anytype, writer: anytype) !void {
         .@"enum" => {
             try std.fmt.format(writer, "{s}", .{@tagName(value)});
         },
-        else => @compileError("Unsupported type: " ++ @typeName(T)),
+        .void => {
+            try writer.writeAll("void");
+        },
+        else => {
+            @compileLog(@typeInfo(T));
+            @compileError("Unsupported type: " ++ @typeName(T));
+        },
     }
 }
 
