@@ -151,24 +151,6 @@ pub fn processAssuranceExtrinsic(
         assured_reports.deinit();
     }
 
-    // First remove any timed out reports
-    {
-        const timeout_span = span.child(.cleanup_timeouts);
-        defer timeout_span.deinit();
-        timeout_span.debug("Checking for timed out reports at slot {d}", .{current_slot});
-        for (&pending_reports.reports, 0..) |*report, core_idx| {
-            if (report.*) |*pending_report| {
-                const report_timeout = pending_report.assignment.timeout + params.work_replacement_period;
-                if (current_slot >= report_timeout) {
-                    timeout_span.debug("core {d}: report.timeout {d} < {d} => remove", .{ core_idx, report_timeout, current_slot });
-                    // Report has timed out, remove it
-                    pending_report.deinit(allocator);
-                    report.* = null;
-                }
-            }
-        }
-    }
-
     // Just track counts per core instead of individual validator bits
     var core_assurance_counts = [_]usize{0} ** params.core_count;
 
@@ -240,6 +222,24 @@ pub fn processAssuranceExtrinsic(
                 } else {
                     core_span.err("Code {d}: we have assurances for a core which is not engaged", .{core_idx});
                     return error.CoreNotEngaged;
+                }
+            }
+        }
+    }
+
+    // First remove any timed out reports
+    {
+        const timeout_span = span.child(.cleanup_timeouts);
+        defer timeout_span.deinit();
+        timeout_span.debug("Checking for timed out reports at slot {d}", .{current_slot});
+        for (&pending_reports.reports, 0..) |*report, core_idx| {
+            if (report.*) |*pending_report| {
+                const report_timeout = pending_report.assignment.timeout + params.work_replacement_period;
+                if (current_slot >= report_timeout) {
+                    timeout_span.debug("core {d}: report.timeout {d} < {d} => remove", .{ core_idx, report_timeout, current_slot });
+                    // Report has timed out, remove it
+                    pending_report.deinit(allocator);
+                    report.* = null;
                 }
             }
         }

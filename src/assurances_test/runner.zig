@@ -68,7 +68,6 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
     defer {
         if (process_result) |available_assignments| {
             available_assignments.deinit(allocator);
-            @panic("Here");
         } else |_| {}
     }
 

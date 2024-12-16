@@ -62,10 +62,10 @@ test "tiny/assurance_for_not_engaged_core-1.bin" {
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/assurance_for_not_engaged_core-1.bin");
 }
 
-// test "tiny/assurances_for_stale_report-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/assurances_for_stale_report-1.bin");
-// }
+test "tiny/assurances_for_stale_report-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/assurances_for_stale_report-1.bin");
+}
 //
 // test "tiny/assurances_with_bad_signature-1.bin" {
 //     const allocator = std.testing.allocator;
