@@ -65,6 +65,7 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
                     params,
                     allocator,
                     valid_extrinsic,
+                    test_case.input.slot,
                     state_rho,
                 );
                 defer allocator.free(available_reports);

@@ -3,6 +3,8 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const crypto = std.crypto;
 
+const tracing = @import("tracing.zig");
+
 /// A wrapper type that guarantees an AssuranceExtrinsic has been validated
 pub const ValidatedAssuranceExtrinsic = struct {
     inner: types.AssurancesExtrinsic,
@@ -88,11 +90,23 @@ pub fn processAssuranceExtrinsic(
     comptime params: @import("jam_params.zig").Params,
     allocator: std.mem.Allocator,
     assurances_extrinsic: ValidatedAssuranceExtrinsic,
+    current_slot: types.TimeSlot,
     pending_reports: *state.Rho(params.core_count),
 ) ![]types.AvailabilityAssignment {
     // Track which cores have super-majority assurance
     var assured_reports = std.ArrayList(types.AvailabilityAssignment).init(allocator);
     defer assured_reports.deinit();
+
+    // First remove any timed out reports
+    for (&pending_reports.reports) |*report| {
+        if (report.*) |*pending_report| {
+            if (current_slot > pending_report.assignment.timeout) {
+                // Report has timed out, remove it
+                pending_report.deinit(allocator);
+                report.* = null;
+            }
+        }
+    }
 
     // Just track counts per core instead of individual validator bits
     var core_assurance_counts = [_]usize{0} ** params.core_count;
@@ -122,11 +136,11 @@ pub fn processAssuranceExtrinsic(
     const super_majority = params.validators_super_majority;
 
     for (core_assurance_counts, 0..) |count, core_idx| {
-        // If super-majority reached and core has pending report
-        if (count > super_majority and
-            pending_reports.reports[core_idx] != null)
-        {
-            try assured_reports.append(try pending_reports.reports[core_idx].?.assignment.deepClone(allocator));
+        // If super-majority reached and core has pending report that hasn't timed out
+        if (count > super_majority and pending_reports.reports[core_idx] != null) {
+            const report = pending_reports.reports[core_idx].?;
+            // NOTE: timed out reports were already removed as null
+            try assured_reports.append(try report.assignment.deepClone(allocator));
         }
     }
 
