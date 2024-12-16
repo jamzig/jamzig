@@ -76,9 +76,8 @@ pub const ValidatedAssuranceExtrinsic = struct {
             signature_span.debug("Validating signature for validator {d}", .{assurance.validator_index});
 
             // The message is: "$jam_available" ++ H(E(anchor, bitfield))
-            const prefix = "jam_available";
+            const prefix: []const u8 = "jam_available";
             var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-            hasher.update(prefix);
             hasher.update(&assurance.anchor);
             hasher.update(assurance.bitfield);
             var hash: [32]u8 = undefined;
@@ -99,7 +98,7 @@ pub const ValidatedAssuranceExtrinsic = struct {
             const signature = crypto.sign.Ed25519.Signature.fromBytes(assurance.signature);
 
             signature_span.trace("Verifying signature", .{});
-            signature.verify(&hash, validator_pub_key) catch {
+            signature.verify(prefix ++ &hash, validator_pub_key) catch {
                 signature_span.err("Signature verification failed for validator {d}", .{assurance.validator_index});
                 return Error.InvalidSignature;
             };
@@ -107,6 +106,21 @@ pub const ValidatedAssuranceExtrinsic = struct {
         }
 
         return ValidatedAssuranceExtrinsic{ .inner = extrinsic };
+    }
+};
+
+const AvailableAssignments = struct {
+    inner: []types.AvailabilityAssignment,
+
+    pub fn items(self: @This()) []types.AvailabilityAssignment {
+        return self.inner;
+    }
+
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+        for (self.items()) |*assignment| {
+            assignment.deinit(allocator);
+        }
+        allocator.free(self.inner);
     }
 };
 
@@ -118,7 +132,7 @@ pub fn processAssuranceExtrinsic(
     assurances_extrinsic: ValidatedAssuranceExtrinsic,
     current_slot: types.TimeSlot,
     pending_reports: *state.Rho(params.core_count),
-) ![]types.AvailabilityAssignment {
+) !AvailableAssignments {
     const span = trace.span(.process_assurance_extrinsic);
     defer span.deinit();
     span.debug("Processing assurance extrinsic with {d} assurances", .{assurances_extrinsic.items().len});
@@ -152,26 +166,45 @@ pub fn processAssuranceExtrinsic(
         const process_span = span.child(.process_assurances);
         defer process_span.deinit();
         process_span.debug("Processing {d} assurances for {d} cores", .{ assurances_extrinsic.items().len, params.core_count });
-        for (assurances_extrinsic.items()) |assurance| {
-            const bytes_per_field = (params.core_count + 7) / 8;
 
+        for (assurances_extrinsic.items(), 0..) |assurance, assurance_idx| {
+            const bitfield_span = process_span.child(.process_bitfield);
+            defer bitfield_span.deinit();
+            bitfield_span.debug("Processing assurance {d}: bitfield={}", .{ assurance_idx, std.fmt.fmtSliceHexLower(assurance.bitfield) });
+
+            const bytes_per_field = (params.core_count + 7) / 8;
             var byte_idx: usize = 0;
             while (byte_idx < bytes_per_field) : (byte_idx += 1) {
                 const byte = assurance.bitfield[byte_idx];
-                if (byte == 0) continue; // Skip empty bytes
+                if (byte == 0) {
+                    bitfield_span.trace("Byte {d}: 0x00 (skipping empty byte)", .{byte_idx});
+                    continue;
+                }
+
+                const byte_span = bitfield_span.child(.process_byte);
+                defer byte_span.deinit();
+                byte_span.trace("Processing byte {d}: 0x{x:0>2}", .{ byte_idx, byte });
 
                 var bit_pos: u3 = 0;
                 while (bit_pos < 8) : (bit_pos += 1) {
                     const core_idx = byte_idx * 8 + bit_pos;
-                    if (core_idx >= params.core_count) break;
+                    if (core_idx >= params.core_count) {
+                        byte_span.trace("Stopping at bit {d}: core_idx {d} >= core_count {d}", .{ bit_pos, core_idx, params.core_count });
+                        break;
+                    }
 
-                    if ((byte & (@as(u8, 1) << bit_pos)) != 0) {
+                    const bit_value = (byte & (@as(u8, 1) << bit_pos)) != 0;
+                    if (bit_value) {
                         core_assurance_counts[core_idx] += 1;
+                        byte_span.trace("core[{d}] bit {d}: set   (count now {d})", .{ core_idx, bit_pos, core_assurance_counts[core_idx] });
+                    } else {
+                        byte_span.trace("core[{d}] bit {d}: unset (count now {d})", .{ core_idx, bit_pos, core_assurance_counts[core_idx] });
                     }
                 }
             }
+            bitfield_span.debug("Finished processing bitfield, current counts: {any}", .{core_assurance_counts});
         }
-        process_span.debug("Finished processing bitfields", .{});
+        process_span.debug("Finished processing all bitfields", .{});
     }
 
     // Check which cores have super-majority
@@ -185,14 +218,13 @@ pub fn processAssuranceExtrinsic(
 
         for (core_assurance_counts, 0..) |count, core_idx| {
             // If super-majority reached and core has pending report that hasn't timed out
-            if (count > super_majority and pending_reports.reports[core_idx] != null) {
-                const report = pending_reports.reports[core_idx].?;
+            if (count >= super_majority and pending_reports.hasReport(core_idx)) {
                 // NOTE: timed out reports were already removed as null
-                try assured_reports.append(try report.assignment.deepClone(allocator));
+                try assured_reports.append(pending_reports.takeReportOwned(core_idx).?);
             }
         }
     }
 
     span.debug("Completed processing with {d} assured reports", .{assured_reports.items.len});
-    return assured_reports.toOwnedSlice();
+    return .{ .inner = try assured_reports.toOwnedSlice() };
 }

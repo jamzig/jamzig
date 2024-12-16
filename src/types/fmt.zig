@@ -405,3 +405,13 @@ pub fn Format(comptime T: type) type {
 pub fn format(value: anytype) Format(@TypeOf(value)) {
     return .{ .value = value };
 }
+
+pub fn formatAlloc(allocator: std.mem.Allocator, value: anytype) ![]u8 {
+    var buffer = std.ArrayList(u8).init(allocator);
+    errdefer buffer.deinit();
+
+    const writer = buffer.writer();
+    const fmt = format(value);
+    try fmt.format("{}", .{}, writer);
+    return buffer.toOwnedSlice();
+}

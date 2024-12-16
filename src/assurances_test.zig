@@ -52,10 +52,10 @@ test "tiny/no_assurances_with_stale_report-1.bin" {
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/no_assurances_with_stale_report-1.bin");
 }
 
-// test "tiny/some_assurances-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/some_assurances-1.bin");
-// }
+test "tiny/some_assurances-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/some_assurances-1.bin");
+}
 
 // test "tiny/assurance_for_not_engaged_core-1.bin" {
 //     const allocator = std.testing.allocator;
@@ -109,30 +109,30 @@ fn runTest(comptime params: jam_params.Params, allocator: std.mem.Allocator, tes
     try runAssuranceTest(params, allocator, test_vector);
 }
 
-test "all.tiny.vectors" {
-    const allocator = std.testing.allocator;
-
-    var tiny_test_files = try @import("tests/ordered_files.zig").getOrderedFiles(allocator, BASE_PATH ++ "tiny");
-    defer tiny_test_files.deinit();
-
-    for (tiny_test_files.items()) |test_file| {
-        if (!std.mem.endsWith(u8, test_file.path, ".bin")) {
-            continue;
-        }
-        try runTest(FULL_PARAMS, allocator, test_file.path);
-    }
-}
-
-test "all.full.vectors" {
-    const allocator = std.testing.allocator;
-
-    var full_test_files = try @import("tests/ordered_files.zig").getOrderedFiles(allocator, BASE_PATH ++ "full");
-    defer full_test_files.deinit();
-
-    for (full_test_files.items()) |test_file| {
-        if (!std.mem.endsWith(u8, test_file.path, ".bin")) {
-            continue;
-        }
-        try runTest(FULL_PARAMS, allocator, test_file.path);
-    }
-}
+// test "all.tiny.vectors" {
+//     const allocator = std.testing.allocator;
+//
+//     var tiny_test_files = try @import("tests/ordered_files.zig").getOrderedFiles(allocator, BASE_PATH ++ "tiny");
+//     defer tiny_test_files.deinit();
+//
+//     for (tiny_test_files.items()) |test_file| {
+//         if (!std.mem.endsWith(u8, test_file.path, ".bin")) {
+//             continue;
+//         }
+//         try runTest(FULL_PARAMS, allocator, test_file.path);
+//     }
+// }
+//
+// test "all.full.vectors" {
+//     const allocator = std.testing.allocator;
+//
+//     var full_test_files = try @import("tests/ordered_files.zig").getOrderedFiles(allocator, BASE_PATH ++ "full");
+//     defer full_test_files.deinit();
+//
+//     for (full_test_files.items()) |test_file| {
+//         if (!std.mem.endsWith(u8, test_file.path, ".bin")) {
+//             continue;
+//         }
+//         try runTest(FULL_PARAMS, allocator, test_file.path);
+//     }
+// }

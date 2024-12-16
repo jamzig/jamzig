@@ -2,6 +2,7 @@ const std = @import("std");
 const converters = @import("./converters.zig");
 const tvector = @import("../jamtestvectors/assurances.zig");
 const assurances = @import("../assurances.zig");
+const state = @import("../state.zig");
 const types = @import("../types.zig");
 const helpers = @import("../tests/helpers.zig");
 const diff = @import("../tests/diff.zig");
@@ -61,36 +62,44 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
                 const state_kappa = &pre_state_validators;
 
                 // Process the validated extrinsic
-                const available_reports = try assurances.processAssuranceExtrinsic(
+                const available_assignments = try assurances.processAssuranceExtrinsic(
                     params,
                     allocator,
                     valid_extrinsic,
                     test_case.input.slot,
                     state_rho,
                 );
+                defer available_assignments.deinit(allocator);
+
+                const available_reports = try @import("../utils.zig").mapAlloc(
+                    types.AvailabilityAssignment,
+                    types.WorkReport,
+                    allocator,
+                    available_assignments.inner,
+                    struct {
+                        pub fn map(assignment: types.AvailabilityAssignment) types.WorkReport {
+                            return assignment.report;
+                        }
+                    }.map,
+                );
+                // NOTE: only slice needs to be freed, available_assignments.deinit will free
+                // inner memory
                 defer allocator.free(available_reports);
 
                 // Verify outputs match expected results
-                if (available_reports.len != expected_marks.reported.len) {
-                    std.debug.print("\nMismatch in number of reports:\n  Expected: {d}\n  Got: {d}\n", .{
-                        expected_marks.reported.len,
-                        available_reports.len,
-                    });
-                    return error.ReportCountMismatch;
-                }
-
-                for (available_reports, expected_marks.reported) |actual, expected| {
-                    diff.expectFormattedEqual(allocator, actual.report, expected) catch {
-                        return error.ReportMismatch;
-                    };
-                }
+                diff.expectTypesFmtEqual([]types.WorkReport, allocator, available_reports, expected_marks.reported) catch {
+                    std.debug.print("Mismatch: available reports != expected reports\n", .{});
+                    return error.ReportMismatch;
+                };
 
                 // Verify state matches expected state
-                diff.expectFormattedEqual(allocator, state_rho, &expected_assignments) catch {
+                diff.expectFormattedEqual(*state.Rho(params.core_count), allocator, state_rho, &expected_assignments) catch {
+                    std.debug.print("Mismatch: actual Rho != expected Rho\n", .{});
                     return error.StateRhoMismatch;
                 };
 
-                diff.expectFormattedEqual(allocator, state_kappa, &expected_validators) catch {
+                diff.expectTypesFmtEqual(*types.ValidatorSet, allocator, state_kappa, &expected_validators) catch {
+                    std.debug.print("Mismatch: actual Kappa != expected Kappa\n", .{});
                     return error.StateKappaMismatch;
                 };
             } else |err| {
