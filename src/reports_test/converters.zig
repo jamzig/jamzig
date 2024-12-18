@@ -35,7 +35,7 @@ pub fn convertBeta(
     errdefer beta.deinit();
 
     for (blocks) |block| {
-        try beta.addBlockInfo(block);
+        try beta.addBlockInfo(try block.deepClone(allocator));
     }
 
     return beta;

@@ -61,6 +61,11 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 return Error.ReportEpochBeforeLast;
             }
 
+            // Validate anchor is recent
+            if (jam_state.beta.?.getBlockInfoByHash(guarantee.report.context.anchor) == null) {
+                return Error.AnchorNotRecent;
+            }
+
             // Check sufficient guarantors
             if (guarantee.signatures.len < params.validators_super_majority) {
                 return Error.InsufficientGuarantees;
@@ -85,11 +90,6 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             // if (jam_state.rho.?.isEngaged(guarantee.report.core_index)) {
             //     return Error.CoreEngaged;
             // }
-
-            // Validate anchor is recent
-            if (jam_state.beta.?.getBlockInfoByHash(guarantee.report.context.anchor) == null) {
-                return Error.AnchorNotRecent;
-            }
 
             // Check service ID exists
             for (guarantee.report.results) |result| {
