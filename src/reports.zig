@@ -153,7 +153,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
 
                 // Create message to verify using Blake2b
                 // The message is: "jam_guarantee" ++ H(E(anchor, bitfield))
-                const prefix: []const u8 = "jam_available";
+                const prefix: []const u8 = "jam_guarantee";
                 const w = try @import("./codec.zig").serializeAlloc(types.WorkReport, params, allocator, guarantee.report);
                 defer allocator.free(w);
                 var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});

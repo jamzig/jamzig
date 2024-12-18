@@ -39,10 +39,10 @@ test "tiny/bad_state_root-1.bin" {
     const allocator = std.testing.allocator;
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/bad_state_root-1.bin");
 }
-// test "tiny/bad_validator_index-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/bad_validator_index-1.bin");
-// }
+test "tiny/bad_validator_index-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/bad_validator_index-1.bin");
+}
 // test "tiny/consume_authorization_once-1.bin" {
 //     const allocator = std.testing.allocator;
 //     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/consume_authorization_once-1.bin");
