@@ -62,13 +62,12 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             }
 
             // Validate anchor is recent
-            if (jam_state.beta.?.getBlockInfoByHash(guarantee.report.context.anchor) == null) {
+            if (jam_state.beta.?.getBlockInfoByHash(guarantee.report.context.anchor)) |binfo| {
+                if (!std.mem.eql(u8, &guarantee.report.context.beefy_root, &binfo.beefy_mmr_root())) {
+                    return Error.BadBeefyMmrRoot;
+                }
+            } else {
                 return Error.AnchorNotRecent;
-            }
-
-            // Check sufficient guarantors
-            if (guarantee.signatures.len < params.validators_super_majority) {
-                return Error.InsufficientGuarantees;
             }
 
             // Validate guarantors are sorted and unique
@@ -79,17 +78,6 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 }
                 prev_index = sig.validator_index;
             }
-
-            // Validate core assignment
-            const assignment = jam_state.rho.?.getReport(guarantee.report.core_index);
-            if (assignment == null) {
-                return Error.WrongAssignment;
-            }
-
-            // Check core is not engaged
-            // if (jam_state.rho.?.isEngaged(guarantee.report.core_index)) {
-            //     return Error.CoreEngaged;
-            // }
 
             // Check service ID exists
             for (guarantee.report.results) |result| {
@@ -107,6 +95,17 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     return Error.BadServiceId;
                 }
             }
+
+            // Validate core assignment
+            const assignment = jam_state.rho.?.getReport(guarantee.report.core_index);
+            if (assignment == null) {
+                return Error.WrongAssignment;
+            }
+
+            // Check core is not engaged
+            // if (jam_state.rho.?.isEngaged(guarantee.report.core_index)) {
+            //     return Error.CoreEngaged;
+            // }
 
             // Validate report prerequisites exist
             // TODO: move this to recent_blocks
@@ -170,6 +169,11 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 signature.verify(prefix ++ &hash, validator_pub_key) catch {
                     return Error.BadSignature;
                 };
+            }
+
+            // Check sufficient guarantors
+            if (guarantee.signatures.len < params.validators_super_majority) {
+                return Error.InsufficientGuarantees;
             }
         }
 

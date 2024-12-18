@@ -15,14 +15,14 @@ test "tiny/anchor_not_recent-1.bin" {
     const allocator = std.testing.allocator;
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/anchor_not_recent-1.bin");
 }
-// test "tiny/bad_beefy_mmr-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/bad_beefy_mmr-1.bin");
-// }
-// test "tiny/bad_code_hash-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/bad_code_hash-1.bin");
-// }
+test "tiny/bad_beefy_mmr-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/bad_beefy_mmr-1.bin");
+}
+test "tiny/bad_code_hash-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/bad_code_hash-1.bin");
+}
 // test "tiny/bad_core_index-1.bin" {
 //     const allocator = std.testing.allocator;
 //     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/bad_core_index-1.bin");
@@ -177,7 +177,7 @@ test "tiny/anchor_not_recent-1.bin" {
 
 // Helper function to run individual tests
 fn runTest(comptime params: jam_params.Params, allocator: std.mem.Allocator, test_bin: []const u8) !void {
-    std.debug.print("Running test: {s}\n", .{test_bin});
+    std.debug.print("\nRunning test: {s}\n", .{test_bin});
 
     const test_vector = try @import("jamtestvectors/loader.zig").loadAndDeserializeTestVector(
         tvector.TestCase,
