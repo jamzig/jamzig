@@ -12,6 +12,7 @@ pub const Error = error{
     FutureReportSlot,
     ReportEpochBeforeLast,
     InsufficientGuarantees,
+    TooManyGuarantees,
     OutOfOrderGuarantee,
     NotSortedOrUniqueGuarantors,
     WrongAssignment,
@@ -108,6 +109,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 core_span.err("Invalid core index {d} >= {d}", .{ guarantee.report.core_index, params.core_count });
                 return Error.BadCoreIndex;
             }
+
+            // Check if we have enough signatures:
 
             const slot_span = span.child(.validate_slot);
             defer slot_span.deinit();
@@ -268,6 +271,21 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 defer sig_span.deinit();
 
                 sig_span.debug("Validating {d} guarantor signatures", .{guarantee.signatures.len});
+
+                sig_span.debug("Checking signature count: {d} must be either 2 or 3", .{guarantee.signatures.len});
+
+                if (guarantee.signatures.len < 2) {
+                    sig_span.err("Insufficient guarantees: got {d}, minimum required is 2", .{
+                        guarantee.signatures.len,
+                    });
+                    return Error.InsufficientGuarantees;
+                }
+                if (guarantee.signatures.len > 3) {
+                    sig_span.err("Too many guarantees: got {d}, maximum allowed is 3", .{
+                        guarantee.signatures.len,
+                    });
+                    return Error.TooManyGuarantees;
+                }
 
                 for (guarantee.signatures) |sig| {
                     const sig_detail_span = sig_span.child(.validate_signature);
