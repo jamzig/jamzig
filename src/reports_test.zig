@@ -63,14 +63,14 @@ test "tiny/duplicated_package_in_report-1.bin" {
     const allocator = std.testing.allocator;
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/duplicated_package_in_report-1.bin");
 }
-// test "tiny/future_report_slot-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/future_report_slot-1.bin");
-// }
-// test "tiny/high_work_report_gas-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/high_work_report_gas-1.bin");
-// }
+test "tiny/future_report_slot-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/future_report_slot-1.bin");
+}
+test "tiny/high_work_report_gas-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/high_work_report_gas-1.bin");
+}
 // test "tiny/many_dependencies-1.bin" {
 //     const allocator = std.testing.allocator;
 //     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/many_dependencies-1.bin");

@@ -96,6 +96,13 @@ pub fn runReportTest(comptime params: Params, allocator: std.mem.Allocator, test
         .ok => |expected_output| {
             if (process_result) |result| {
                 // Verify outputs match expected results
+
+                // ensure results are sorted so we can match
+                std.mem.sortUnstable(types.ReportedWorkPackage, result.reported, {}, struct {
+                    pub fn inner(_: void, a: types.ReportedWorkPackage, b: types.ReportedWorkPackage) bool {
+                        return std.mem.order(u8, &a.hash, &b.hash) == .lt;
+                    }
+                }.inner);
                 diff.expectTypesFmtEqual(
                     []types.ReportedWorkPackage,
                     allocator,
@@ -106,6 +113,12 @@ pub fn runReportTest(comptime params: Params, allocator: std.mem.Allocator, test
                     return error.OutputMismatch;
                 };
 
+                // ensure reporters are sorted so we can match
+                std.mem.sortUnstable(types.Ed25519Public, result.reporters, {}, struct {
+                    pub fn inner(_: void, a: types.Ed25519Public, b: types.Ed25519Public) bool {
+                        return std.mem.order(u8, &a, &b) == .lt;
+                    }
+                }.inner);
                 diff.expectTypesFmtEqual(
                     []types.Ed25519Public,
                     allocator,
