@@ -60,11 +60,13 @@ pub fn nextHexStringToBytes(
     switch (token) {
         .allocated_string => |string| {
             // ensure the string starts with "0x"
-            if (string.len < 2 or string[0] != '0' or string[1] != 'x') {
+            if (string.len < 2) {
                 return error.PrefixMismatch;
+            } else if (string[0] == '0' and string[1] == 'x') {
+                return try hexStringToBytes(allocator, string[2..]);
+            } else {
+                return try hexStringToBytes(allocator, string[0..]);
             }
-            const bytes = try hexStringToBytes(allocator, string[2..]);
-            return bytes;
         },
         else => {
             return error.UnexpectedToken;
