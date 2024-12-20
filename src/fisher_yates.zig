@@ -83,6 +83,7 @@ fn shuffleRecursive(
 /// Fisher-Yates shuffle implementation following the formal specification
 pub fn shuffleWithHash(
     comptime T: type,
+    allocator: std.mem.Allocator,
     sequence: []T,
     hash: [32]u8,
 ) void {
@@ -90,7 +91,7 @@ pub fn shuffleWithHash(
     if (sequence.len < 1) return;
 
     // Use an arena allocator for temporary allocations
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     // Perform recursive shuffle and copy result back to input sequence
@@ -105,8 +106,9 @@ pub fn shuffleWithHash(
 /// The original shuffle implementation
 pub fn shuffle(
     comptime T: type,
+    allocator: std.mem.Allocator,
     sequence: []T,
     entropy: [32]u8,
 ) void {
-    shuffleWithHash(T, sequence, entropy);
+    shuffleWithHash(T, allocator, sequence, entropy);
 }
