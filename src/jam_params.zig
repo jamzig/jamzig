@@ -101,6 +101,7 @@ pub const TINY_PARAMS = Params{
     .epoch_length = 12,
     .ticket_submission_end_epoch_slot = 10,
     .max_ticket_entries_per_validator = 3, // NOTE: updated
+    .recent_history_size = 8, // NOTE: explicitly set in testvectors
     .validators_count = 6,
     .validators_super_majority = 5,
     .core_count = 2,

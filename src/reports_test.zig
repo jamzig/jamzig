@@ -99,10 +99,10 @@ test "tiny/out_of_order_guarantees-1.bin" {
     const allocator = std.testing.allocator;
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/out_of_order_guarantees-1.bin");
 }
-// test "tiny/report_before_last_rotation-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/report_before_last_rotation-1.bin");
-// }
+test "tiny/report_before_last_rotation-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/report_before_last_rotation-1.bin");
+}
 // test "tiny/report_curr_rotation-1.bin" {
 //     const allocator = std.testing.allocator;
 //     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/report_curr_rotation-1.bin");

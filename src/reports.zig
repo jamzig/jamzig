@@ -127,10 +127,6 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 slot,
                 guarantee.report.core_index,
             });
-            slot_span.trace("Report epoch: {d}, current epoch: {d}", .{
-                guarantee.slot / params.epoch_length,
-                slot / params.epoch_length,
-            });
 
             // Validate report slot is not in future
             if (guarantee.slot > slot) {
@@ -138,16 +134,17 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 return Error.FutureReportSlot;
             }
 
-            const epoch_span = span.child(.validate_epoch);
-            defer epoch_span.deinit();
+            const rotation_span = span.child(.validate_rotation);
+            defer rotation_span.deinit();
 
-            // Check epoch is current or last
-            const report_epoch = guarantee.slot / params.epoch_length;
-            const current_epoch = slot / params.epoch_length;
-            epoch_span.debug("Validating report epoch {d} against current epoch {d}", .{ report_epoch, current_epoch });
+            // Check rotation period according to graypaper 11.27
+            const current_rotation = @divFloor(slot, params.validator_rotation_period);
+            const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
+            rotation_span.debug("Validating report rotation {d} against current rotation {d}", .{ report_rotation, current_rotation });
 
-            if (report_epoch + 1 < current_epoch) {
-                epoch_span.err("Report epoch {d} is too old (current: {d})", .{ report_epoch, current_epoch });
+            // Report must be from current  rotation
+            if (report_rotation < current_rotation) {
+                rotation_span.err("Report from rotation {d} is too old (current: {d})", .{ report_rotation, current_rotation });
                 return Error.ReportEpochBeforeLast;
             }
 
