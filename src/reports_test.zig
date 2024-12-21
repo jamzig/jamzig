@@ -111,10 +111,10 @@ test "tiny/report_prev_rotation-1.bin" {
     const allocator = std.testing.allocator;
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/report_prev_rotation-1.bin");
 }
-// test "tiny/reports_with_dependencies-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/reports_with_dependencies-1.bin");
-// }
+test "tiny/reports_with_dependencies-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/reports_with_dependencies-1.bin");
+}
 // test "tiny/reports_with_dependencies-2.bin" {
 //     const allocator = std.testing.allocator;
 //     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/reports_with_dependencies-2.bin");

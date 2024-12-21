@@ -264,6 +264,15 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                         }
                     }
                 }
+
+                // walk the guarantees to see if the prereq is there
+                for (guarantees.data) |g| {
+                    if (std.mem.eql(u8, &g.report.package_spec.hash, &prereq)) {
+                        found_prereq = true;
+                        break;
+                    }
+                }
+
                 if (!found_prereq) {
                     return Error.DependencyMissing;
                 }
