@@ -37,7 +37,6 @@ pub const Error = error{
     SegmentRootLookupInvalid,
     BadSignature,
     InvalidValidatorPublicKey,
-    InvalidGuarantorAssignment,
     InvalidRotationPeriod,
     InvalidSlotRange,
 };
@@ -409,7 +408,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                         jam_state.eta.?[2], // Current epoch entropy
                         jam_state.eta.?[3], // Previous epoch entropy
                     ) catch |err| switch (err) {
-                        error.InvalidGuarantorAssignment => return Error.InvalidGuarantorAssignment,
+                        error.InvalidGuarantorAssignment => return Error.WrongAssignment,
                         error.InvalidRotationPeriod => return Error.InvalidRotationPeriod,
                         error.InvalidSlotRange => return Error.InvalidSlotRange,
                         else => |e| return e,
