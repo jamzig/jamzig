@@ -327,6 +327,7 @@ pub const DisabledSpan = struct {
     pub inline fn err(_: *const DisabledSpan, comptime _: []const u8, _: anytype) void {}
 };
 
+// TODO: automatically enable nested scopes without requiring additional -Dtracing-scope flags
 pub fn scoped(comptime scope: @Type(.enum_literal)) TracingScope {
     return comptime TracingScope.init(scope);
 }

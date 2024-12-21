@@ -10,3 +10,6 @@
 [submodule "src/jamtestvectors/pulls/erasure_coding"]
 	path = src/jamtestvectors/pulls/erasure_coding
 	url = https://github.com/w3f/jamtestvectors/
+[submodule "src/jamtestvectors/pulls/fisher-yates"]
+	path = src/jamtestvectors/pulls/fisher-yates
+	url = https://github.com/w3f/jamtestvectors/

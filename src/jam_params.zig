@@ -23,17 +23,21 @@ pub const Params = struct {
     // F: The audit bias factor, expected additional auditors per no-show
     audit_bias_factor: u8 = 2, // F
     // GA: The total gas allocated to a core for Accumulation
-    // gas_alloc_accumulation: u32, // GA
+    // See: https://github.com/w3f/jamtestvectors/pull/20#issuecomment-2526203035
+    gas_alloc_accumulation: u32 = 10_000_000, // GA
     // GI: The gas allocated to invoke a work-package’s Is-Authorized logic
-    // gas_alloc_is_authorized: u32, // GI
+    gas_alloc_is_authorized: u32 = 1_000_000, // GI
     // GR: The total gas allocated for a work-package’s Refine logic
-    // gas_alloc_refine: u32, // GR
+    gas_alloc_refine: u32 = 500_000_000, // GR
     // GT: The total gas allocated across all cores for Accumulation
-    //total_gas_alloc_accumulation: u32, // GT
+    total_gas_alloc_accumulation: u32 = 35_000_000, // GT
     // H: The size of recent history, in blocks
     recent_history_size: u8 = 8, // H
     // I: The maximum amount of work items in a package
     max_work_items_per_package: u8 = 4, // I
+    // J: The maximum amount of dependencies in a work report segment-root
+    // lookup dictionary and the number of pre-requisites for a work item
+    max_number_of_dependencies_for_work_reports: u8 = 8, // J
     // K: The maximum number of tickets which may be submitted in a single extrinsic
     max_tickets_per_extrinsic: u32 = 16, // K
     // L: The maximum age in timeslots of the lookup anchor
@@ -99,8 +103,10 @@ pub const Params = struct {
 
 pub const TINY_PARAMS = Params{
     .epoch_length = 12,
+    .validator_rotation_period = 4, // R
     .ticket_submission_end_epoch_slot = 10,
     .max_ticket_entries_per_validator = 3, // NOTE: updated
+    .recent_history_size = 8, // NOTE: explicitly set in testvectors
     .validators_count = 6,
     .validators_super_majority = 5,
     .core_count = 2,

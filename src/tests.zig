@@ -8,10 +8,17 @@ comptime {
     _ = @import("jamtestvectors/history.zig");
     _ = @import("jamtestvectors/erasure_coding.zig");
     _ = @import("jamtestvectors/assurances.zig");
+    _ = @import("jamtestvectors/fisher_yates.zig");
 
     _ = @import("codec.zig");
     _ = @import("codec_test.zig");
     _ = @import("codec/blob_dict.zig");
+
+    _ = @import("fisher_yates.zig");
+    _ = @import("fisher_yates_test.zig");
+
+    _ = @import("guarantor_assignments.zig");
+    _ = @import("guarantor_assignments_test.zig");
 
     _ = @import("safrole_test.zig");
     _ = @import("safrole_test/diffz.zig");
@@ -63,6 +70,9 @@ comptime {
 
     _ = @import("assurances.zig");
     _ = @import("assurances_test.zig");
+
+    _ = @import("reports.zig");
+    _ = @import("reports_test.zig");
 
     _ = @import("disputes.zig");
     _ = @import("disputes_test.zig");
