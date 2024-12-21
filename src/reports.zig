@@ -5,6 +5,7 @@ const crypto = std.crypto;
 
 const tracing = @import("tracing.zig");
 const trace = tracing.scoped(.reports);
+const guarantor_validation = @import("guarantor_validation.zig");
 
 /// Error types for report validation and processing
 pub const Error = error{
@@ -34,6 +35,9 @@ pub const Error = error{
     SegmentRootLookupInvalid,
     BadSignature,
     InvalidValidatorPublicKey,
+    InvalidGuarantorAssignment,
+    InvalidRotationPeriod,
+    InvalidSlotRange,
 };
 
 pub const ValidatedGuaranteeExtrinsic = struct {
@@ -140,11 +144,23 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             // Check rotation period according to graypaper 11.27
             const current_rotation = @divFloor(slot, params.validator_rotation_period);
             const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
-            rotation_span.debug("Validating report rotation {d} against current rotation {d}", .{ report_rotation, current_rotation });
+            const is_current_rotation = (current_rotation == report_rotation);
+
+            rotation_span.debug("Validating report rotation {d} against current rotation {d} (rotation_period={d})", .{
+                report_rotation,
+                current_rotation,
+                params.validator_rotation_period,
+            });
 
             // Report must be from current  rotation
-            if (report_rotation < current_rotation) {
-                rotation_span.err("Report from rotation {d} is too old (current: {d})", .{ report_rotation, current_rotation });
+            if (report_rotation < current_rotation - 1) {
+                rotation_span.err(
+                    "Report from rotation {d} is too old (current: {d})",
+                    .{
+                        report_rotation,
+                        current_rotation,
+                    },
+                );
                 return Error.ReportEpochBeforeLast;
             }
 
@@ -270,6 +286,22 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 }
             }
 
+            // Check timeslot is within valid range
+            const min_guarantee_slot = (@divFloor(slot, params.validator_rotation_period) -| 1) * params.validator_rotation_period;
+            const max_guarantee_slot = slot;
+            rotation_span.debug("Validating guarantee time slot {d} is between {d} and {d}", .{ guarantee.slot, min_guarantee_slot, max_guarantee_slot });
+
+            // Report must be from current  rotation
+            if (!(guarantee.slot >= min_guarantee_slot and guarantee.slot <= slot)) {
+                rotation_span.err(
+                    "Guarantee time slot out of range: {d} is NOT between {d} and {d}",
+                    .{ guarantee.slot, min_guarantee_slot, max_guarantee_slot },
+                );
+                return Error.ReportEpochBeforeLast;
+            }
+
+            // 11.27 ---
+
             // Validate signatures
             {
                 const sig_span = span.child(.validate_signatures);
@@ -291,7 +323,41 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     });
                     return Error.TooManyGuarantees;
                 }
+                // Validate all validator indices are in range upfront
+                for (guarantee.signatures) |sig| {
+                    if (sig.validator_index >= params.validators_count) {
+                        sig_span.err("Invalid validator index {d} >= {d}", .{
+                            sig.validator_index,
+                            params.validators_count,
+                        });
+                        return Error.BadValidatorIndex;
+                    }
+                }
 
+                // Validate guarantor assignments against rotation periods
+                {
+                    const assign_span = sig_span.child(.validate_assignments);
+                    defer assign_span.deinit();
+                    assign_span.debug("Validating guarantor assignments for {d} signatures", .{guarantee.signatures.len});
+
+                    guarantor_validation.validateGuarantors(
+                        params,
+                        allocator,
+                        guarantee,
+                        slot,
+                        jam_state.eta.?[2], // Current epoch entropy
+                        jam_state.eta.?[3], // Previous epoch entropy
+                    ) catch |err| switch (err) {
+                        error.InvalidGuarantorAssignment => return Error.InvalidGuarantorAssignment,
+                        error.InvalidRotationPeriod => return Error.InvalidRotationPeriod,
+                        error.InvalidSlotRange => return Error.InvalidSlotRange,
+                        else => |e| return e,
+                    };
+
+                    assign_span.debug("Assignment validation successful", .{});
+                }
+
+                // Validate signatures
                 for (guarantee.signatures) |sig| {
                     const sig_detail_span = sig_span.child(.validate_signature);
                     defer sig_detail_span.deinit();
@@ -299,15 +365,11 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     sig_detail_span.debug("Validating signature for validator index {d}", .{sig.validator_index});
                     sig_detail_span.trace("Signature: {s}", .{std.fmt.fmtSliceHexLower(&sig.signature)});
 
-                    if (sig.validator_index >= jam_state.kappa.?.validators.len) {
-                        sig_detail_span.err("Invalid validator index {d} >= {d}", .{
-                            sig.validator_index,
-                            jam_state.kappa.?.validators.len,
-                        });
-                        return Error.BadValidatorIndex;
-                    }
+                    const validator = if (is_current_rotation)
+                        jam_state.kappa.?.validators[sig.validator_index] //
+                    else
+                        jam_state.lambda.?.validators[sig.validator_index]; //
 
-                    const validator = jam_state.kappa.?.validators[sig.validator_index];
                     const public_key = validator.ed25519;
                     sig_detail_span.trace("Validator public key: {s}", .{std.fmt.fmtSliceHexLower(&public_key)});
 
@@ -489,16 +551,23 @@ pub fn processGuaranteeExtrinsic(
         jam_state.alpha.?.removeAuthorizer(core_index, guarantee.report.authorizer_hash);
 
         // Track reported packages
-        // NOTE:need to entry to use the hash_function to get the work report hash
-        const entry = jam_state.rho.?.getReport(core_index).?;
         try reported.append(.{
-            .hash = entry.assignment.report.package_spec.hash,
+            .hash = assignment.report.package_spec.hash,
             .exports_root = guarantee.report.package_spec.exports_root,
         });
 
+        const current_rotation = @divFloor(slot, params.validator_rotation_period);
+        const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
+
+        const is_current_rotation = (current_rotation == report_rotation);
+
         // Track reporters and update Pi stats
         for (guarantee.signatures) |sig| {
-            const validator = jam_state.kappa.?.validators[sig.validator_index];
+            const validator = if (is_current_rotation)
+                jam_state.kappa.?.validators[sig.validator_index]
+            else
+                jam_state.lambda.?.validators[sig.validator_index];
+
             try reporters.append(validator.ed25519);
 
             // Update guarantee stats in Pi

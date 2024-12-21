@@ -99,6 +99,7 @@ pub const Params = struct {
 
 pub const TINY_PARAMS = Params{
     .epoch_length = 12,
+    .validator_rotation_period = 4, // R
     .ticket_submission_end_epoch_slot = 10,
     .max_ticket_entries_per_validator = 3, // NOTE: updated
     .recent_history_size = 8, // NOTE: explicitly set in testvectors

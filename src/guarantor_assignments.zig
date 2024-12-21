@@ -6,13 +6,14 @@ const utils = @import("utils/sort.zig");
 
 /// Rotate core assignments by n positions
 pub fn rotateAssignments(
+    comptime core_count: u32,
     cores: []u32,
     n: u32,
 ) void {
     // Create output array
     // Apply rotation formula from 11.20: [(x + n) mod C | x <- c]
     for (cores) |*x| {
-        x.* = (x.* + n) % @as(u32, @intCast(cores.len));
+        x.* = @mod(x.* + n, core_count);
     }
 }
 
@@ -44,7 +45,9 @@ pub fn permuteAssignments(
     const rotation = @divFloor(@mod(slot, params.epoch_length), params.validator_rotation_period);
 
     // Apply rotation
-    rotateAssignments(assignments.items, rotation);
+    rotateAssignments(params.core_count, assignments.items, rotation);
+
+    std.debug.print("Assignments: {any}\n", .{assignments.items});
 
     return assignments.toOwnedSlice();
 }
