@@ -3,6 +3,8 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const crypto = std.crypto;
 
+const recent_blocks = @import("recent_blocks.zig");
+
 const tracing = @import("tracing.zig");
 const trace = tracing.scoped(.reports);
 const guarantor_validation = @import("guarantor_validation.zig");
@@ -282,24 +284,42 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             // TODO: move this to recent_blocks
             for (guarantee.report.segment_root_lookup) |segment| {
                 var found_package = false;
+                var matching_segment_root = false;
+
+                // First check recent blocks
                 outer: for (jam_state.beta.?.blocks.items) |block| {
                     for (block.work_reports) |report| {
                         if (std.mem.eql(u8, &report.hash, &segment.work_package_hash)) {
                             found_package = true;
+                            // TODO: Validate segment root matches
+                            // We would need access to the actual segment root from history
+
+                            for (block.work_reports) |reported_work_package| {
+                                if (std.mem.eql(u8, &reported_work_package.exports_root, &segment.segment_tree_root)) {
+                                    matching_segment_root = true;
+                                }
+                                break;
+                            }
                             break :outer;
                         }
                     }
                 }
 
-                // walk the guarantees to see if the prereq is there
+                // Then check current block's guarantees
                 for (guarantees.data) |g| {
                     if (std.mem.eql(u8, &g.report.package_spec.hash, &segment.work_package_hash)) {
                         found_package = true;
+                        if (std.mem.eql(u8, &g.report.package_spec.exports_root, &segment.segment_tree_root)) {
+                            matching_segment_root = true;
+                        }
                         break;
                     }
                 }
 
                 if (!found_package) {
+                    return Error.SegmentRootLookupInvalid;
+                }
+                if (found_package and !matching_segment_root) {
                     return Error.SegmentRootLookupInvalid;
                 }
             }
