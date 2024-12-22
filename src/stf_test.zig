@@ -18,11 +18,6 @@ test "jamtestnet.jamduna: safrole import" {
     const span = trace.span(.jamduna);
     defer span.deinit();
 
-    if (true) {
-        span.warn("disabled test, waiting for update from jamduna team", .{});
-        return;
-    }
-
     // we derive from the normal settings
     const JAMDUNA_PARAMS = jam_params.Params{
         .epoch_length = 12,
@@ -39,34 +34,41 @@ test "jamtestnet.jamduna: safrole import" {
     const allocator = testing.allocator;
 
     // Deserialize the state dictionary bin
-    var genesis_state_dict = try jamtestnet.parsers.bin.traces.loadStateDictionaryBin(allocator, "src/jamtestnet/data/traces/safrole/jam_duna/traces/genesis.bin");
-    defer genesis_state_dict.deinit();
+    var state_transition = try jamtestnet.parsers.bin.state_transition.loadTestVector(
+        JAMDUNA_PARAMS,
+        allocator,
+        "src/jamtestnet/data/safrole/state_transitions/425530_000.bin",
+    );
+    defer state_transition.deinit(allocator);
+
+    var genesis_mdict = try state_transition.pre_state_as_merklization_dict(allocator);
+    defer genesis_mdict.deinit();
 
     // Reonstruct state from state dict
-    var jam_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &genesis_state_dict);
-    defer jam_state.deinit(allocator);
+    var genesis_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &genesis_mdict);
+    defer genesis_state.deinit(allocator);
 
     // NOTE: missing pre_image_lookups in the state dicts will add manuall
 
     // get the service account
-    const service_account = jam_state.delta.?.accounts.get(0x00).?;
+    const service_account = genesis_state.delta.?.accounts.get(0x00).?;
     const storage_count = service_account.storage.count();
     const preimages_count = service_account.preimages.count();
     std.debug.print("\nService Account Stats:\n", .{});
     std.debug.print("  Storage entries: {d}\n", .{storage_count});
     std.debug.print("  Preimages entries: {d}\n\n", .{preimages_count});
 
-    var parent_state_dict = try jam_state.buildStateMerklizationDictionary(allocator);
+    var parent_state_dict = try genesis_state.buildStateMerklizationDictionary(allocator);
     defer parent_state_dict.deinit();
 
-    var genesis_state_diff = try parent_state_dict.diff(&genesis_state_dict);
+    var genesis_state_diff = try parent_state_dict.diff(&genesis_mdict);
     defer genesis_state_diff.deinit();
     if (genesis_state_diff.has_changes()) {
         std.debug.print("\nGenesis State diff other=expected:\n\n{any}\n", .{genesis_state_diff});
         return error.InvalidGenesisState;
     }
 
-    var parent_state_root = try jam_state.buildStateRoot(allocator);
+    var parent_state_root = try genesis_state.buildStateRoot(allocator);
 
     var outputs = try jamtestnet.collector.collectJamOutputs("src/jamtestnet/data/traces/safrole/jam_duna/", allocator);
     defer outputs.deinit(allocator);
@@ -113,7 +115,7 @@ test "jamtestnet.jamduna: safrole import" {
 
         std.debug.print("block {} ..", .{block.value.header.slot});
 
-        var new_state = try stf.stateTransition(JAMDUNA_PARAMS, allocator, &jam_state, &block.value);
+        var new_state = try stf.stateTransition(JAMDUNA_PARAMS, allocator, &genesis_state, &block.value);
         defer new_state.deinit(allocator);
 
         const state_root = try new_state.buildStateRoot(allocator);
@@ -121,9 +123,9 @@ test "jamtestnet.jamduna: safrole import" {
 
         std.debug.print(" STF \x1b[32mOK\x1b[0m\n", .{});
 
-        try jam_state.merge(&new_state, allocator);
+        try genesis_state.merge(&new_state, allocator);
 
         parent_state_dict.deinit();
-        parent_state_dict = try jam_state.buildStateMerklizationDictionary(allocator);
+        parent_state_dict = try genesis_state.buildStateMerklizationDictionary(allocator);
     }
 }

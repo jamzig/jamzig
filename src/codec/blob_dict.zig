@@ -22,6 +22,10 @@ pub const BlobDict = struct {
         };
     }
 
+    pub fn decode(_: anytype, reader: anytype, alloc: std.mem.Allocator) !@This() {
+        return try deserializeDict(alloc, reader);
+    }
+
     pub fn deinit(self: *BlobDict) void {
         const span = log.span(.deinit);
         defer span.deinit();

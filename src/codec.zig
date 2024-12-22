@@ -190,6 +190,16 @@ fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocat
         .@"struct" => |structInfo| {
             const struct_span = span.child(.struct_deserialize);
             defer struct_span.deinit();
+
+            if (@hasDecl(T, "decode")) {
+                struct_span.debug("Deserializing using custom decode method", .{});
+                return try @call(.auto, @field(T, "decode"), .{
+                    params,
+                    reader,
+                    allocator,
+                });
+            }
+
             struct_span.debug("Deserializing struct with {d} fields", .{structInfo.fields.len});
 
             var result: T = undefined;
