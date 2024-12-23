@@ -22,15 +22,15 @@ const MerklizationDictionary = state_dictionary.MerklizationDictionary;
 
 pub const JamProcessingOutput = struct {
     block: OutputFormats,
-    trace: OutputFormats,
+    state_transition: OutputFormats,
     state_snapshot: OutputFormats,
 
     pub fn parseTraceJson(self: *const JamProcessingOutput, allocator: Allocator) !MerklizationDictionary {
-        return @import("parsers/json/traces.zig").loadStateDictionaryDump(allocator, self.trace.json.path);
+        return @import("parsers/json/traces.zig").loadStateDictionaryDump(allocator, self.state_transition.json.path);
     }
 
     pub fn parseTraceBin(self: *const JamProcessingOutput, allocator: Allocator) !MerklizationDictionary {
-        return @import("parsers/bin/traces.zig").loadStateDictionaryBin(allocator, self.trace.bin.path);
+        return @import("parsers/bin/traces.zig").loadStateDictionaryBin(allocator, self.state_transition.bin.path);
     }
 };
 
@@ -44,7 +44,7 @@ pub const JamOutputs = struct {
     pub fn deinit(self: *JamOutputs, allocator: Allocator) void {
         for (self.outputs.items) |output| {
             output.block.deinit(allocator);
-            output.trace.deinit(allocator);
+            output.state_transition.deinit(allocator);
             output.state_snapshot.deinit(allocator);
         }
         self.outputs.deinit();
@@ -128,9 +128,9 @@ pub fn collectJamOutputs(base_path: []const u8, allocator: Allocator) !JamOutput
     var block_files = try getOrderedFiles(allocator, blocks_path);
     defer block_files.deinit();
 
-    const traces_path = try std.fs.path.join(allocator, &[_][]const u8{ base_path, "traces" });
-    defer allocator.free(traces_path);
-    var trace_files = try getOrderedFiles(allocator, traces_path);
+    const state_transitions_path = try std.fs.path.join(allocator, &[_][]const u8{ base_path, "state_transitions" });
+    defer allocator.free(state_transitions_path);
+    var trace_files = try getOrderedFiles(allocator, state_transitions_path);
     defer trace_files.deinit();
 
     const snapshots_path = try std.fs.path.join(allocator, &[_][]const u8{ base_path, "state_snapshots" });
@@ -145,9 +145,9 @@ pub fn collectJamOutputs(base_path: []const u8, allocator: Allocator) !JamOutput
     errdefer filtered_blocks.deinit_entries();
     defer filtered_blocks.deinit();
 
-    var filtered_traces = try filterValidJamFiles(allocator, trace_files.items());
-    errdefer filtered_traces.deinit_entries();
-    defer filtered_traces.deinit();
+    var filtered_state_transitions = try filterValidJamFiles(allocator, trace_files.items());
+    errdefer filtered_state_transitions.deinit_entries();
+    defer filtered_state_transitions.deinit();
 
     var filtered_snapshots = try filterValidJamFiles(allocator, snapshot_files.items());
     errdefer filtered_snapshots.deinit_entries();
@@ -160,12 +160,12 @@ pub fn collectJamOutputs(base_path: []const u8, allocator: Allocator) !JamOutput
     }
 
     // all the lengts should be the same, otherwise print error on length
-    if (!(filtered_blocks.entries.items.len == filtered_traces.entries.items.len and //
-        filtered_traces.entries.items.len == filtered_snapshots.entries.items.len))
+    if (!(filtered_blocks.entries.items.len == filtered_state_transitions.entries.items.len and //
+        filtered_state_transitions.entries.items.len == filtered_snapshots.entries.items.len))
     {
         std.debug.print("File counts do not match: blocks({d}) traces({d}) snapshots({d})", .{
             filtered_blocks.entries.items.len,
-            filtered_traces.entries.items.len,
+            filtered_state_transitions.entries.items.len,
             filtered_snapshots.entries.items.len,
         });
         return error.FileCountsDoNotMatch;
@@ -185,8 +185,8 @@ pub fn collectJamOutputs(base_path: []const u8, allocator: Allocator) !JamOutput
     while (i < file_count) : (i += 2) {
         const block_bin = filtered_blocks.entries.items[i];
         const block_json = filtered_blocks.entries.items[i + 1];
-        const trace_bin = filtered_traces.entries.items[i];
-        const trace_json = filtered_traces.entries.items[i + 1];
+        const trace_bin = filtered_state_transitions.entries.items[i];
+        const trace_json = filtered_state_transitions.entries.items[i + 1];
         const snapshot_bin = filtered_snapshots.entries.items[i];
         const snapshot_json = filtered_snapshots.entries.items[i + 1];
 
@@ -225,7 +225,7 @@ pub fn collectJamOutputs(base_path: []const u8, allocator: Allocator) !JamOutput
                 .bin = block_bin,
                 .json = block_json,
             },
-            .trace = .{
+            .state_transition = .{
                 .bin = trace_bin,
                 .json = trace_json,
             },

@@ -14,23 +14,23 @@ const jamtestnet = @import("jamtestnet.zig");
 
 const trace = @import("tracing.zig").scoped(.stf_test);
 
-test "jamtestnet.jamduna: safrole import" {
+// we derive from the normal settings
+// see: https://github.com/jam-duna/jamtestnet/blob/main/chainspecs.json#L2
+const JAMDUNA_PARAMS = jam_params.Params{
+    .epoch_length = 12,
+    .ticket_submission_end_epoch_slot = 10,
+    .validators_count = 6,
+    .validators_super_majority = 5,
+    .core_count = 2,
+    .avail_bitfield_bytes = (2 + 7) / 8,
+    // JAMDUNA changes
+    .max_ticket_entries_per_validator = 3, // N
+    .max_authorizations_queue_items = 6, // M
+};
+
+test "jamtestnet.jamduna: verifying state reconstruction" {
     const span = trace.span(.jamduna);
     defer span.deinit();
-
-    // we derive from the normal settings
-    // see: https://github.com/jam-duna/jamtestnet/blob/main/chainspecs.json#L2
-    const JAMDUNA_PARAMS = jam_params.Params{
-        .epoch_length = 12,
-        .ticket_submission_end_epoch_slot = 10,
-        .validators_count = 6,
-        .validators_super_majority = 5,
-        .core_count = 2,
-        .avail_bitfield_bytes = (2 + 7) / 8,
-        // JAMDUNA changes
-        .max_ticket_entries_per_validator = 3, // N
-        .max_authorizations_queue_items = 6, // M
-    };
 
     // Get test allocator
     const allocator = testing.allocator;
@@ -50,6 +50,14 @@ test "jamtestnet.jamduna: safrole import" {
     var genesis_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &genesis_mdict);
     defer genesis_state.deinit(allocator);
 
+    // Check the roots
+    var parent_state_root = try genesis_state.buildStateRootWithConfig(allocator, .{ .include_preimage_timestamps = false });
+    try std.testing.expectEqualSlices(
+        u8,
+        &parent_state_root,
+        &state_transition.pre_state.state_root,
+    );
+
     // NOTE: missing pre_image_lookups in the state dicts will add manuall
 
     // get the service account
@@ -60,74 +68,54 @@ test "jamtestnet.jamduna: safrole import" {
     std.debug.print("  Storage entries: {d}\n", .{storage_count});
     std.debug.print("  Preimages entries: {d}\n\n", .{preimages_count});
 
-    var parent_state_dict = try genesis_state.buildStateMerklizationDictionary(allocator);
-    defer parent_state_dict.deinit();
+    // JamDuna testblocks do no contain timestamps from the preimages
+    var reconstructed_genesis_state_mdict = try genesis_state.buildStateMerklizationDictionaryWithConfig(
+        allocator,
+        .{ .include_preimage_timestamps = false },
+    );
+    defer reconstructed_genesis_state_mdict.deinit();
 
-    var genesis_state_diff = try parent_state_dict.diff(&genesis_mdict);
+    // Lets see when we serialize the genesis mdict ourselves if we get the same mdict
+    var genesis_state_diff = try genesis_mdict.diff(&reconstructed_genesis_state_mdict);
     defer genesis_state_diff.deinit();
     if (genesis_state_diff.has_changes()) {
-        std.debug.print("\nGenesis State diff other=expected:\n\n{any}\n", .{genesis_state_diff});
+        std.debug.print("\nDiff between reconstructed state and original state dictionary:\n(- means missing from reconstructed, + means extra in reconstructed)\n\n{any}\n", .{genesis_state_diff});
+
+        for (genesis_state_diff.entries.items) |diff| {
+            const key_type = @import("state_dictionary/key_type_detection.zig").detectKeyType(diff.key);
+            std.debug.print("Key type: {s}, key: 0x{s}\n", .{ @tagName(key_type), std.fmt.fmtSliceHexLower(&diff.key) });
+        }
+
         return error.InvalidGenesisState;
     }
+}
 
-    var parent_state_root = try genesis_state.buildStateRoot(allocator);
+test "jamtestnet.jamduna: safrole state transitions" {
+    const allocator = std.testing.allocator;
 
-    var outputs = try jamtestnet.collector.collectJamOutputs("src/jamtestnet/data/traces/safrole/jam_duna/", allocator);
-    defer outputs.deinit(allocator);
+    var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions("src/jamtestnet/data/safrole", allocator);
+    defer state_transition_vectors.deinit(allocator);
 
-    std.debug.print("\n", .{});
-    for (outputs.items()) |output| {
-        std.debug.print("decode {s} => ", .{output.block.bin.name});
+    var current_state: ?state.JamState(JAMDUNA_PARAMS) = null;
+    defer {
+        if (current_state) |*cs| cs.deinit(allocator);
+    }
+    for (state_transition_vectors.items()) |state_transition_vector| {
+        var state_transition = try state_transition_vector.decodeBin(JAMDUNA_PARAMS, allocator);
+        defer state_transition.deinit(allocator);
 
-        // Slurp the binary file
-        var block_bin = try output.block.bin.slurp(allocator);
-        defer block_bin.deinit();
-
-        // Now decode the block
-        const block = try codec.deserialize(
-            types.Block,
-            JAMDUNA_PARAMS,
-            allocator,
-            block_bin.buffer,
-        );
-        defer block.deinit();
-
-        if (std.mem.eql(u8, &block.value.header.parent_state_root, &parent_state_root)) {
-            std.debug.print(" parent roots \x1b[32mmatch\x1b[0m ", .{});
-        } else {
-            std.debug.print("\n\nparent roots \x1b[31mdo not match\x1b[0m (me: 0x{s}, trace: 0x{s})\n", .{
-                std.fmt.fmtSliceHexLower(&parent_state_root),
-                std.fmt.fmtSliceHexLower(&block.value.header.parent_state_root),
-            });
-
-            std.debug.print("\nParent State Dictionary:\n{any}\n", .{parent_state_dict});
-
-            var expected_state_dict = try output.parseTraceJson(allocator);
-            defer expected_state_dict.deinit();
-
-            std.debug.print("\nExpected State Dictionary:\n{any}\n", .{expected_state_dict});
-
-            var delta = try expected_state_dict.diff(&parent_state_dict);
-            defer delta.deinit();
-            std.debug.print("\n State diff:\n{any}\n", .{delta});
-
-            return error.ParentStateRootsDoNotMatch;
+        if (current_state == null) {
+            var dict = try state_transition.pre_state_as_merklization_dict(allocator);
+            defer dict.deinit();
+            current_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &dict);
         }
-        parent_state_root = block.value.header.parent_state_root;
 
-        std.debug.print("block {} ..", .{block.value.header.slot});
-
-        var new_state = try stf.stateTransition(JAMDUNA_PARAMS, allocator, &genesis_state, &block.value);
+        var new_state = try stf.stateTransition(JAMDUNA_PARAMS, allocator, &current_state.?, &state_transition.block);
         defer new_state.deinit(allocator);
 
-        const state_root = try new_state.buildStateRoot(allocator);
-        std.debug.print("state root 0x{s}", .{std.fmt.fmtSliceHexLower(&state_root)});
+        const state_root = try new_state.buildStateRootWithConfig(allocator, .{ .include_preimage_timestamps = false });
+        _ = state_root;
 
-        std.debug.print(" STF \x1b[32mOK\x1b[0m\n", .{});
-
-        try genesis_state.merge(&new_state, allocator);
-
-        parent_state_dict.deinit();
-        parent_state_dict = try genesis_state.buildStateMerklizationDictionary(allocator);
+        try current_state.?.merge(&new_state, allocator);
     }
 }

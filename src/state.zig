@@ -177,9 +177,18 @@ pub fn JamState(comptime params: Params) type {
         pub fn buildStateMerklizationDictionary(self: *const JamState(params), allocator: std.mem.Allocator) !state_dict.MerklizationDictionary {
             return try state_dict.buildStateMerklizationDictionary(params, allocator, self);
         }
+        pub fn buildStateMerklizationDictionaryWithConfig(self: *const JamState(params), allocator: std.mem.Allocator, comptime config: state_dict.DictionaryConfig) !state_dict.MerklizationDictionary {
+            return try state_dict.buildStateMerklizationDictionaryWithConfig(params, allocator, self, config);
+        }
 
         pub fn buildStateRoot(self: *const JamState(params), allocator: std.mem.Allocator) !types.StateRoot {
             var map = try self.buildStateMerklizationDictionary(allocator);
+            defer map.deinit();
+            return try @import("state_merklization.zig").merklizeStateDictionary(allocator, &map);
+        }
+
+        pub fn buildStateRootWithConfig(self: *const JamState(params), allocator: std.mem.Allocator, comptime config: state_dict.DictionaryConfig) !types.StateRoot {
+            var map = try self.buildStateMerklizationDictionaryWithConfig(allocator, config);
             defer map.deinit();
             return try @import("state_merklization.zig").merklizeStateDictionary(allocator, &map);
         }
