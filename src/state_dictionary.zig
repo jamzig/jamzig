@@ -347,6 +347,10 @@ pub const MerklizationDictionaryDiff = struct {
         };
     }
 
+    pub fn items(self: *const MerklizationDictionaryDiff) []DiffEntry {
+        self.entries.items;
+    }
+
     pub fn has_changes(self: *const MerklizationDictionaryDiff) bool {
         return self.entries.items.len > 0;
     }
@@ -466,10 +470,19 @@ pub const MerklizationDictionary = struct {
     }
 };
 
-pub fn buildStateMerklizationDictionary(
+pub const DictionaryConfig = struct {
+    include_preimage_timestamps: bool = true,
+    include_preimages: bool = true,
+    include_storage: bool = true,
+};
+
+/// Uses a config to conditionally enable or disable certain parts of the
+/// building process.
+pub fn buildStateMerklizationDictionaryWithConfig(
     comptime params: Params,
     allocator: std.mem.Allocator,
     state: *const jamstate.JamState(params),
+    comptime config: DictionaryConfig,
 ) !MerklizationDictionary {
     var map = std.AutoHashMap([32]u8, []const u8).init(allocator);
     errdefer map.deinit();
@@ -602,51 +615,66 @@ pub fn buildStateMerklizationDictionary(
     }
 
     // Handle delta component (service accounts) specially
-    var delta_managed = try getOrInitManaged(allocator, &state.delta, .{allocator});
-    defer delta_managed.deinit(allocator);
-    if (delta_managed.ptr.accounts.count() > 0) {
-        var service_iter = delta_managed.ptr.accounts.iterator();
-        while (service_iter.next()) |service_entry| {
-            const service_idx = service_entry.key_ptr.*;
-            const account = service_entry.value_ptr;
+    if (config.include_storage) {
+        var delta_managed = try getOrInitManaged(allocator, &state.delta, .{allocator});
+        defer delta_managed.deinit(allocator);
+        if (delta_managed.ptr.accounts.count() > 0) {
+            var service_iter = delta_managed.ptr.accounts.iterator();
+            while (service_iter.next()) |service_entry| {
+                const service_idx = service_entry.key_ptr.*;
+                const account = service_entry.value_ptr;
 
-            // Base account data
-            const base_key = constructByteServiceIndexKey(255, service_idx);
-            var base_value = std.ArrayList(u8).init(allocator);
-            try state_encoder.delta.encodeServiceAccountBase(account, base_value.writer());
+                // Base account data
+                const base_key = constructByteServiceIndexKey(255, service_idx);
+                var base_value = std.ArrayList(u8).init(allocator);
+                try state_encoder.delta.encodeServiceAccountBase(account, base_value.writer());
 
-            try map.put(base_key, try base_value.toOwnedSlice());
+                try map.put(base_key, try base_value.toOwnedSlice());
 
-            // Storage entries
-            var storage_iter = account.storage.iterator();
-            while (storage_iter.next()) |storage_entry| {
-                const storage_key = constructServiceIndexHashKey(service_idx, buildStorageKey(storage_entry.key_ptr.*));
-                try map.put(storage_key, try allocator.dupe(u8, storage_entry.value_ptr.*));
-            }
+                // Storage entries
+                var storage_iter = account.storage.iterator();
+                while (storage_iter.next()) |storage_entry| {
+                    const storage_key = constructServiceIndexHashKey(service_idx, buildStorageKey(storage_entry.key_ptr.*));
+                    try map.put(storage_key, try allocator.dupe(u8, storage_entry.value_ptr.*));
+                }
 
-            // Preimage lookups
-            var preimage_iter = account.preimages.iterator();
-            while (preimage_iter.next()) |preimage_entry| {
-                const preimage_key = constructServiceIndexHashKey(service_idx, buildPreimageKey(preimage_entry.key_ptr.*));
-                try map.put(preimage_key, try allocator.dupe(u8, preimage_entry.value_ptr.*));
-            }
+                if (config.include_preimages) {
+                    // Preimage lookups
+                    var preimage_iter = account.preimages.iterator();
+                    while (preimage_iter.next()) |preimage_entry| {
+                        const preimage_key = constructServiceIndexHashKey(service_idx, buildPreimageKey(preimage_entry.key_ptr.*));
+                        try map.put(preimage_key, try allocator.dupe(u8, preimage_entry.value_ptr.*));
+                    }
 
-            // Preimage timestamps
-            var lookup_iter = account.preimage_lookups.iterator();
-            while (lookup_iter.next()) |lookup_entry| {
-                const delta_encoder = state_encoder.delta;
-                const key: services.PreimageLookupKey = lookup_entry.key_ptr.*;
+                    if (config.include_preimage_timestamps) {
+                        // Preimage timestamps
+                        var lookup_iter = account.preimage_lookups.iterator();
+                        while (lookup_iter.next()) |lookup_entry| {
+                            const delta_encoder = state_encoder.delta;
+                            const key: services.PreimageLookupKey = lookup_entry.key_ptr.*;
 
-                var preimage_lookup = try std.ArrayList(u8).initCapacity(allocator, 24);
-                try delta_encoder.encodePreimageLookup(lookup_entry.value_ptr.*, preimage_lookup.writer());
+                            var preimage_lookup = try std.ArrayList(u8).initCapacity(allocator, 24);
+                            try delta_encoder.encodePreimageLookup(lookup_entry.value_ptr.*, preimage_lookup.writer());
 
-                const lookup_key = constructServiceIndexHashKey(service_idx, buildPreimageLookupKey(key));
-                try map.put(lookup_key, try preimage_lookup.toOwnedSlice());
+                            const lookup_key = constructServiceIndexHashKey(service_idx, buildPreimageLookupKey(key));
+                            try map.put(lookup_key, try preimage_lookup.toOwnedSlice());
+                        }
+                    }
+                }
             }
         }
     }
 
     return .{ .entries = map };
+}
+
+/// builds the full buildStateMerklizationDictionary
+pub fn buildStateMerklizationDictionary(
+    comptime params: Params,
+    allocator: std.mem.Allocator,
+    state: *const jamstate.JamState(params),
+) !MerklizationDictionary {
+    return try buildStateMerklizationDictionaryWithConfig(params, allocator, state, .{});
 }
 
 //  _   _       _ _  _____         _

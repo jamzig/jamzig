@@ -2,17 +2,37 @@ const std = @import("std");
 const testing = std.testing;
 const authorization_queue = @import("../authorization_queue.zig");
 const Phi = authorization_queue.Phi;
-const Q = authorization_queue.Q; // Maximum queue items (80)
-const H = authorization_queue.H; // Hash size (32)
 
-pub fn decode(comptime core_count: u16, allocator: std.mem.Allocator, reader: anytype) !Phi(core_count) {
-    var phi = try Phi(core_count).init(allocator);
+const H = 32; // Hash size (32)
+
+const tracing = @import("../tracing.zig");
+
+const trace = tracing.scoped(.phi_decoder);
+
+pub fn decode(
+    comptime core_count: u16,
+    comptime max_authorizations_queue_items: u8,
+    allocator: std.mem.Allocator,
+    reader: anytype,
+) !Phi(core_count, max_authorizations_queue_items) {
+    const span = trace.span(.decode);
+    defer span.deinit();
+
+    span.debug("starting phi state decoding for {d} cores", .{core_count});
+
+    var phi = try Phi(core_count, max_authorizations_queue_items).init(allocator);
     errdefer phi.deinit();
+
+    span.debug("initialized empty phi state", .{});
 
     // For each core
     for (0..core_count) |core| {
+        const core_span = span.child(.process_core);
+        defer core_span.deinit();
+        core_span.debug("processing core {d}", .{core});
+
         var i: usize = 0;
-        while (i < Q) : (i += 1) {
+        while (i < max_authorizations_queue_items) : (i += 1) {
             var hash: [H]u8 = undefined;
             try reader.readNoEof(&hash);
 
@@ -25,12 +45,21 @@ pub fn decode(comptime core_count: u16, allocator: std.mem.Allocator, reader: an
                 }
             }
 
-            // Only add non-zero hashes to the queue
-            if (!is_zero) {
+            if (is_zero) {
+                core_span.trace("skipping zero hash at position {d}", .{i});
+            } else {
+                core_span.debug("found non-zero hash at position {d}", .{i});
                 try phi.addAuthorization(@intCast(core), hash);
             }
         }
+        core_span.info("processed {d} hashes for core {d}, found {d} non-zero", .{
+            max_authorizations_queue_items,
+            core,
+            phi.queue[core].items.len,
+        });
     }
+
+    span.info("completed decoding phi state", .{});
 
     return phi;
 }
@@ -38,6 +67,8 @@ pub fn decode(comptime core_count: u16, allocator: std.mem.Allocator, reader: an
 test "decode phi - empty queues" {
     const allocator = testing.allocator;
     const core_count: u16 = 2;
+
+    const Q = 80;
 
     // Create buffer with all zero hashes
     var buffer = std.ArrayList(u8).init(allocator);
@@ -51,7 +82,7 @@ test "decode phi - empty queues" {
     }
 
     var fbs = std.io.fixedBufferStream(buffer.items);
-    var phi = try decode(core_count, allocator, fbs.reader());
+    var phi = try decode(core_count, Q, allocator, fbs.reader());
     defer phi.deinit();
 
     // Verify empty queues
@@ -63,6 +94,8 @@ test "decode phi - empty queues" {
 test "decode phi - with authorizations" {
     const allocator = testing.allocator;
     const core_count: u16 = 2;
+
+    const Q = 80;
 
     // Create test data
     var buffer = std.ArrayList(u8).init(allocator);
@@ -91,7 +124,7 @@ test "decode phi - with authorizations" {
     }
 
     var fbs = std.io.fixedBufferStream(buffer.items);
-    var phi = try decode(core_count, allocator, fbs.reader());
+    var phi = try decode(core_count, Q, allocator, fbs.reader());
     defer phi.deinit();
 
     // Verify Core 0
@@ -108,6 +141,8 @@ test "decode phi - insufficient data" {
     const allocator = testing.allocator;
     const core_count: u16 = 2;
 
+    const Q = 80;
+
     // Create buffer with incomplete data
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
@@ -116,7 +151,7 @@ test "decode phi - insufficient data" {
     try buffer.appendSlice(&[_]u8{1} ** (H * Q + H / 2));
 
     var fbs = std.io.fixedBufferStream(buffer.items);
-    try testing.expectError(error.EndOfStream, decode(core_count, allocator, fbs.reader()));
+    try testing.expectError(error.EndOfStream, decode(core_count, Q, allocator, fbs.reader()));
 }
 
 test "decode phi - roundtrip" {
@@ -124,8 +159,10 @@ test "decode phi - roundtrip" {
     const encoder = @import("../state_encoding/phi.zig");
     const core_count: u16 = 2;
 
+    const Q = 80;
+
     // Create original phi state
-    var original = try Phi(core_count).init(allocator);
+    var original = try Phi(core_count, Q).init(allocator);
     defer original.deinit();
 
     // Add authorizations
@@ -141,7 +178,7 @@ test "decode phi - roundtrip" {
 
     // Decode
     var fbs = std.io.fixedBufferStream(buffer.items);
-    var decoded = try decode(core_count, allocator, fbs.reader());
+    var decoded = try decode(core_count, Q, allocator, fbs.reader());
     defer decoded.deinit();
 
     // Verify queues
