@@ -89,4 +89,7 @@ comptime {
     _ = @import("jamtestnet.zig");
 
     _ = @import("stf_test.zig");
+
+    _ = @import("crypto/bls.zig");
+    _ = @import("crypto/bls_test.zig");
 }
