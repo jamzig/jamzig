@@ -409,7 +409,7 @@ fn phiZeroOutOffenders(data: types.ValidatorSet, offenders: []const types.Ed2551
 
 /// Fallback function selects an epoch’s worth of validator Bandersnatch keys
 /// from the validator key set k using the entropy collected on chain
-fn gammaS_Fallback(
+pub fn gammaS_Fallback(
     allocator: std.mem.Allocator,
     r: types.OpaqueHash,
     epoch_length: u32,

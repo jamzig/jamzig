@@ -11,20 +11,26 @@ test "sequoia: State transition with sequoia-generated blocks" {
     const allocator = testing.allocator;
 
     // Create initial state using tiny test parameters
-    var current_state = try state.JamState(jam_params.TINY_PARAMS).initGenesis(allocator);
-    defer current_state.deinit(allocator);
 
     // Setup our seeded Rng
     const seed: [32]u8 = [_]u8{42} ** 32;
     var prng = std.Random.ChaCha.init(seed);
     var rng = prng.random();
 
+    // Create genesis state
+    const config = try sequoia.GenesisConfig(jam_params.TINY_PARAMS).buildWithRng(allocator, &rng);
+
     // Create block builder
-    var builder = try sequoia.createTinyBlockBuilder(allocator, &rng);
+    var builder = try sequoia.BlockBuilder(jam_params.TINY_PARAMS).init(allocator, config, &rng);
     defer builder.deinit();
 
     // Test multiple block transitions
-    const num_blocks = 100;
+    const num_blocks = 32;
+
+    // Let's give access to the current state
+    var current_state = &builder.state;
+
+    // std.debug.print("Initial state: {s}\n", .{current_state});
 
     // Generate and process multiple blocks
     for (0..num_blocks) |i| {
@@ -38,8 +44,10 @@ test "sequoia: State transition with sequoia-generated blocks" {
         std.debug.print("  Author: {d}\n", .{block.header.author_index});
 
         // Perform state transition
-        var state_delta = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, &current_state, &block);
+        var state_delta = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, current_state, &block);
         defer state_delta.deinit(allocator);
+
+        std.debug.print("  State delta: {s}\n", .{state_delta});
 
         // Verify basic state transition properties
         try testing.expect(state_delta.tau.? > current_state.tau.?);

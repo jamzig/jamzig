@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const crypto = @import("crypto.zig");
+const safrole = @import("safrole.zig");
 const ring_vrf = @import("ring_vrf.zig");
 const jam_params = @import("jam_params.zig");
 const jamstate = @import("state.zig");
@@ -17,8 +18,6 @@ pub fn GenesisConfig(params: jam_params.Params) type {
         validator_keys: []ValidatorKeySet,
 
         params: jam_params.Params = params,
-
-        rng: *std.Random,
 
         pub fn buildWithRng(allocator: std.mem.Allocator, rng: *std.Random) !GenesisConfig(params) {
             var config: GenesisConfig(params) = undefined;
@@ -48,10 +47,70 @@ pub fn GenesisConfig(params: jam_params.Params) type {
             return config;
         }
 
-        pub fn buildJamState(self: *const GenesisConfig(params), allocator: std.mem.Allocator) !jamstate.JamState(params) {
-            // TODO: rename initGenesis to init Empty or init Zero
-            const state = jamstate.JamState(params).initGenesis(allocator);
-            _ = self;
+        pub fn buildJamState(self: *const GenesisConfig(params), allocator: std.mem.Allocator, _: *std.Random) !jamstate.JamState(params) {
+            // Initialize an empty genesis state with all components initialized
+            var state = try jamstate.JamState(params).initGenesis(allocator);
+            errdefer state.deinit(allocator);
+
+            // Set the initial entropy values and timeslot from config
+            state.eta.? = self.initial_entropy;
+            state.tau.? = self.initial_slot;
+
+            // Setup the initial validator set
+            //
+            // Determinism: All nodes must start with exactly the same validator ordering to reach consensus. Any shuffling would need to be deterministic and thus wouldn't add real randomization anyway.
+            // Security: The initial ordering doesn't matter because:
+            //
+            // Block authoring in the first epoch uses the fallback function F(), which provides pseudo-random selection
+            // The ticket system will naturally create randomization starting from the second epoch
+            // The validator rotation system ensures proper cycling of responsibilities
+            //
+            // Simplicity: Starting with identical ordered sets makes the genesis state simpler to verify and reduces the chance of consensus errors during chain startup.
+
+            // First, create initial validator set from the provided keys
+            for (state.kappa.?.validators, 0..params.validators_count) |*validator, i| {
+                const key = self.validator_keys[i];
+                validator.* = .{
+                    .bandersnatch = key.bandersnatch_keypair.public_key,
+                    .ed25519 = key.ed25519_keypair.public_key.toBytes(),
+                    .bls = [_]u8{0} ** 144,
+                    .metadata = [_]u8{0} ** 128,
+                };
+            }
+
+            // Create copies for lambda, iota
+            std.mem.copyForwards(types.ValidatorData, state.lambda.?.validators, state.kappa.?.validators);
+            std.mem.copyForwards(types.ValidatorData, state.iota.?.validators, state.kappa.?.validators);
+
+            // Initialize safrole, so same order in gamma.?.k
+            // γk (gamma_k)    : We start with the genesis validators since these are the active
+            //                   validators for the first epoch.
+            // γz (gamma_z)    : We need to create the ring root immediately so that validators
+            //                   can start submitting tickets for the next epoch.
+            // γa (gamma_a)    : Starts empty since no tickets have been submitted yet.
+            // η (eta)         : We need all four entropy values for various protocol functions.
+            //                   We initialize them deterministically based on genesis
+            //                   configuration to ensure all nodes start with the same values.
+            // γs (gamma_s)    : Most importantly, we use the fallback function to create our
+            //                   initial slot assignments. This gives us a deterministic but
+            //                   pseudo-random sequence of block authors for the first epoch.
+            std.mem.copyForwards(types.ValidatorData, state.gamma.?.k.validators, state.kappa.?.validators);
+
+            // Gamma_s with initial empty tickets from the start
+            state.gamma.?.s.deinit(allocator);
+            state.gamma.?.s = .{
+                .keys = try safrole.gammaS_Fallback(allocator, state.eta.?[2], params.epoch_length, state.kappa.?),
+            };
+
+            // Calculate gamma_z (Bandersnatch ring root) from gamma_k validators
+            {
+                const pub_keys = try state.gamma.?.k.getBandersnatchPublicKeys(allocator);
+                defer allocator.free(pub_keys);
+                var verifier = try ring_vrf.RingVerifier.init(pub_keys);
+                defer verifier.deinit();
+                state.gamma.?.z = try verifier.get_commitment();
+            }
+
             return state;
         }
 
@@ -96,18 +155,25 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         last_header_hash: ?types.Hash,
         last_state_root: ?types.Hash,
 
+        rng: *std.Random,
+
         /// Initialize the BlockBuilder with required state
-        pub fn init(allocator: std.mem.Allocator, config: GenesisConfig(params)) !Self {
+        pub fn init(
+            allocator: std.mem.Allocator,
+            config: GenesisConfig(params),
+            rng: *std.Random,
+        ) !Self {
             // Initialize BLS for cryptographic operations
             try Bls12_381.init();
 
             return Self{
                 .allocator = allocator,
                 .config = config,
-                .state = try config.buildJamState(allocator),
+                .state = try config.buildJamState(allocator, rng),
                 .current_slot = config.initial_slot,
                 .last_header_hash = null,
                 .last_state_root = null,
+                .rng = rng,
             };
         }
 
@@ -306,7 +372,7 @@ pub fn createTinyBlockBuilder(
     rng: *std.Random,
 ) !BlockBuilder(jam_params.TINY_PARAMS) {
     const config = try GenesisConfig(jam_params.TINY_PARAMS).buildWithRng(allocator, rng);
-    return BlockBuilder(jam_params.TINY_PARAMS).init(allocator, config);
+    return BlockBuilder(jam_params.TINY_PARAMS).init(allocator, config, rng);
 }
 
 fn generateValidatorKeys(allocator: std.mem.Allocator, count: u32) ![]ValidatorKeySet {
