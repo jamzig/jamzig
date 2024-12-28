@@ -204,6 +204,49 @@ pub unsafe extern "C" fn vrf_verify(
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn ietf_vrf_verify(
+    verifier: *const Verifier,
+    vrf_input_data: *const u8,
+    vrf_input_data_len: size_t,
+    aux_data: *const u8,
+    aux_data_len: size_t,
+    signature: *const u8,
+    signature_len: size_t,
+    signer_key_index: size_t,
+    output: *mut u8,
+    output_len: *mut size_t,
+) -> bool {
+    debug_assert!(!verifier.is_null(), "verifier pointer must not be null");
+    debug_assert!(
+        !vrf_input_data.is_null(),
+        "vrf_input_data pointer must not be null"
+    );
+    debug_assert!(!aux_data.is_null(), "aux_data pointer must not be null");
+    debug_assert!(!signature.is_null(), "signature pointer must not be null");
+    debug_assert!(!output.is_null(), "output pointer must not be null");
+    debug_assert!(!output_len.is_null(), "output_len pointer must not be null");
+
+    let verifier = &*verifier;
+    let vrf_input_slice = std::slice::from_raw_parts(vrf_input_data, vrf_input_data_len);
+    let aux_data_slice = std::slice::from_raw_parts(aux_data, aux_data_len);
+    let signature_slice = std::slice::from_raw_parts(signature, signature_len);
+
+    match verifier.ietf_vrf_verify(
+        vrf_input_slice,
+        aux_data_slice,
+        signature_slice,
+        signer_key_index,
+    ) {
+        Ok(result) => {
+            ptr::copy_nonoverlapping(result.as_ptr(), output, 32);
+            *output_len = 32;
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// # Safety
 ///
 /// This function is unsafe because it dereferences raw pointers.
@@ -265,6 +308,59 @@ pub unsafe extern "C" fn vrf_verify_ring_signature_against_commitment(
     match verifier.ring_vrf_verify(vrf_input, aux, sig) {
         Ok(output) => {
             std::ptr::copy_nonoverlapping(output.as_ptr(), vrf_output, 32);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// IETF VRF Sign (non-anonymous).
+///
+/// Creates a deterministic VRF signature from the Prover's secret key on the given input data.
+/// The output VRF hash can be recovered by verifying the signature.
+///
+/// # Safety
+/// - `prover` must be a valid pointer to a `Prover` created elsewhere.
+/// - `vrf_input_data` must point to valid memory of length `vrf_input_data_len`.
+/// - `aux_data` must point to valid memory of length `aux_data_len`.
+/// - `signature_out` must point to enough space to hold the resulting signature.
+/// - `signature_size_out` must point to a valid `size_t` that will be overwritten with the actual signature length.
+#[no_mangle]
+pub unsafe extern "C" fn ietf_vrf_sign(
+    prover: *const Prover,
+    vrf_input_data: *const u8,
+    vrf_input_data_len: size_t,
+    aux_data: *const u8,
+    aux_data_len: size_t,
+    signature_out: *mut u8,
+    signature_size_out: *mut size_t,
+) -> bool {
+    debug_assert!(!prover.is_null(), "prover pointer must not be null");
+    debug_assert!(
+        !vrf_input_data.is_null(),
+        "vrf_input_data pointer must not be null"
+    );
+    debug_assert!(!aux_data.is_null(), "aux_data pointer must not be null");
+    debug_assert!(
+        !signature_out.is_null(),
+        "signature_out pointer must not be null"
+    );
+    debug_assert!(
+        !signature_size_out.is_null(),
+        "signature_size_out pointer must not be null"
+    );
+
+    let prover = &*prover;
+    let vrf_input_slice = std::slice::from_raw_parts(vrf_input_data, vrf_input_data_len);
+    let aux_data_slice = std::slice::from_raw_parts(aux_data, aux_data_len);
+
+    let result = prover.ietf_vrf_sign(vrf_input_slice, aux_data_slice);
+
+    match result {
+        Ok(signature) => {
+            let size = signature.len();
+            ptr::copy_nonoverlapping(signature.as_ptr(), signature_out, size);
+            *signature_size_out = size;
             true
         }
         Err(_) => false,
