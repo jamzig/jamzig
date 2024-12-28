@@ -7,6 +7,8 @@ const jam_params = @import("jam_params.zig");
 const jamstate = @import("state.zig");
 const codec = @import("codec.zig");
 
+pub const logging = @import("sequoia/logging.zig");
+
 const Ed25519 = std.crypto.sign.Ed25519;
 const Bls12_381 = crypto.bls.Bls12_381;
 const bandersnatch = crypto.bandersnatch;

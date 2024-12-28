@@ -33,21 +33,17 @@ test "sequoia: State transition with sequoia-generated blocks" {
     // std.debug.print("Initial state: {s}\n", .{current_state});
 
     // Generate and process multiple blocks
-    for (0..num_blocks) |i| {
+    for (0..num_blocks) |_| {
         // Build next block
         var block = try builder.buildNextBlock();
         defer block.deinit(allocator);
 
         // Log block information for debugging
-        std.debug.print("\nProcessing block {d}:\n", .{i});
-        std.debug.print("  Slot: {d}\n", .{block.header.slot});
-        std.debug.print("  Author: {d}\n", .{block.header.author_index});
+        sequoia.logging.printStateTransitionDebug(jam_params.TINY_PARAMS, current_state, &block);
 
         // Perform state transition
         var state_delta = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, current_state, &block);
         defer state_delta.deinit(allocator);
-
-        std.debug.print("  State delta: {s}\n", .{state_delta});
 
         // Verify basic state transition properties
         try testing.expect(state_delta.tau.? > current_state.tau.?);
