@@ -10,6 +10,57 @@ const Ed25519 = std.crypto.sign.Ed25519;
 const Bls12_381 = crypto.bls.Bls12_381;
 const bandersnatch = crypto.bandersnatch;
 
+pub fn GenesisConfig(params: jam_params.Params) type {
+    return struct {
+        initial_slot: u32 = 0,
+        initial_entropy: [4][32]u8,
+        validator_keys: []ValidatorKeySet,
+
+        params: jam_params.Params = params,
+
+        rng: *std.Random,
+
+        pub fn buildWithRng(allocator: std.mem.Allocator, rng: *std.Random) !GenesisConfig(params) {
+            var config: GenesisConfig(params) = undefined;
+
+            // set some details
+            config.initial_slot = 0;
+
+            // Initialize validator keys
+            try Bls12_381.init();
+            var validator_keys = try allocator.alloc(ValidatorKeySet, params.validators_count);
+            errdefer allocator.free(validator_keys);
+
+            for (0..params.validators_count) |i| {
+                var key_seed: [32]u8 = undefined;
+                rng.bytes(&key_seed);
+                validator_keys[i] = try ValidatorKeySet.init(key_seed);
+            }
+            config.validator_keys = validator_keys;
+
+            // Generate initial entropy using ChaCha8 PRNG seeded with input seed
+            var entropy: [4][32]u8 = undefined;
+            for (0..4) |i| {
+                rng.bytes(&entropy[i]);
+            }
+            config.initial_entropy = entropy;
+
+            return config;
+        }
+
+        pub fn buildJamState(self: *const GenesisConfig(params), allocator: std.mem.Allocator) !jamstate.JamState(params) {
+            // TODO: rename initGenesis to init Empty or init Zero
+            const state = jamstate.JamState(params).initGenesis(allocator);
+            _ = self;
+            return state;
+        }
+
+        pub fn deinit(self: *GenesisConfig(params), allocator: std.mem.Allocator) void {
+            allocator.free(self.validator_keys);
+        }
+    };
+}
+
 const ValidatorKeySet = struct {
     bandersnatch_keypair: bandersnatch.BandersnatchKeyPair,
     ed25519_keypair: Ed25519.KeyPair,
@@ -24,47 +75,45 @@ const ValidatorKeySet = struct {
             .bls12_381_keypair = try Bls12_381.KeyPair.create(seed),
         };
     }
+
+    pub fn createDeterministic(index: u32) !ValidatorKeySet {
+        var seed: [SEED_LENGTH]u8 = [_]u8{0} ** SEED_LENGTH;
+        std.mem.writeInt(u32, seed[0..4], index, .little);
+        return init(seed);
+    }
 };
 
 pub fn BlockBuilder(comptime params: jam_params.Params) type {
     return struct {
         const Self = @This();
 
+        config: GenesisConfig(params),
+
         allocator: std.mem.Allocator,
-        state: *jamstate.JamState(params),
-        validator_keys: []ValidatorKeySet,
+        state: jamstate.JamState(params),
         current_slot: types.TimeSlot = 0,
 
         last_header_hash: ?types.Hash,
         last_state_root: ?types.Hash,
 
         /// Initialize the BlockBuilder with required state
-        pub fn init(allocator: std.mem.Allocator, initial_state: *jamstate.JamState(params)) !Self {
-            var validator_keys = try allocator.alloc(ValidatorKeySet, params.validators_count);
-            errdefer allocator.free(validator_keys);
-
+        pub fn init(allocator: std.mem.Allocator, config: GenesisConfig(params)) !Self {
             // Initialize BLS for cryptographic operations
             try Bls12_381.init();
 
-            // Generate validator keys from deterministic seeds
-            for (0..params.validators_count) |i| {
-                var seed: [32]u8 = [_]u8{0} ** ValidatorKeySet.SEED_LENGTH;
-                std.mem.writeInt(u32, seed[0..4], @as(u32, @intCast(i)), .little);
-                validator_keys[i] = try ValidatorKeySet.init(seed);
-            }
-
             return Self{
                 .allocator = allocator,
-                .state = initial_state,
-                .validator_keys = validator_keys,
-                .current_slot = 0,
+                .config = config,
+                .state = try config.buildJamState(allocator),
+                .current_slot = config.initial_slot,
                 .last_header_hash = null,
                 .last_state_root = null,
             };
         }
 
         pub fn deinit(self: *Self) void {
-            self.allocator.free(self.validator_keys);
+            self.config.deinit(self.allocator);
+            self.state.deinit(self.allocator);
         }
 
         /// Check if ticket-based sealing is possible for the current slot
@@ -173,7 +222,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         pub fn buildNextBlock(self: *Self) !types.Block {
             // Select block producer for this slot
             const author_index = try self.selectBlockProducer();
-            const author_keys = self.validator_keys[author_index];
+            const author_keys = self.config.validator_keys[author_index];
 
             // Determine if we can use ticket-based sealing
             const use_ticket = self.canUseTicketSealing(author_index);
@@ -254,7 +303,18 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
 pub fn createTinyBlockBuilder(
     allocator: std.mem.Allocator,
-    initial_state: *jamstate.JamState(jam_params.TINY_PARAMS),
+    rng: *std.Random,
 ) !BlockBuilder(jam_params.TINY_PARAMS) {
-    return BlockBuilder(jam_params.TINY_PARAMS).init(allocator, initial_state);
+    const config = try GenesisConfig(jam_params.TINY_PARAMS).buildWithRng(allocator, rng);
+    return BlockBuilder(jam_params.TINY_PARAMS).init(allocator, config);
+}
+
+fn generateValidatorKeys(allocator: std.mem.Allocator, count: u32) ![]ValidatorKeySet {
+    var keys = try allocator.alloc(ValidatorKeySet, count);
+    errdefer allocator.free(keys);
+
+    for (0..count) |i| {
+        keys[i] = try ValidatorKeySet.createDeterministic(@intCast(i));
+    }
+    return keys;
 }

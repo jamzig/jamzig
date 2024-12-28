@@ -14,8 +14,13 @@ test "sequoia: State transition with sequoia-generated blocks" {
     var current_state = try state.JamState(jam_params.TINY_PARAMS).initGenesis(allocator);
     defer current_state.deinit(allocator);
 
+    // Setup our seeded Rng
+    const seed: [32]u8 = [_]u8{42} ** 32;
+    var prng = std.Random.ChaCha.init(seed);
+    var rng = prng.random();
+
     // Create block builder
-    var builder = try sequoia.createTinyBlockBuilder(allocator, &current_state);
+    var builder = try sequoia.createTinyBlockBuilder(allocator, &rng);
     defer builder.deinit();
 
     // Test multiple block transitions
