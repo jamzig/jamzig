@@ -31,7 +31,8 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         allocator: std.mem.Allocator,
         state: *jamstate.JamState(params),
         validator_keys: []ValidatorKeySet,
-        current_slot: types.TimeSlot,
+        current_slot: types.TimeSlot = 0,
+
         last_header_hash: ?types.Hash,
         last_state_root: ?types.Hash,
 
@@ -72,7 +73,12 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             // Generate block seal for fallback mode
             const block_seal = try self.generateBlockSeal(author_keys.bandersnatch_keypair);
 
-            self.current_slot += 1;
+            // Ensure new slot is greater than parent
+            const new_slot = @max(
+                self.current_slot + 1,
+                self.state.tau.? + 1,
+            );
+            self.current_slot = new_slot;
 
             const header = types.Header{
                 .parent = if (self.last_header_hash) |hash| hash else std.mem.zeroes(types.Hash),
