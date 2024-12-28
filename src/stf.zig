@@ -75,21 +75,18 @@ pub fn stateTransition(
     // has been changed.
     try current_state.ensureFullyInitialized();
 
-    var new_state: JamState(params) = try JamState(params).init(allocator);
+    var state_delta: JamState(params) = try JamState(params).init(allocator);
+    errdefer state_delta.deinit(allocator);
 
     // Step 1: Time Transition (τ')
     // Purpose: Update the blockchain's internal time based on the new block's header.
     // This step ensures that the blockchain's concept of time progresses with each new block.
     // It's crucial for maintaining the temporal order of events and for time-based protocol rules.
-    if (current_state.tau) |tau| {
-        new_state.tau = try transitionTime(
-            allocator,
-            tau,
-            new_block.header,
-        );
-    } else {
-        return error.UninitializedTau;
-    }
+    state_delta.tau = try transitionTime(
+        allocator,
+        current_state.tau.?,
+        new_block.header,
+    );
 
     // Step 2: Recent History Transition (β')
     // Purpose: Update the recent history of blocks with information from the new block.
@@ -97,7 +94,7 @@ pub fn stateTransition(
     // - Validating new blocks (e.g., checking parent hashes)
     // - Handling short-term chain reorganizations
     // - Providing context for other protocol operations
-    new_state.beta = try transitionRecentHistory(
+    state_delta.beta = try transitionRecentHistory(
         params,
         allocator,
         &current_state.beta.?,
@@ -106,7 +103,7 @@ pub fn stateTransition(
 
     // NOTE: it seems safrole needs updated psi with offenders now
     // putting it here to make it work
-    new_state.psi = try current_state.psi.?.deepClone();
+    state_delta.psi = try current_state.psi.?.deepClone();
 
     // Step 3-5: Safrole Consensus Mechanism Transition (γ', η', ι', κ', λ')
     // Purpose: Update the consensus-related state components based on the Safrole rules.
@@ -127,7 +124,7 @@ pub fn stateTransition(
         &current_state.kappa.?,
         &current_state.lambda.?,
         &current_state.tau.?,
-        &new_state.psi.?,
+        &state_delta.psi.?, // offenders
         new_block,
     );
     // NOTE: only deinit the markers as we are using rest of allocated
@@ -135,16 +132,16 @@ pub fn stateTransition(
     defer safrole_transition.deinit_markers(allocator);
 
     // Extract state components from post_state
-    new_state.gamma = .{
+    state_delta.gamma = .{
         .k = safrole_transition.post_state.gamma_k,
         .a = safrole_transition.post_state.gamma_a,
         .s = safrole_transition.post_state.gamma_s,
         .z = safrole_transition.post_state.gamma_z,
     };
-    new_state.eta = safrole_transition.post_state.eta;
-    new_state.iota = safrole_transition.post_state.iota;
-    new_state.kappa = safrole_transition.post_state.kappa;
-    new_state.lambda = safrole_transition.post_state.lambda;
+    state_delta.eta = safrole_transition.post_state.eta;
+    state_delta.iota = safrole_transition.post_state.iota;
+    state_delta.kappa = safrole_transition.post_state.kappa;
+    state_delta.lambda = safrole_transition.post_state.lambda;
 
     // Store markers if present
     // if (safrole_transition.epoch_marker) |marker| {
@@ -253,7 +250,7 @@ pub fn stateTransition(
     //     &new_state.kappa,
     // );
 
-    return new_state;
+    return state_delta;
 }
 
 pub fn transitionTime(
@@ -321,8 +318,8 @@ pub fn transitionSafrole(
         .eta = current_eta.*,
         .lambda = current_lambda.*,
         .kappa = current_kappa.*,
-        .gamma_k = current_gamma.k,
         .iota = current_iota.*,
+        .gamma_k = current_gamma.k,
         .gamma_a = current_gamma.a,
         .gamma_s = current_gamma.s,
         .gamma_z = current_gamma.z,
@@ -334,9 +331,8 @@ pub fn transitionSafrole(
     return try safrole.transition(
         allocator,
         params,
-        safrole_state,
+        &safrole_state,
         input.slot,
-        // TODO: get the entropy out of the entropy source
         input.entropy,
         input.extrinsic,
         offenders,

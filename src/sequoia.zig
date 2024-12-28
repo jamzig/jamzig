@@ -72,6 +72,8 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             // Generate block seal for fallback mode
             const block_seal = try self.generateBlockSeal(author_keys.bandersnatch_keypair);
 
+            self.current_slot += 1;
+
             const header = types.Header{
                 .parent = if (self.last_header_hash) |hash| hash else std.mem.zeroes(types.Hash),
                 .parent_state_root = if (self.last_state_root) |root| root else std.mem.zeroes(types.Hash),
@@ -102,7 +104,6 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 .extrinsic = extrinsic,
             };
 
-            self.current_slot += 1;
             self.last_header_hash = try block.header.header_hash(params, self.allocator);
 
             // try self.state.merge(block); // Update state with new block

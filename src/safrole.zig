@@ -54,7 +54,7 @@ pub const Result = struct {
 pub fn transition(
     allocator: std.mem.Allocator,
     params: Params,
-    pre_state: safrole_types.State,
+    pre_state: *const safrole_types.State,
     slot: types.TimeSlot,
     bandersnatch_vrf_output: types.BandersnatchVrfOutput,
     ticket_extrinsic: types.TicketsExtrinsic,
@@ -164,16 +164,21 @@ pub fn transition(
         // replaced with zeroed keys.
         //
         // NOTE: using post_state to update post_state as we are moving pointers around
-        const lamda = post_state.lambda;
-        const kappa = post_state.kappa;
-        const gamma_k = post_state.gamma_k;
-        const iota = post_state.iota;
+        const lamda = post_state.lambda; // X
+        const kappa = post_state.kappa; // X
+        const gamma_k = post_state.gamma_k; // X
+        const iota = post_state.iota; // X
 
         post_state.kappa = gamma_k;
-        post_state.gamma_k = phiZeroOutOffenders(try iota.deepClone(allocator), offenders);
+        post_state.gamma_k = phiZeroOutOffenders(
+            // Need to deepClone, as we also need post_state.iota to
+            // stay unchanged
+            try iota.deepClone(allocator),
+            offenders,
+        );
         post_state.lambda = kappa;
+        // lambda is phasing out, so we can free it
         lamda.deinit(allocator);
-
         // post_state.iota seems to stay the same
 
         // gamma_z is the epoch’s root, a Bandersnatch ring root composed with the
@@ -198,7 +203,12 @@ pub fn transition(
         // Gamma_S
         // Free memory here since we are sure we are going to
         // update the value following.
+
+        // NOTE: take ownership as post_state.gamma_s is going to be updated
+        // but could fail. Which would trigger the errdefer which would
+        // lead to a double free.
         post_state.gamma_s.deinit(allocator);
+        _ = post_state.gamma_s.clearAndTakeOwnership();
 
         // (68) e′ = e + 1 ∧ m ≥ Y ∧ ∣γa∣ = E
         if (prev_epoch_slot >= params.ticket_submission_end_epoch_slot and
@@ -217,7 +227,7 @@ pub fn transition(
 
         // On an new epoch gamma_a will be reset to 0
         allocator.free(post_state.gamma_a);
-        post_state.gamma_a = try allocator.alloc(types.TicketBody, 0);
+        post_state.gamma_a = &[_]types.TicketBody{};
     }
 
     // GP0.3.6@(66) Combine previous entropy accumulator (η0) with new entropy
@@ -248,9 +258,13 @@ pub fn transition(
         epoch_marker = .{
             .entropy = post_state.eta[1],
             .tickets_entropy = post_state.eta[2], // TODO: check GP for what this is
+            // TODO: place this function on the validator set level.
             .validators = try extractBandersnatchKeys(allocator, post_state.gamma_k),
         };
     }
+    errdefer if (epoch_marker) |*marker| {
+        allocator.free(marker.validators);
+    };
 
     // (72)@GP0.3.6 e′ = e ∧ m < Y ≤ m′ ∧ ∣γa∣ = E
     // Not crossing an epoch boundary

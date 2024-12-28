@@ -440,6 +440,12 @@ pub const ValidatorSet = struct {
         };
     }
 
+    pub fn clearAndTakeOwnership(self: *@This()) []ValidatorData {
+        const current = self.validators;
+        self.validators = &[_]ValidatorData{};
+        return current;
+    }
+
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
         allocator.free(self.validators);
     }
@@ -458,49 +464,12 @@ pub const ValidatorSet = struct {
         };
     }
 
-    pub fn merge(self: *@This(), other: @This()) !void {
-        if (self.validators.len != other.validators.len) {
-            return error.LengthMismatch;
-        }
-        @memcpy(self.validators, other.validators);
+    pub fn merge(self: *@This(), other: *@This(), allocator: std.mem.Allocator) void {
+        std.debug.assert(self.validators.len == other.validators.len); // Assert lengths match in debug mode
+        self.deinit(allocator); // Free current
+        self.validators = other.clearAndTakeOwnership();
     }
 };
-
-pub fn ValidatorSetFixed(comptime validators_count: u32) type {
-    return struct {
-        validators: [validators_count]ValidatorData,
-
-        pub fn init() !@This() {
-            return @This(){ .validators = std.mem.zeroes([validators_count]ValidatorData) };
-        }
-
-        pub fn len(self: @This()) usize {
-            return self.validators.len;
-        }
-
-        pub fn items(self: @This()) []ValidatorData {
-            return self.validators;
-        }
-
-        pub fn deepClone(self: *@This(), allocator: std.mem.Allocator) *@This() {
-            var cloned = try allocator.create(@This());
-            cloned.validators = self.validators;
-
-            return cloned;
-        }
-
-        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-            allocator.destroy(self);
-        }
-
-        pub fn merge(self: *@This(), other: *@This()) !void {
-            if (self.validators.len != other.validators.len) {
-                return error.LengthMismatch;
-            }
-            std.mem.copyForwards(ValidatorData, &self.validators, &other.validators);
-        }
-    };
-}
 
 // Safrole types
 pub const Lambda = ValidatorSet;
@@ -518,6 +487,21 @@ pub const GammaS = union(enum) {
 
     pub fn keys_size(params: jam_params.Params) usize {
         return params.epoch_length;
+    }
+
+    pub fn clearAndTakeOwnership(self: *@This()) @This() {
+        const current = self.*;
+        switch (self.*) {
+            .tickets => |*tickets| tickets.* = &[_]TicketBody{},
+            .keys => |*keys| keys.* = &[_]BandersnatchPublic{},
+        }
+        return current;
+    }
+
+    pub fn merge(self: *@This(), other: *@This(), allocator: std.mem.Allocator) void {
+        self.deinit(allocator); // free current entry
+        // abandon ownership of other, and take it
+        self.* = other.clearAndTakeOwnership();
     }
 
     // TODO: make the const* to *
@@ -540,6 +524,7 @@ pub const GammaS = union(enum) {
     }
 };
 
+// TODO: make into struct
 pub const GammaA = []TicketBody;
 pub const GammaZ = BlsPublic;
 
