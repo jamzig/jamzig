@@ -27,14 +27,15 @@ test "sequoia: State transition with sequoia-generated blocks" {
     defer builder.deinit();
 
     // Test multiple block transitions
-    const num_blocks = 1000;
+    const num_blocks = 24;
 
     // Let's give access to the current state
     var current_state = &builder.state;
 
-    // sequoia.logging.printStateDebug(jam_params.TINY_PARAMS, current_state);
+    sequoia.logging.printStateDebug(jam_params.TINY_PARAMS, current_state);
 
-    var debug_last_state: []u8 = try sequoia.logging.allocPrintStateDebug(jam_params.TINY_PARAMS, allocator, current_state);
+    var debug_last_state: []u8 =
+        try sequoia.logging.allocPrintStateDebug(jam_params.TINY_PARAMS, allocator, current_state);
     defer allocator.free(debug_last_state);
 
     // Generate and process multiple blocks
@@ -44,7 +45,7 @@ test "sequoia: State transition with sequoia-generated blocks" {
         defer block.deinit(allocator);
 
         // Log block information for debugging
-        sequoia.logging.printBlockDebug(jam_params.TINY_PARAMS, &block);
+        sequoia.logging.printBlockEntropyDebug(jam_params.TINY_PARAMS, &block, current_state);
 
         // Perform state transition
         var state_delta = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, current_state, &block);

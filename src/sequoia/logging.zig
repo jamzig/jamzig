@@ -69,23 +69,51 @@ pub fn formatStateDebug(
     }
 }
 
+fn formatBlockHeaderDebug(
+    writer: anytype,
+    comptime params: jam_params.Params,
+    block: *const types.Block,
+) !void {
+    const block_hash = try block.header.header_hash(params, std.heap.page_allocator);
+    try writer.print("▶ Block: S#{d:0>4}({d:0>3}/{d:0>3}) author={d:0>4} hash=0x{s} pstate=0x{s}", .{
+        block.header.slot,
+        block.header.slot % params.epoch_length,
+        block.header.slot / params.epoch_length,
+        block.header.author_index,
+        std.fmt.fmtSliceHexLower(block_hash[0..2]),
+        std.fmt.fmtSliceHexLower(block.header.parent_state_root[0..2]),
+    });
+}
+
 // Format block debug information
 pub fn formatBlockDebug(
     writer: anytype,
     comptime params: jam_params.Params,
     block: *const types.Block,
 ) !void {
-    // Calculate block hash
-    const block_hash = try block.header.header_hash(params, std.heap.page_allocator);
+    try formatBlockHeaderDebug(writer, params, block);
+    try writer.print("\n", .{});
+}
 
-    try writer.print("▶ Block: slot={d} epoch={d} slot_in_epoch={d} author={d} hash=0x{s} state=0x{s}\n", .{
-        block.header.slot,
-        block.header.slot / params.epoch_length,
-        block.header.slot % params.epoch_length,
-        block.header.author_index,
-        std.fmt.fmtSliceHexLower(block_hash[0..4]),
-        std.fmt.fmtSliceHexLower(block.header.parent_state_root[0..4]),
-    });
+// Format block debug information with entropy from state
+pub fn formatBlockEntropyDebug(
+    writer: anytype,
+    comptime params: jam_params.Params,
+    block: *const types.Block,
+    state: *const jamstate.JamState(params),
+) !void {
+    try formatBlockHeaderDebug(writer, params, block);
+
+    // Add entropy information if available
+    if (state.eta) |eta| {
+        try writer.print(" η=[", .{});
+        for (eta[0..@min(4, eta.len)], 0..) |e, i| {
+            if (i > 0) try writer.print(",", .{});
+            try writer.print("{s}", .{std.fmt.fmtSliceHexLower(e[0..2])});
+        }
+        try writer.print("]", .{});
+    }
+    try writer.print("\n", .{});
 }
 
 // Format combined state and block debug information
@@ -112,6 +140,14 @@ pub fn printBlockDebug(
     block: *const types.Block,
 ) void {
     formatBlockDebug(std.io.getStdErr().writer(), params, block) catch return;
+}
+
+pub fn printBlockEntropyDebug(
+    comptime params: jam_params.Params,
+    block: *const types.Block,
+    state: *const jamstate.JamState(params),
+) void {
+    formatBlockEntropyDebug(std.io.getStdErr().writer(), params, block, state) catch return;
 }
 
 pub fn printStateTransitionDebug(
