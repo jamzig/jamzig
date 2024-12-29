@@ -440,7 +440,7 @@ pub const ValidatorSet = struct {
     /// Find the index of a validator by their public key
     /// key_type must be "bls", "bandersnatch", or "edwards"
     /// Returns error.ValidatorNotFound if the key doesn't match any validator
-    pub fn findValidatorIndex(self: ValidatorSet, comptime key_type: KeyType, key: anytype) !usize {
+    pub fn findValidatorIndex(self: ValidatorSet, comptime key_type: KeyType, key: anytype) !u16 {
         const field_name = comptime switch (key_type) {
             .BlsPublic => "bls",
             .BandersnatchPublic => "bandersnatch",
@@ -451,7 +451,7 @@ pub const ValidatorSet = struct {
             // std.debug.print("Comparing validator[{d}] key: {any} with search key: {any}\n", .{ i, &@field(validator, field_name), &key });
             if (std.mem.eql(u8, &@field(validator, field_name), &key)) {
                 // std.debug.print("Found validator[{d}] with key: {any}\n", .{ i, &key });
-                return i;
+                return @intCast(i);
             }
         }
         return error.ValidatorNotFound;

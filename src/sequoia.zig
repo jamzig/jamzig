@@ -289,7 +289,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         /// Build the next block in the chain with proper sealing
         pub fn buildNextBlock(self: *Self) !types.Block {
             // Select block producer for this slot
-            const author_index = try self.selectBlockProducer();
+            const author_index = try self.selectBlockAuthor();
             const author_keys = self.config.validator_keys[author_index];
 
             // Determine if we can use ticket-based sealing
@@ -357,14 +357,45 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             return block;
         }
 
-        fn selectBlockProducer(self: *Self) !types.ValidatorIndex {
-            // const slot = self.current_slot;
-            const entropy = if (self.state.eta) |eta| eta[2] else std.mem.zeroes(types.Entropy);
+        fn selectBlockAuthor(self: *Self) !types.ValidatorIndex {
+            if (self.state.gamma) |gamma| {
+                // Get index into gamma_s using current slot
+                const slot_in_epoch = self.current_slot % params.epoch_length;
 
-            // Convert entropy bytes to u64 and use it to select validator
-            const entropy_int = std.mem.readInt(u64, entropy[0..8], .big);
-            const index = @as(types.ValidatorIndex, @truncate(entropy_int % params.validators_count));
-            return index;
+                // Select based on gamma_s mode
+                switch (gamma.s) {
+                    .tickets => |_| {
+                        return error.TicketsNotImplementedYet;
+                    },
+                    .keys => |keys| {
+                        // Ensure we have the correct number of keys
+                        std.debug.assert(keys.len == params.epoch_length);
+
+                        // Encode the slot index into 4 bytes as per equation 6.26
+                        var encoded_slot: [4]u8 = undefined;
+                        std.mem.writeInt(u32, &encoded_slot, @intCast(slot_in_epoch), .little);
+
+                        // Get entropy from eta[2] for the fallback function as per equation 6.24
+                        var entropy = self.state.eta.?[2];
+
+                        // Hash entropy concatenated with encoded slot
+                        var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+                        hasher.update(&entropy);
+                        hasher.update(&encoded_slot);
+                        var hash: [32]u8 = undefined;
+                        hasher.final(&hash);
+
+                        // Take first 4 bytes for deterministic validator selection, as per equation 6.26
+                        const index_bytes = hash[0..4].*;
+                        const validator_index = std.mem.readInt(u32, &index_bytes, .little) % keys.len;
+                        const validator_key = keys[validator_index];
+
+                        // TODO: ensure this is kappa'
+                        return try self.state.kappa.?.findValidatorIndex(.BandersnatchPublic, validator_key);
+                    },
+                }
+            }
+            return error.NoValidatorSet;
         }
     };
 }
