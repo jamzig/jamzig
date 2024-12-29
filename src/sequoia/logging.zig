@@ -34,25 +34,15 @@ fn formatPublicKey(writer: anytype, key: types.BandersnatchPublic, index: usize)
     });
 }
 
-// Format state transition debug information to a writer
-pub fn formatStateTransitionDebug(
+// Format state debug information
+pub fn formatStateDebug(
     writer: anytype,
     comptime params: jam_params.Params,
     state: *const jamstate.JamState(params),
-    block: *const types.Block,
 ) !void {
-    try writer.print("\n▶ State Transition Debug\n", .{});
+    try writer.print("\n▶ State Debug\n", .{});
 
-    const current_epoch = block.header.slot / params.epoch_length;
-    const slot_in_epoch = block.header.slot % params.epoch_length;
-
-    try writer.print("\n→ Time Information\n", .{});
-    try writer.print("    Slot: {d}\n", .{block.header.slot});
-    try writer.print("    Current Epoch: {d}\n", .{current_epoch});
-    try writer.print("    Slot in Epoch: {d}\n", .{slot_in_epoch});
-    try writer.print("    Block Author Index: {d}\n", .{block.header.author_index});
-
-    try writer.print("\n→ Validator Sets\n", .{});
+    try writer.print("\n→ Validator Sets \n", .{});
     try formatValidatorSet(writer, state.kappa, "Active", "κ");
     try formatValidatorSet(writer, state.iota, "Upcoming", "ι");
     try formatValidatorSet(writer, state.lambda, "Historical", "λ");
@@ -90,11 +80,89 @@ pub fn formatStateTransitionDebug(
     }
 }
 
-// Wrapper function to print to stderr
+// Format block debug information
+pub fn formatBlockDebug(
+    writer: anytype,
+    comptime params: jam_params.Params,
+    block: *const types.Block,
+) !void {
+    try writer.print("\n▶ Block Debug\n", .{});
+
+    const current_epoch = block.header.slot / params.epoch_length;
+    const slot_in_epoch = block.header.slot % params.epoch_length;
+
+    try writer.print("\n→ Time Information\n", .{});
+    try writer.print("    Slot: {d}\n", .{block.header.slot});
+    try writer.print("    Current Epoch: {d}\n", .{current_epoch});
+    try writer.print("    Slot in Epoch: {d}\n", .{slot_in_epoch});
+    try writer.print("    Block Author Index: {d}\n", .{block.header.author_index});
+}
+
+// Format combined state and block debug information
+pub fn formatStateTransitionDebug(
+    writer: anytype,
+    comptime params: jam_params.Params,
+    state: *const jamstate.JamState(params),
+    block: *const types.Block,
+) !void {
+    try formatBlockDebug(writer, params, block);
+    try formatStateDebug(writer, params, state);
+}
+
+// Wrapper functions to print to stderr
+pub fn printStateDebug(
+    comptime params: jam_params.Params,
+    state: *const jamstate.JamState(params),
+) void {
+    formatStateDebug(std.io.getStdErr().writer(), params, state) catch return;
+}
+
+pub fn printBlockDebug(
+    comptime params: jam_params.Params,
+    block: *const types.Block,
+) void {
+    formatBlockDebug(std.io.getStdErr().writer(), params, block) catch return;
+}
+
 pub fn printStateTransitionDebug(
     comptime params: jam_params.Params,
     state: *const jamstate.JamState(params),
     block: *const types.Block,
 ) void {
     formatStateTransitionDebug(std.io.getStdErr().writer(), params, state, block) catch return;
+}
+
+// Variants that return allocated strings
+pub fn allocPrintStateDebug(
+    comptime params: jam_params.Params,
+    allocator: std.mem.Allocator,
+    state: *const jamstate.JamState(params),
+) ![]u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    errdefer list.deinit();
+    try formatStateDebug(list.writer(), params, state);
+    return list.toOwnedSlice();
+}
+
+pub fn allocPrintBlockDebug(
+    comptime params: jam_params.Params,
+    allocator: std.mem.Allocator,
+    block: *const types.Block,
+) ![]u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    errdefer list.deinit();
+    try formatBlockDebug(list.writer(), params, block);
+    return list.toOwnedSlice();
+}
+
+pub fn allocPrintStateTransitionDebug(
+    comptime params: jam_params.Params,
+    allocator: std.mem.Allocator,
+    state: *const jamstate.JamState(params),
+    block: *const types.Block,
+) ![]u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    errdefer list.deinit();
+    try formatStateTransitionDebug(list.writer(), params, state, block);
+    return list.toOwnedSlice();
 }
