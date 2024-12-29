@@ -8,6 +8,7 @@ const jamstate = @import("state.zig");
 const codec = @import("codec.zig");
 
 pub const logging = @import("sequoia/logging.zig");
+const trace = @import("tracing.zig").scoped(.sequoia);
 
 const Ed25519 = std.crypto.sign.Ed25519;
 const Bls12_381 = crypto.bls.Bls12_381;
@@ -22,6 +23,10 @@ pub fn GenesisConfig(params: jam_params.Params) type {
         params: jam_params.Params = params,
 
         pub fn buildWithRng(allocator: std.mem.Allocator, rng: *std.Random) !GenesisConfig(params) {
+            const span = trace.span(.build_with_rng);
+            defer span.deinit();
+            span.debug("Building genesis config with RNG", .{});
+
             var config: GenesisConfig(params) = undefined;
 
             // set some details
@@ -32,26 +37,42 @@ pub fn GenesisConfig(params: jam_params.Params) type {
             var validator_keys = try allocator.alloc(ValidatorKeySet, params.validators_count);
             errdefer allocator.free(validator_keys);
 
+            span.debug("Initializing {d} validator keys", .{params.validators_count});
             for (0..params.validators_count) |i| {
+                const key_span = span.child(.validator_key);
+                defer key_span.deinit();
+                key_span.debug("Generating key for validator {d}", .{i});
+
                 var key_seed: [32]u8 = undefined;
                 rng.bytes(&key_seed);
+                key_span.trace("Generated key seed: {any}", .{std.fmt.fmtSliceHexLower(&key_seed)});
+
                 validator_keys[i] = try ValidatorKeySet.init(key_seed);
             }
+
             config.validator_keys = validator_keys;
 
             // Generate initial entropy using ChaCha8 PRNG seeded with input seed
+            span.debug("Generating initial entropy values", .{});
             var entropy: [4][32]u8 = undefined;
             for (0..4) |i| {
                 rng.bytes(&entropy[i]);
+                span.trace("Generated entropy[{d}]: {any}", .{ i, std.fmt.fmtSliceHexLower(&entropy[i]) });
             }
+
             config.initial_entropy = entropy;
 
             return config;
         }
 
         pub fn buildJamState(self: *const GenesisConfig(params), allocator: std.mem.Allocator, _: *std.Random) !jamstate.JamState(params) {
+            const span = trace.span(.build_jam_state);
+            defer span.deinit();
+            span.debug("Building JAM state from genesis config", .{});
+
             // Initialize an empty genesis state with all components initialized
             var state = try jamstate.JamState(params).initGenesis(allocator);
+
             errdefer state.deinit(allocator);
 
             // Set the initial entropy values and timeslot from config
@@ -286,10 +307,16 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             return try prover.signIetf(message.items, &[_]u8{});
         }
 
-        /// Build the next block in the chain with proper sealing
+        // Build the next block in the chain with proper sealing
         pub fn buildNextBlock(self: *Self) !types.Block {
+            const span = trace.span(.build_next_block);
+            defer span.deinit();
+            span.debug("Building next block at slot {d}", .{self.current_slot + 1});
+
             // Select block producer for this slot
             const author_index = try self.selectBlockAuthor();
+            span.debug("Selected block author index: {d}", .{author_index});
+
             const author_keys = self.config.validator_keys[author_index];
 
             // Determine if we can use ticket-based sealing
@@ -358,16 +385,24 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn selectBlockAuthor(self: *Self) !types.ValidatorIndex {
+            const span = trace.span(.select_block_author);
+            defer span.deinit();
+            span.debug("Selecting block author for slot {d}", .{self.current_slot});
+
             if (self.state.gamma) |gamma| {
                 // Get index into gamma_s using current slot
                 const slot_in_epoch = self.current_slot % params.epoch_length;
+                span.debug("Slot in epoch: {d}", .{slot_in_epoch});
 
                 // Select based on gamma_s mode
                 switch (gamma.s) {
                     .tickets => |_| {
+                        span.debug("Ticket-based author selection not implemented", .{});
                         return error.TicketsNotImplementedYet;
                     },
                     .keys => |keys| {
+                        span.debug("Using fallback key-based author selection", .{});
+
                         // Ensure we have the correct number of keys
                         std.debug.assert(keys.len == params.epoch_length);
 
@@ -379,16 +414,22 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                         var entropy = self.state.eta.?[2];
 
                         // Hash entropy concatenated with encoded slot
+                        span.trace("Using entropy for hash: {any}", .{std.fmt.fmtSliceHexLower(&entropy)});
+                        span.trace("Using encoded slot: {any}", .{std.fmt.fmtSliceHexLower(&encoded_slot)});
+
                         var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
                         hasher.update(&entropy);
                         hasher.update(&encoded_slot);
                         var hash: [32]u8 = undefined;
                         hasher.final(&hash);
+                        span.trace("Generated hash: {any}", .{std.fmt.fmtSliceHexLower(&hash)});
 
                         // Take first 4 bytes for deterministic validator selection, as per equation 6.26
                         const index_bytes = hash[0..4].*;
                         const validator_index = std.mem.readInt(u32, &index_bytes, .little) % keys.len;
                         const validator_key = keys[validator_index];
+                        span.debug("Selected validator index {d} from key set", .{validator_index});
+                        span.trace("Using validator key: {any}", .{std.fmt.fmtSliceHexLower(&validator_key)});
 
                         // TODO: ensure this is kappa'
                         return try self.state.kappa.?.findValidatorIndex(.BandersnatchPublic, validator_key);
