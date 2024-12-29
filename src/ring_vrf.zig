@@ -103,7 +103,6 @@ pub const RingProver = struct {
         vrf_input: []const u8,
         aux_data: []const u8,
     ) Error!types.BandersnatchIetfVrfSignature {
-        // Adjust 'BandersnatchIetfVrfSignature' type to whatever you use to hold IETF VRF signatures.
         var signature: types.BandersnatchIetfVrfSignature = undefined;
         var signature_size: usize = 0;
 
@@ -121,8 +120,7 @@ pub const RingProver = struct {
             return Error.SigningFailed;
         }
 
-        // If you expect a specific signature size, you can assert or check it here:
-        // std.debug.assert(signature_size == @sizeOf(types.BandersnatchIetfVrfSignature));
+        std.debug.assert(signature_size == @sizeOf(types.BandersnatchIetfVrfSignature));
         return signature;
     }
 };

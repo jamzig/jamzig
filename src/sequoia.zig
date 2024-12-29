@@ -227,52 +227,50 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             self: *Self,
             header: *const types.Header,
             author_keys: ValidatorKeySet,
-            validator_set: types.ValidatorSet,
-            use_ticket: bool,
+            eta_prime: *const types.Eta,
+            gamma_s: *const types.GammaS,
         ) !types.BandersnatchVrfSignature {
-            var message = std.ArrayList(u8).init(self.allocator);
-            defer message.deinit();
+            // TODO: optimize, no allocation needed
+            var context = std.ArrayList(u8).init(self.allocator);
+            defer context.deinit();
 
-            if (use_ticket) {
-                // Ticket-based sealing
-                try message.appendSlice("jam_ticket_seal");
-                if (self.state.eta) |eta| {
-                    try message.appendSlice(eta[2][0..3]); // Use 3 bytes from current entropy
-                }
-            } else {
-                // Fallback sealing
-                try message.appendSlice("jam_fallback_seal");
+            const span = trace.span(.generate_seal_context);
+            defer span.deinit();
 
-                // Hash header and append to message
-                var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-                const encoded_header_unsigned = try codec.serializeAlloc(
-                    types.HeaderUnsigned,
-                    params,
-                    self.allocator,
-                    types.HeaderUnsigned.fromHeaderShared(header),
-                );
-                defer self.allocator.free(encoded_header_unsigned);
-                hasher.update(encoded_header_unsigned);
+            switch (gamma_s.*) {
+                .tickets => |tickets| {
+                    // Ticket-based sealing 6.15
+                    span.debug("Using ticket-based sealing", .{});
+                    const slot_index = header.slot % params.validators_count;
+                    const ticket = tickets[slot_index];
 
-                var hash: [32]u8 = undefined;
-                hasher.final(&hash);
-                try message.appendSlice(&hash);
+                    span.trace("Slot index: {d}, ticket attempt: {d}", .{ slot_index, ticket.attempt });
+
+                    try context.appendSlice("jam_ticket_seal");
+                    try context.appendSlice(&eta_prime[3]);
+                    try context.append(ticket.attempt);
+                },
+                .keys => {
+                    // Fallback sealing
+                    span.debug("Using fallback sealing", .{});
+                    span.trace("Using eta_prime[3]: {any}", .{std.fmt.fmtSliceHexLower(&eta_prime[3])});
+
+                    try context.appendSlice("jam_fallback_seal");
+                    try context.appendSlice(&eta_prime[3]);
+                },
             }
 
-            // TODO: we are doing this twice move this to outer scope, same with findValidatorIndex
-            const pubkeys = try validator_set.getBandersnatchPublicKeys(self.allocator);
-            defer self.allocator.free(pubkeys);
-
-            // Create VRF prover with the author's key
-            var prover = try ring_vrf.RingProver.init(
-                author_keys.bandersnatch_keypair.private_key,
-                pubkeys,
-                try validator_set.findValidatorIndex(.BandersnatchPublic, author_keys.bandersnatch_keypair.public_key),
+            // Create bandersnatch signature
+            const header_unsigned = try codec.serializeAlloc(
+                types.HeaderUnsigned,
+                params,
+                self.allocator,
+                types.HeaderUnsigned.fromHeaderShared(header),
             );
-            defer prover.deinit();
+            defer self.allocator.free(header_unsigned);
 
             // Generate and return the seal signature
-            return try prover.signIetf(message.items, &[_]u8{});
+            return try prover.signIetf(header_unsigned, context);
         }
 
         /// Generate the VRF entropy signature using the seal output
