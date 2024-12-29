@@ -27,12 +27,12 @@ test "sequoia: State transition with sequoia-generated blocks" {
     defer builder.deinit();
 
     // Test multiple block transitions
-    const num_blocks = 14;
+    const num_blocks = 1000;
 
     // Let's give access to the current state
     var current_state = &builder.state;
 
-    sequoia.logging.printStateDebug(jam_params.TINY_PARAMS, current_state);
+    // sequoia.logging.printStateDebug(jam_params.TINY_PARAMS, current_state);
 
     var debug_last_state: []u8 = try sequoia.logging.allocPrintStateDebug(jam_params.TINY_PARAMS, allocator, current_state);
     defer allocator.free(debug_last_state);
@@ -56,7 +56,7 @@ test "sequoia: State transition with sequoia-generated blocks" {
         const debug_current_state = try sequoia.logging.allocPrintStateDebug(jam_params.TINY_PARAMS, allocator, current_state);
         if (!std.mem.eql(u8, debug_last_state, debug_current_state)) {
             std.debug.print("\n\nState changes detected:\n", .{});
-            try diffz.debugPrintDiff(allocator, debug_last_state, debug_current_state);
+            try diffz.debugPrintDiffMarkChanges(allocator, debug_last_state, debug_current_state);
         }
         allocator.free(debug_last_state);
         debug_last_state = debug_current_state;

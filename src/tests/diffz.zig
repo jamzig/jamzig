@@ -2,7 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const diffz = @import("diffz");
 
-pub fn debugPrintDiff(allocator: Allocator, before: []const u8, after: []const u8) !void {
+/// Print the differences between two slices of bytes. Printing after with the changes marked in yellow.
+pub fn debugPrintDiffMarkChanges(allocator: Allocator, before: []const u8, after: []const u8) !void {
     const config = diffz{
         .diff_check_lines_over = 0, // Always use line mode
     };

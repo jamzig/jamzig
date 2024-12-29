@@ -75,16 +75,17 @@ pub fn formatBlockDebug(
     comptime params: jam_params.Params,
     block: *const types.Block,
 ) !void {
-    try writer.print("\n▶ Block Debug\n", .{});
+    // Calculate block hash
+    const block_hash = try block.header.header_hash(params, std.heap.page_allocator);
 
-    const current_epoch = block.header.slot / params.epoch_length;
-    const slot_in_epoch = block.header.slot % params.epoch_length;
-
-    try writer.print("\n→ Time Information\n", .{});
-    try writer.print("    Slot: {d}\n", .{block.header.slot});
-    try writer.print("    Current Epoch: {d}\n", .{current_epoch});
-    try writer.print("    Slot in Epoch: {d}\n", .{slot_in_epoch});
-    try writer.print("    Block Author Index: {d}\n", .{block.header.author_index});
+    try writer.print("▶ Block: slot={d} epoch={d} slot_in_epoch={d} author={d} hash=0x{s} state=0x{s}\n", .{
+        block.header.slot,
+        block.header.slot / params.epoch_length,
+        block.header.slot % params.epoch_length,
+        block.header.author_index,
+        std.fmt.fmtSliceHexLower(block_hash[0..4]),
+        std.fmt.fmtSliceHexLower(block.header.parent_state_root[0..4]),
+    });
 }
 
 // Format combined state and block debug information
