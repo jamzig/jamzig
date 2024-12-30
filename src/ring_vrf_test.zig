@@ -1,6 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
-const bandersnatch = @import("crypto/bandersnatch.zig");
+const Bandersnatch = @import("crypto/bandersnatch.zig").Bandersnatch;
 const ring_vrf = @import("ring_vrf.zig");
 
 fn timeFunction(comptime desc: []const u8, comptime func: anytype, args: anytype) @typeInfo(@TypeOf(func)).@"fn".return_type.? {
@@ -20,7 +20,7 @@ test "ring_signature.vrf: ring signature and VRF" {
     // Generate public keys for the ring
     for (0..RING_SIZE) |i| {
         const seed = std.mem.asBytes(&std.mem.nativeToLittle(usize, i));
-        const key_pair = try bandersnatch.Bandersnatch.KeyPair.create(seed);
+        const key_pair = try Bandersnatch.KeyPair.create(seed);
         ring[i] = key_pair.public_key.toBytes();
 
         // Print the first 3 keys in hex format
@@ -48,7 +48,7 @@ test "ring_signature.vrf: ring signature and VRF" {
 
     // Generate a key pair for the prover
     const prover_seed = std.mem.asBytes(&std.mem.nativeToLittle(usize, prover_key_index));
-    const prover_key_pair = try bandersnatch.Bandersnatch.KeyPair.create(prover_seed);
+    const prover_key_pair = try Bandersnatch.KeyPair.create(prover_seed);
 
     // Create prover
     var prover = try ring_vrf.RingProver.init(
@@ -85,7 +85,7 @@ test "verify.commitment: verify against commitment" {
     // Generate public keys for the ring
     for (0..RING_SIZE) |i| {
         const seed = std.mem.asBytes(&std.mem.nativeToLittle(usize, i));
-        const key_pair = try bandersnatch.Bandersnatch.KeyPair.create(seed);
+        const key_pair = try Bandersnatch.KeyPair.create(seed);
         ring[i] = key_pair.public_key.toBytes();
     }
 
@@ -100,7 +100,7 @@ test "verify.commitment: verify against commitment" {
 
     // Generate a key pair for the prover
     const prover_seed = std.mem.asBytes(&std.mem.nativeToLittle(usize, prover_key_index));
-    const prover_key_pair = try bandersnatch.Bandersnatch.KeyPair.create(prover_seed);
+    const prover_key_pair = try Bandersnatch.KeyPair.create(prover_seed);
 
     // Create prover
     var prover = try ring_vrf.RingProver.init(
@@ -159,7 +159,7 @@ test "fuzz: takes 10s" {
     for (0..RING_SIZE) |i| {
         var seed: [32]u8 = undefined;
         random.bytes(&seed);
-        const key_pair = try bandersnatch.Bandersnatch.KeyPair.create(&seed);
+        const key_pair = try Bandersnatch.KeyPair.create(&seed);
         ring_keypairs[i] = .{
             .public_key = key_pair.public_key.toBytes(),
             .private_key = key_pair.secret_key.toBytes(),
@@ -210,13 +210,13 @@ test "equivalence.paths: Test VRF output equivalence paths" {
     // Create a set of validator keys
     const ring_size: usize = 5;
     var public_keys: [ring_size]types.BandersnatchPublic = undefined;
-    var key_pairs: [ring_size]bandersnatch.Bandersnatch.KeyPair = undefined;
+    var key_pairs: [ring_size]Bandersnatch.KeyPair = undefined;
 
     // Generate keypairs for all validators
     for (0..ring_size) |i| {
         // Create deterministic seeds for reproducibility
         const seed = std.mem.asBytes(&std.mem.nativeToLittle(usize, i));
-        key_pairs[i] = try bandersnatch.Bandersnatch.KeyPair.create(seed);
+        key_pairs[i] = try Bandersnatch.KeyPair.create(seed);
         public_keys[i] = key_pairs[i].public_key.toBytes();
     }
 
@@ -237,7 +237,7 @@ test "equivalence.paths: Test VRF output equivalence paths" {
 
     // Path 1: Generate VRF output through Ring VRF
     // This is what we do when submitting a ticket
-    {
+    const ring_vrf_output = ticket_path: {
         std.debug.print("\n=== Path 1: Ring VRF ===\n", .{});
 
         // Create ticket context as per protocol
@@ -256,32 +256,40 @@ test "equivalence.paths: Test VRF output equivalence paths" {
             ticket_context.items);
 
         // Verify and get VRF output
-        const ring_vrf_output = try ring_verifier.verify(&[_]u8{}, ticket_context.items, &ring_signature);
+        const vrf_output = try ring_verifier.verify(&[_]u8{}, ticket_context.items, &ring_signature);
 
-        std.debug.print("Ring VRF output: {x}\n", .{ring_vrf_output});
-    }
+        std.debug.print("Ring VRF output: {x}\n", .{vrf_output});
+
+        break :ticket_path vrf_output;
+    };
 
     // Path 2: Generate VRF output through regular signature
     // This is what happens when we create the block seal
-    {
+    const fallback_vrf_output = fallback_path: {
         std.debug.print("\n=== Path 2: Regular Signature ===\n", .{});
 
-        // Create a mock unsigned header
-        const unsigned_header = [_]u8{1} ** 32; // Simplified for example
-
         // Create the seal signature
-        const seal_signature = try our_keypair.sign(&unsigned_header, &[_]u8{} // Empty context for seal
-        );
+        const prefix = "jam_ticket_fallback";
+        const eta_3 = [_]u8{0} ** 32; // Mock eta_3 value
+        //
+        var context = std.ArrayList(u8).init(allocator);
+        defer context.deinit();
+        try context.appendSlice(prefix);
+        try context.appendSlice(&eta_3);
 
+        // Generate VRF signature using our keypair
+        const vrf_signature = try our_keypair.sign(&[_]u8{}, context.items);
         // Extract VRF output using Y function
-        const seal_vrf_output = try seal_signature.outputHash();
+        const vrf_output = try vrf_signature.outputHash();
 
-        std.debug.print("Seal VRF output: {x}\n", .{seal_vrf_output});
+        std.debug.print("Fallback VRF output: {x}\n", .{vrf_output});
 
         // Verify the signature to confirm
-        const verify_output = try seal_signature.verify(&unsigned_header, &[_]u8{}, our_keypair.public_key);
+        // const _ = try vrf_signature.verify(&unsigned_header, &[_]u8{}, our_keypair.public_key);
 
         // These should be equal
-        try std.testing.expectEqualSlices(u8, &seal_vrf_output, &verify_output);
-    }
+        break :fallback_path vrf_output;
+    };
+
+    try std.testing.expectEqualSlices(u8, &ring_vrf_output, &fallback_vrf_output);
 }
