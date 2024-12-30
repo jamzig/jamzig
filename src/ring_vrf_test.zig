@@ -255,10 +255,12 @@ test "equivalence.paths: Test VRF output equivalence paths" {
         const ring_signature = try ring_prover.sign(&[_]u8{}, // Empty message for VRF
             ticket_context.items);
 
+        std.debug.print("Ring VRF Signature: {x}\n", .{ring_signature});
+
         // Verify and get VRF output
         const vrf_output = try ring_verifier.verify(&[_]u8{}, ticket_context.items, &ring_signature);
 
-        std.debug.print("Ring VRF output: {x}\n", .{vrf_output});
+        std.debug.print("Ring VRF output({d}): {x}\n", .{ vrf_output.len, vrf_output });
 
         break :ticket_path vrf_output;
     };
@@ -279,10 +281,12 @@ test "equivalence.paths: Test VRF output equivalence paths" {
 
         // Generate VRF signature using our keypair
         const vrf_signature = try our_keypair.sign(&[_]u8{}, context.items);
+        const vrf_signature_raw = vrf_signature.toBytes();
+        std.debug.print("Fallback VRF Signature({d}): {x}\n", .{ @sizeOf(@TypeOf(vrf_signature_raw)), vrf_signature_raw });
+
         // Extract VRF output using Y function
         const vrf_output = try vrf_signature.outputHash();
-
-        std.debug.print("Fallback VRF output: {x}\n", .{vrf_output});
+        std.debug.print("Ring VRF output({d}): {x}\n", .{ vrf_output.len, vrf_output });
 
         // Verify the signature to confirm
         // const _ = try vrf_signature.verify(&unsigned_header, &[_]u8{}, our_keypair.public_key);

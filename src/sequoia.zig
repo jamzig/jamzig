@@ -201,88 +201,91 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             self.state.deinit(self.allocator);
         }
 
-        fn generateVrfOutputFallback(self: *Self, author_keys: *const ValidatorKeySet, eta_prime: *const types.Eta) !types.BandersnatchVrfOutput {
-            // Generate VRF output using fallback function
-            var context = std.ArrayList(u8).init(self.allocator);
-            defer context.deinit();
+        fn generateVrfOutputFallback(author_keys: *const ValidatorKeySet, eta_prime: *const types.Eta) !types.BandersnatchVrfOutput {
+            const span = trace.span(.generate_vrf_output_fallback);
+            defer span.deinit();
+            span.debug("Generating VRF output using fallback function", .{});
 
-            try context.appendSlice("jam_vrf_fallback");
-            try context.appendSlice(eta_prime[3]);
+            const context = "jam_fallback_seal" ++ eta_prime[3];
+            span.trace("Using eta_prime[3]: {any}", .{std.fmt.fmtSliceHexLower(&eta_prime[3])});
+            span.trace("Using context: {s}", .{context});
 
+            span.debug("Signing with Bandersnatch keypair", .{});
+            span.trace("Using public key: {any}", .{std.fmt.fmtSliceHexLower(&author_keys.bandersnatch_keypair.public_key.toBytes())});
             const signature = try author_keys.bandersnatch_keypair
-                .sign(&[_]u8{}, context.items);
+                .sign(&[_]u8{}, context);
+            span.trace("Generated signature: {s}", .{std.fmt.fmtSliceHexLower(&signature.toBytes())});
 
-            return signature.outputHash();
+            const output = try signature.outputHash();
+            span.debug("Generated VRF output", .{});
+            span.trace("VRF output: {s}", .{std.fmt.fmtSliceHexLower(&output)});
+
+            return output;
+        }
+
+        fn generateEntropySourceFallback(
+            author_keys: ValidatorKeySet,
+            eta_prime: *const types.Eta,
+        ) !Bandersnatch.Signature {
+            const span = trace.span(.generate_entropy_source_fallback);
+            defer span.deinit();
+            span.debug("Generating entropy source using fallback method", .{});
+
+            span.debug("Generating VRF output", .{});
+            const vrf_output = try generateVrfOutputFallback(&author_keys, eta_prime);
+            span.trace("VRF output: {any}", .{std.fmt.fmtSliceHexLower(&vrf_output)});
+
+            // Now sign with our Bandersnatch keypair
+            const context = "jam_entropy" ++ vrf_output;
+            span.trace("Signing context: {s}", .{context});
+            span.trace("Using public key: {any}", .{std.fmt.fmtSliceHexLower(&author_keys.bandersnatch_keypair.public_key.toBytes())});
+
+            span.debug("Generating Bandersnatch signature", .{});
+            const entropy_source = try author_keys.bandersnatch_keypair
+                .sign(&[_]u8{}, context);
+
+            span.debug("Generated entropy source signature", .{});
+            span.trace("Entropy source bytes: {any}", .{std.fmt.fmtSliceHexLower(&entropy_source.toBytes())});
+
+            return entropy_source;
         }
 
         /// Generate the block seal signature using either ticket or fallback mode
-        fn generateBlockSeal(
-            self: *Self,
-            header: *const types.Header,
+        fn generateBlockSealFallback(
+            allocator: std.mem.Allocator,
+            header: *const types.Header, // Assumes entropy_source is already set
             author_keys: ValidatorKeySet,
             eta_prime: *const types.Eta,
-            gamma_s: *const types.GammaS,
         ) !Bandersnatch.Signature {
-            // TODO: optimize, no allocation needed
-            var context = std.ArrayList(u8).init(self.allocator);
-            defer context.deinit();
-
-            const span = trace.span(.generate_seal_context);
+            const span = trace.span(.generate_seal_fallback);
             defer span.deinit();
+            span.debug("Generating block seal using fallback method", .{});
 
-            switch (gamma_s.*) {
-                .tickets => |tickets| {
-                    // Ticket-based sealing 6.15
-                    span.debug("Using ticket-based sealing", .{});
-                    const slot_index = header.slot % params.validators_count;
-                    const ticket = tickets[slot_index];
-
-                    span.trace("Slot index: {d}, ticket attempt: {d}", .{ slot_index, ticket.attempt });
-
-                    try context.appendSlice("jam_ticket_seal");
-                    try context.appendSlice(&eta_prime[3]);
-                    try context.append(ticket.attempt);
-                },
-                .keys => {
-                    // Fallback sealing
-                    span.debug("Using fallback sealing", .{});
-                    span.trace("Using eta_prime[3]: {any}", .{std.fmt.fmtSliceHexLower(&eta_prime[3])});
-
-                    try context.appendSlice("jam_fallback_seal");
-                    try context.appendSlice(&eta_prime[3]);
-                },
-            }
+            const context = "jam_fallback_seal" ++ eta_prime[3];
+            span.trace("Using eta_prime[3]: {any}", .{std.fmt.fmtSliceHexLower(&eta_prime[3])});
+            span.trace("Using context: {s}", .{context});
+            span.trace("Using author public key: {any}", .{std.fmt.fmtSliceHexLower(&author_keys.bandersnatch_keypair.public_key.toBytes())});
 
             // Create bandersnatch signature
+            span.debug("Serializing unsigned header", .{});
             const header_unsigned = try codec.serializeAlloc(
                 types.HeaderUnsigned,
                 params,
-                self.allocator,
+                allocator,
                 types.HeaderUnsigned.fromHeaderShared(header),
             );
-            defer self.allocator.free(header_unsigned);
+            defer allocator.free(header_unsigned);
+            span.trace("Unsigned header bytes: {any}", .{std.fmt.fmtSliceHexLower(header_unsigned)});
 
             // Generate and return the seal signature
-            return author_keys.bandersnatch_keypair
-                .sign(header_unsigned, context.items);
-        }
+            span.debug("Generating Bandersnatch signature", .{});
+            const signature = try author_keys.bandersnatch_keypair
+                .sign(header_unsigned, context);
 
-        /// Generate the VRF entropy signature using the seal output
-        fn generateEntropySignature(
-            self: *Self,
-            author_keys: ValidatorKeySet,
-            seal_output: Bandersnatch.Signature,
-        ) !Bandersnatch.Signature {
-            var context = std.ArrayList(u8).init(self.allocator);
-            defer context.deinit();
+            span.debug("Generated block seal signature", .{});
+            span.trace("Seal signature bytes: {any}", .{std.fmt.fmtSliceHexLower(&signature.toBytes())});
 
-            // Construct entropy message
-            try context.appendSlice("jam_entropy");
-            try context.appendSlice(&try seal_output.outputHash()); // Y function
-
-            // Create VRF prover
-            return try author_keys.bandersnatch_keypair
-                .sign(&[_]u8{}, context.items);
+            return signature;
         }
 
         // Build the next block in the chain with proper sealing
@@ -304,6 +307,11 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             );
             self.current_slot = new_slot;
 
+            // TODO: Get eta_prime for this slot
+            const eta_prime = &self.state.eta.?;
+
+            const entropy_source = try generateEntropySourceFallback(author_keys, eta_prime);
+
             // Create initial header without signatures
             var header = types.Header{
                 .parent = if (self.last_header_hash) |hash| hash else std.mem.zeroes(types.Hash),
@@ -314,24 +322,18 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 .epoch_mark = null,
                 .tickets_mark = null,
                 .offenders_mark = &[_]types.Ed25519Public{},
-                .entropy_source = undefined,
+                .entropy_source = entropy_source.toBytes(),
                 .seal = undefined,
             };
 
             // Generate block seal
-            const block_seal = try self.generateBlockSeal(
+            const block_seal = try generateBlockSealFallback(
+                self.allocator,
                 &header,
                 author_keys,
-                &self.state.eta.?,
-                &self.state.gamma.?.s,
+                eta_prime,
             );
             header.seal = block_seal.toBytes();
-
-            // Generate entropy signature using seal output
-            header.entropy_source = (try self.generateEntropySignature(
-                author_keys,
-                block_seal,
-            )).toBytes();
 
             // Create empty extrinsic for now
             const extrinsic = types.Extrinsic{
@@ -409,7 +411,9 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                         span.trace("Using validator key: {any}", .{std.fmt.fmtSliceHexLower(&validator_key)});
 
                         // TODO: ensure this is kappa'
-                        return try self.state.kappa.?.findValidatorIndex(.BandersnatchPublic, validator_key);
+                        const found_index = try self.state.kappa.?.findValidatorIndex(.BandersnatchPublic, validator_key);
+                        span.trace("Found validator at kappa index: {d}", .{found_index});
+                        return found_index;
                     },
                 }
             }
