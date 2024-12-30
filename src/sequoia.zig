@@ -179,6 +179,8 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
         rng: *std.Random,
 
+        validator_tickets: [params.validators_count]u8,
+
         /// Initialize the BlockBuilder with required state
         pub fn init(
             allocator: std.mem.Allocator,
@@ -193,6 +195,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 .last_header_hash = null,
                 .last_state_root = null,
                 .rng = rng,
+                .validator_tickets = std.mem.zeroes([params.validators_count]u8),
             };
         }
 
@@ -313,7 +316,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             self.current_slot = new_slot;
 
             const current_epoch = self.current_slot / params.epoch_length;
-            const current_slot_position = self.current_slot % params.epoch_length;
+            const current_epoch_slot = self.current_slot % params.epoch_length;
 
             // Header's epoch marker (He): empty, or for first block in epoch:
             // - Next epoch randomness
@@ -330,7 +333,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
             var tickets_mark: ?types.TicketsMark = null;
             if (current_epoch == previous_epoch //
-            and current_slot_position > params.ticket_submission_end_epoch_slot //
+            and current_epoch_slot > params.ticket_submission_end_epoch_slot //
             and previous_slot_position <= params.ticket_submission_end_epoch_slot //
             and self.state.gamma.?.a.len == params.epoch_length //
             ) {
@@ -366,9 +369,22 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             );
             header.seal = block_seal.toBytes();
 
-            // Create empty extrinsic for now
+            // Reset ticket counts at epoch boundary
+            if (current_epoch > previous_epoch) {
+                span.debug("New epoch - resetting validator ticket counts", .{});
+                self.validator_tickets = std.mem.zeroes([params.validators_count]u8);
+            }
+
+            // Only generate tickets before submission end slot
+            var tickets = types.TicketsExtrinsic{ .data = &[_]types.TicketEnvelope{} };
+            if (current_epoch_slot < params.ticket_submission_end_epoch_slot) {
+                tickets = .{ .data = try self.generateTickets(&self.state.eta.?) }; // TODO: eta_prime
+            } else {
+                span.debug("Outside ticket submission period", .{});
+            }
+
             const extrinsic = types.Extrinsic{
-                .tickets = .{ .data = &[_]types.TicketEnvelope{} },
+                .tickets = tickets,
                 .preimages = .{ .data = &[_]types.Preimage{} },
                 .guarantees = .{ .data = &[_]types.ReportGuarantee{} },
                 .assurances = .{ .data = &[_]types.AvailAssurance{} },
@@ -392,6 +408,118 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             span.trace("block:\n{s}", .{types.fmt.format(&block)});
 
             return block;
+        }
+
+        const GeneratedTicket = struct {
+            envelope: types.TicketEnvelope,
+            id: types.OpaqueHash,
+        };
+
+        fn generateTickets(
+            self: *Self,
+            eta_prime: *const types.Eta,
+        ) ![]types.TicketEnvelope {
+            const span = trace.span(.generate_tickets);
+            defer span.deinit();
+            span.debug("Generating tickets", .{});
+
+            var generated = std.ArrayList(GeneratedTicket).init(self.allocator);
+            defer generated.deinit();
+
+            const gamma_k_keys = try self.state.gamma.?.k.getBandersnatchPublicKeys(self.allocator);
+            defer self.allocator.free(gamma_k_keys);
+
+            // For each validator, randomly decide if they submit a ticket this block
+            for (self.config.validator_keys, 0..) |validator, idx| {
+                // Skip if validator already submitted max tickets
+                if (self.validator_tickets[idx] >= params.max_ticket_entries_per_validator) {
+                    span.trace("Validator {d} already submitted max tickets", .{idx});
+                    continue;
+                }
+
+                // ~20% chance to submit a ticket per block if eligible
+                if (self.rng.intRangeAtMost(u8, 0, 10) < 2) {
+                    span.debug("Generating ticket for validator {d}", .{idx});
+
+                    // Create prover for this validator
+                    var prover = try ring_vrf.RingProver.init(
+                        validator.bandersnatch_keypair.secret_key.toBytes(),
+                        gamma_k_keys,
+                        idx,
+                    );
+                    defer prover.deinit();
+
+                    // Sign with prover to generate ticket
+                    const entry_idx = self.validator_tickets[idx];
+                    const vrf_input = "jam_ticket_seal" ++ eta_prime[2] ++ [_]u8{entry_idx};
+                    const vrf_proof = try prover.sign(
+                        vrf_input,
+                        &[_]u8{},
+                    );
+
+                    span.trace("Ticket generation values:", .{});
+                    span.trace("  Validator index: {d}", .{idx});
+                    span.trace("  Attempt number: {d}", .{entry_idx});
+
+                    span.trace("  Ring size: {d}", .{params.validators_count});
+                    span.trace("  Ring values:", .{});
+                    span.trace("    Gamma_z: {s}", .{std.fmt.fmtSliceHexLower(&self.state.gamma.?.z)});
+                    span.trace("  VRF input:", .{});
+                    span.trace("    Context: {s}", .{vrf_input});
+                    span.trace("    Eta[2]: {s}", .{std.fmt.fmtSliceHexLower(&eta_prime[2])});
+                    span.trace("  VRF output:", .{});
+                    span.trace("    Proof: {s}", .{std.fmt.fmtSliceHexLower(&vrf_proof)});
+                    span.trace("    Public key: {s}", .{std.fmt.fmtSliceHexLower(&validator.bandersnatch_keypair.public_key.toBytes())});
+
+                    const ticket_id = try ring_vrf.verifyRingSignatureAgainstCommitment(
+                        self.state.gamma.?.z,
+                        params.validators_count,
+                        vrf_input,
+                        &[_]u8{},
+                        &vrf_proof,
+                    );
+
+                    // Create and append ticket
+                    const ticket = types.TicketEnvelope{
+                        .attempt = entry_idx,
+                        .signature = vrf_proof,
+                    };
+                    try generated.append(.{ .envelope = ticket, .id = ticket_id });
+
+                    // Increment ticket count for this validator
+                    self.validator_tickets[idx] += 1;
+
+                    // Only include up to K tickets per block
+                    if (generated.items.len >= params.max_ticket_entries_per_validator) {
+                        span.debug("Reached max tickets per block ({d})", .{params.max_ticket_entries_per_validator});
+                        break;
+                    }
+                }
+            }
+
+            // Sort tickets by VRF output (ticket identifier)
+            // TODO: most effective algo?
+            if (generated.items.len > 0) {
+                span.debug("Sorting {d} tickets by VRF output", .{generated.items.len});
+                std.sort.insertion(
+                    GeneratedTicket,
+                    generated.items,
+                    {},
+                    struct {
+                        pub fn lessThan(_: void, a: GeneratedTicket, b: GeneratedTicket) bool {
+                            return std.mem.lessThan(u8, &a.id, &b.id);
+                        }
+                    }.lessThan,
+                );
+            }
+
+            // TODO: this could be avoided
+            var tickets = try std.ArrayList(types.TicketEnvelope).initCapacity(self.allocator, generated.items.len);
+            for (generated.items) |ticket| {
+                try tickets.append(ticket.envelope);
+            }
+
+            return tickets.toOwnedSlice();
         }
 
         fn selectBlockAuthor(self: *Self) !types.ValidatorIndex {

@@ -138,6 +138,17 @@ pub fn transition(
 
         // Check for duplicates in gamma_a using binary search
         // This is already efficient (O(log n)) and doesn't need modification
+        // Verify gamma_a is sorted (debug only)
+        // TODO: move this into a module for debug level assertions
+        std.debug.assert(blk: {
+            if (pre_state.gamma_a.len <= 1) break :blk true;
+            var i: usize = 1;
+            while (i < pre_state.gamma_a.len) : (i += 1) {
+                if (!std.mem.lessThan(u8, &pre_state.gamma_a[i - 1].id, &pre_state.gamma_a[i].id)) break :blk false;
+            }
+            break :blk true;
+        });
+
         const position = std.sort.binarySearch(types.TicketBody, pre_state.gamma_a, current_ticket, struct {
             fn order(context: types.TicketBody, item: types.TicketBody) std.math.Order {
                 return std.mem.order(u8, &context.id, &item.id);
