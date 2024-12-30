@@ -345,6 +345,7 @@ fn verifyTicketEnvelope(allocator: std.mem.Allocator, ring_size: usize, gamma_z:
     const empty_aux_data = [_]u8{};
 
     for (extrinsic, 0..) |extr, i| {
+        // TODO: rewrite
         const X_t = [_]u8{ 'j', 'a', 'm', '_', 't', 'i', 'c', 'k', 'e', 't', '_', 's', 'e', 'a', 'l' };
 
         const vrf_input = X_t ++ n2 ++ [_]u8{extr.attempt};

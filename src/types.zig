@@ -601,7 +601,8 @@ pub const HeaderUnsigned = struct {
     entropy_source: BandersnatchVrfSignature,
 
     /// Creates HeaderUnsigned from Header, excluding the seal.
-    /// Used for encoding to bytes without allocations.
+    /// Used for encoding to bytes without allocations. Shares
+    /// ownership with the original header.
     pub fn fromHeaderShared(header: *const Header) @This() {
         return @This(){
             .parent = header.parent,

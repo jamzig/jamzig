@@ -201,6 +201,20 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             self.state.deinit(self.allocator);
         }
 
+        fn generateVrfOutputFallback(self: *Self, author_keys: *const ValidatorKeySet, eta_prime: *const types.Eta) !types.BandersnatchVrfOutput {
+            // Generate VRF output using fallback function
+            var context = std.ArrayList(u8).init(self.allocator);
+            defer context.deinit();
+
+            try context.appendSlice("jam_vrf_fallback");
+            try context.appendSlice(eta_prime[3]);
+
+            const signature = try author_keys.bandersnatch_keypair
+                .sign(&[_]u8{}, context.items);
+
+            return signature.outputHash();
+        }
+
         /// Generate the block seal signature using either ticket or fallback mode
         fn generateBlockSeal(
             self: *Self,
