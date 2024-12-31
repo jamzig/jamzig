@@ -391,6 +391,15 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             );
             header.seal = block_seal.toBytes();
 
+            if (current_epoch > previous_epoch) {
+                // Swap ticket registry maps, and clear the current one
+                span.debug("New epoch - swapping ticket registries and clearing current one", .{});
+                const previous = self.ticket_registry_previous;
+                self.ticket_registry_previous = self.ticket_registry_current;
+                self.ticket_registry_current = previous;
+                self.ticket_registry_current.clearRetainingCapacity();
+            }
+
             var tickets = types.TicketsExtrinsic{ .data = &[_]types.TicketEnvelope{} };
             if (current_epoch_slot < params.ticket_submission_end_epoch_slot) {
                 tickets = .{ .data = try self.generateTickets(&self.state.eta.?) }; // TODO: eta_prime
@@ -403,12 +412,6 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             if (current_epoch > previous_epoch) {
                 span.debug("New epoch - resetting validator ticket counts", .{});
                 self.validator_tickets = std.mem.zeroes([params.validators_count]u8);
-
-                // Swap ticket registry maps, and clear the current one
-                const previous = self.ticket_registry_previous;
-                self.ticket_registry_previous = self.ticket_registry_current;
-                self.ticket_registry_current = previous;
-                self.ticket_registry_current.clearRetainingCapacity();
             }
 
             const extrinsic = types.Extrinsic{
@@ -581,6 +584,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
                             // Validate the entry index matches
                             if (registry_entry.entry_index == ticket.attempt) {
+                                span.err("Ticket attempt index mismatch", .{});
                                 return registry_entry.validator_index;
                             }
                         }
