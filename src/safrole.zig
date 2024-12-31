@@ -365,8 +365,13 @@ fn verifyTicketEnvelope(
     const empty_aux_data = [_]u8{};
 
     for (extrinsic, 0..) |extr, i| {
+        span.trace("Verifying ticket envelope [{d}]:", .{i});
+        span.trace("  Attempt: {d}", .{extr.attempt});
+        span.trace("  Signature: {s}", .{std.fmt.fmtSliceHexLower(&extr.signature)});
+
         // TODO: rewrite
         const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
+
         const output = try ring_vrf.verifyRingSignatureAgainstCommitment(
             gamma_z,
             ring_size,
@@ -374,6 +379,7 @@ fn verifyTicketEnvelope(
             &empty_aux_data,
             &extr.signature,
         );
+        span.trace("  VRF output (ticket ID): {s}", .{std.fmt.fmtSliceHexLower(&output)});
 
         tickets[i].attempt = extr.attempt;
         tickets[i].id = output;

@@ -369,18 +369,18 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             );
             header.seal = block_seal.toBytes();
 
-            // Reset ticket counts at epoch boundary
-            if (current_epoch > previous_epoch) {
-                span.debug("New epoch - resetting validator ticket counts", .{});
-                self.validator_tickets = std.mem.zeroes([params.validators_count]u8);
-            }
-
-            // Only generate tickets before submission end slot
             var tickets = types.TicketsExtrinsic{ .data = &[_]types.TicketEnvelope{} };
             if (current_epoch_slot < params.ticket_submission_end_epoch_slot) {
                 tickets = .{ .data = try self.generateTickets(&self.state.eta.?) }; // TODO: eta_prime
             } else {
                 span.debug("Outside ticket submission period", .{});
+            }
+
+            // Reset ticket counts at epoch boundary, next blocks validators
+            // will be able to submit tickets
+            if (current_epoch > previous_epoch) {
+                span.debug("New epoch - resetting validator ticket counts", .{});
+                self.validator_tickets = std.mem.zeroes([params.validators_count]u8);
             }
 
             const extrinsic = types.Extrinsic{
