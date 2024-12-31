@@ -313,6 +313,68 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             return signature;
         }
 
+        fn generateEntropySourceTicket(
+            author_keys: ValidatorKeySet,
+            ticket: types.TicketBody,
+        ) !Bandersnatch.Signature {
+            const span = trace.span(.generate_entropy_source_ticket);
+            defer span.deinit();
+            span.debug("Generating entropy source using fallback method", .{});
+
+            // Now sign with our Bandersnatch keypair
+            const context = "jam_entropy" ++ ticket.id;
+            span.trace("Signing context: {s}", .{context});
+            span.trace("Using public key: {any}", .{std.fmt.fmtSliceHexLower(&author_keys.bandersnatch_keypair.public_key.toBytes())});
+
+            span.debug("Generating Bandersnatch signature", .{});
+            const entropy_source = try author_keys.bandersnatch_keypair
+                .sign(&[_]u8{}, context);
+
+            span.debug("Generated entropy source signature", .{});
+            span.trace("Entropy source bytes: {any}", .{std.fmt.fmtSliceHexLower(&entropy_source.toBytes())});
+
+            return entropy_source;
+        }
+
+        /// Generate the block seal signature using either ticket or fallback mode
+        fn generateBlockSealTickets(
+            allocator: std.mem.Allocator,
+            header: *const types.Header, // Assumes entropy_source is already set
+            author_keys: ValidatorKeySet,
+            eta_prime: *const types.Eta,
+            ticket: types.TicketBody,
+        ) !Bandersnatch.Signature {
+            const span = trace.span(.generate_seal_tickets);
+            defer span.deinit();
+            span.debug("Generating block seal using tickets method", .{});
+
+            const context = "jam_ticket_seal" ++ eta_prime[3] ++ [_]u8{ticket.attempt};
+            span.trace("Using eta_prime[3]: {any}", .{std.fmt.fmtSliceHexLower(&eta_prime[3])});
+            span.trace("Using context: {s}", .{context});
+            span.trace("Using author public key: {any}", .{std.fmt.fmtSliceHexLower(&author_keys.bandersnatch_keypair.public_key.toBytes())});
+
+            // Create bandersnatch signature
+            span.debug("Serializing unsigned header", .{});
+            const header_unsigned = try codec.serializeAlloc(
+                types.HeaderUnsigned,
+                params,
+                allocator,
+                types.HeaderUnsigned.fromHeaderShared(header),
+            );
+            defer allocator.free(header_unsigned);
+            span.trace("Unsigned header bytes: {any}", .{std.fmt.fmtSliceHexLower(header_unsigned)});
+
+            // Generate and return the seal signature
+            span.debug("Generating Bandersnatch signature", .{});
+            const signature = try author_keys.bandersnatch_keypair
+                .sign(header_unsigned, context);
+
+            span.debug("Generated block seal signature", .{});
+            span.trace("Seal signature bytes: {any}", .{std.fmt.fmtSliceHexLower(&signature.toBytes())});
+
+            return signature;
+        }
+
         // Build the next block in the chain with proper sealing
         pub fn buildNextBlock(self: *Self) !types.Block {
             const span = trace.span(.build_next_block);
@@ -366,7 +428,10 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             // TODO: Get eta_prime for this slot
             const eta_prime = &self.state.eta.?;
 
-            const entropy_source = try generateEntropySourceFallback(author_keys, eta_prime);
+            const entropy_source = switch (self.state.gamma.?.s) {
+                .tickets => |tickets| try generateEntropySourceTicket(author_keys, tickets[current_epoch_slot]),
+                .keys => try generateEntropySourceFallback(author_keys, eta_prime),
+            };
 
             // Create initial header without signatures
             var header = types.Header{
@@ -383,12 +448,21 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             };
 
             // Generate block seal
-            const block_seal = try generateBlockSealFallback(
-                self.allocator,
-                &header,
-                author_keys,
-                eta_prime,
-            );
+            const block_seal = switch (self.state.gamma.?.s) {
+                .keys => try generateBlockSealFallback(
+                    self.allocator,
+                    &header,
+                    author_keys,
+                    eta_prime,
+                ),
+                .tickets => |tickets| try generateBlockSealTickets(
+                    self.allocator,
+                    &header,
+                    author_keys,
+                    eta_prime,
+                    tickets[current_epoch_slot],
+                ),
+            };
             header.seal = block_seal.toBytes();
 
             if (current_epoch > previous_epoch) {
@@ -560,6 +634,69 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             return tickets.toOwnedSlice();
         }
 
+        fn selectBlockAuthorFromTickets(self: *Self, tickets: []const types.TicketBody, slot_in_epoch: u64) !types.ValidatorIndex {
+            const span = trace.span(.select_block_author_tickets);
+            defer span.deinit();
+            span.debug("Using ticket-based author selection for slot {d}", .{slot_in_epoch});
+
+            // Get ticket for this slot
+            const ticket = tickets[slot_in_epoch];
+
+            // Look up the validator who created this ticket
+            if (self.ticket_registry_previous.get(ticket.id)) |registry_entry| {
+                span.debug("Found ticket registry entry - validator: {d}, attempt: {d}", .{ registry_entry.validator_index, registry_entry.entry_index });
+
+                // Validate the entry index matches
+                if (registry_entry.entry_index == ticket.attempt) {
+                    span.err("Ticket attempt index mismatch", .{});
+                    return registry_entry.validator_index;
+                }
+            }
+
+            // No valid author found
+            span.err("No validator found for ticket", .{});
+            return error.NoValidatorFound;
+        }
+
+        fn selectBlockAuthorFromKeys(self: *Self, keys: []const types.BandersnatchPublic, slot_in_epoch: u64) !types.ValidatorIndex {
+            const span = trace.span(.select_block_author_keys);
+            defer span.deinit();
+            span.debug("Using fallback key-based author selection for slot {d}", .{slot_in_epoch});
+
+            // Ensure we have the correct number of keys
+            std.debug.assert(keys.len == params.epoch_length);
+
+            // Encode the slot index into 4 bytes as per equation 6.26
+            var encoded_slot: [4]u8 = undefined;
+            std.mem.writeInt(u32, &encoded_slot, @intCast(slot_in_epoch), .little);
+
+            // Get entropy from eta[2] for the fallback function as per equation 6.24
+            var entropy = self.state.eta.?[2];
+
+            // Hash entropy concatenated with encoded slot
+            span.trace("Using entropy for hash: {any}", .{std.fmt.fmtSliceHexLower(&entropy)});
+            span.trace("Using encoded slot: {any}", .{std.fmt.fmtSliceHexLower(&encoded_slot)});
+
+            var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+            hasher.update(&entropy);
+            hasher.update(&encoded_slot);
+            var hash: [32]u8 = undefined;
+            hasher.final(&hash);
+            span.trace("Generated hash: {any}", .{std.fmt.fmtSliceHexLower(&hash)});
+
+            // Take first 4 bytes for deterministic validator selection, as per equation 6.26
+            const index_bytes = hash[0..4].*;
+            const validator_index = std.mem.readInt(u32, &index_bytes, .little) % keys.len;
+            const validator_key = keys[validator_index];
+            span.debug("Selected validator index {d} from key set", .{validator_index});
+            span.trace("Using validator key: {any}", .{std.fmt.fmtSliceHexLower(&validator_key)});
+
+            // TODO: ensure this is kappa'
+            const found_index = try self.state.kappa.?.findValidatorIndex(.BandersnatchPublic, validator_key);
+            span.trace("Found validator at kappa index: {d}", .{found_index});
+            return found_index;
+        }
+
         fn selectBlockAuthor(self: *Self) !types.ValidatorIndex {
             const span = trace.span(.select_block_author);
             defer span.deinit();
@@ -571,65 +708,10 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 span.debug("Slot in epoch: {d}", .{slot_in_epoch});
 
                 // Select based on gamma_s mode
-                switch (gamma.s) {
-                    .tickets => |tickets| {
-                        span.debug("Using ticket-based author selection", .{});
-
-                        // Get ticket for this slot
-                        const ticket = tickets[slot_in_epoch];
-
-                        // Look up the validator who created this ticket
-                        if (self.ticket_registry_previous.get(ticket.id)) |registry_entry| {
-                            span.debug("Found ticket registry entry - validator: {d}, attempt: {d}", .{ registry_entry.validator_index, registry_entry.entry_index });
-
-                            // Validate the entry index matches
-                            if (registry_entry.entry_index == ticket.attempt) {
-                                span.err("Ticket attempt index mismatch", .{});
-                                return registry_entry.validator_index;
-                            }
-                        }
-
-                        // No valid author found
-                        span.err("No validator found for ticket", .{});
-                        return error.NoValidatorFound;
-                    },
-                    .keys => |keys| {
-                        span.debug("Using fallback key-based author selection", .{});
-
-                        // Ensure we have the correct number of keys
-                        std.debug.assert(keys.len == params.epoch_length);
-
-                        // Encode the slot index into 4 bytes as per equation 6.26
-                        var encoded_slot: [4]u8 = undefined;
-                        std.mem.writeInt(u32, &encoded_slot, @intCast(slot_in_epoch), .little);
-
-                        // Get entropy from eta[2] for the fallback function as per equation 6.24
-                        var entropy = self.state.eta.?[2];
-
-                        // Hash entropy concatenated with encoded slot
-                        span.trace("Using entropy for hash: {any}", .{std.fmt.fmtSliceHexLower(&entropy)});
-                        span.trace("Using encoded slot: {any}", .{std.fmt.fmtSliceHexLower(&encoded_slot)});
-
-                        var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-                        hasher.update(&entropy);
-                        hasher.update(&encoded_slot);
-                        var hash: [32]u8 = undefined;
-                        hasher.final(&hash);
-                        span.trace("Generated hash: {any}", .{std.fmt.fmtSliceHexLower(&hash)});
-
-                        // Take first 4 bytes for deterministic validator selection, as per equation 6.26
-                        const index_bytes = hash[0..4].*;
-                        const validator_index = std.mem.readInt(u32, &index_bytes, .little) % keys.len;
-                        const validator_key = keys[validator_index];
-                        span.debug("Selected validator index {d} from key set", .{validator_index});
-                        span.trace("Using validator key: {any}", .{std.fmt.fmtSliceHexLower(&validator_key)});
-
-                        // TODO: ensure this is kappa'
-                        const found_index = try self.state.kappa.?.findValidatorIndex(.BandersnatchPublic, validator_key);
-                        span.trace("Found validator at kappa index: {d}", .{found_index});
-                        return found_index;
-                    },
-                }
+                return switch (gamma.s) {
+                    .tickets => |tickets| try self.selectBlockAuthorFromTickets(tickets, slot_in_epoch),
+                    .keys => |keys| try self.selectBlockAuthorFromKeys(keys, slot_in_epoch),
+                };
             }
             return error.NoValidatorSet;
         }
