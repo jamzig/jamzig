@@ -290,22 +290,23 @@ pub fn transitionTime(
 
 /// Performs the eta transition by rotating entropy values and integrating new entropy
 /// Returns the new eta state (eta_prime)
-pub fn transitionEta(current_eta: *const state.Eta, new_entropy: types.Entropy) state.Eta {
+pub fn transitionEta(comptime params: Params, transition_time: *const params.Time(), current_eta: *const state.Eta, new_entropy: types.Entropy) state.Eta {
     const span = trace.span(.transition_eta);
     defer span.deinit();
 
-    span.trace("Rotating entropy values: eta[2]={any}, eta[1]={any}, eta[0]={any}", .{
-        std.fmt.fmtSliceHexLower(&current_eta[2]),
-        std.fmt.fmtSliceHexLower(&current_eta[1]),
-        std.fmt.fmtSliceHexLower(&current_eta[0]),
-    });
+    var eta_prime: types.Eta = current_eta.*;
+    if (transition_time.isNewEpoch()) {
+        span.trace("Rotating entropy values: eta[2]={any}, eta[1]={any}, eta[0]={any}", .{
+            std.fmt.fmtSliceHexLower(&current_eta[2]),
+            std.fmt.fmtSliceHexLower(&current_eta[1]),
+            std.fmt.fmtSliceHexLower(&current_eta[0]),
+        });
 
-    var eta_prime: types.Eta = undefined;
-
-    // Rotate the entropy values
-    eta_prime[3] = current_eta[2];
-    eta_prime[2] = current_eta[1];
-    eta_prime[1] = current_eta[0];
+        // Rotate the entropy values
+        eta_prime[3] = current_eta[2];
+        eta_prime[2] = current_eta[1];
+        eta_prime[1] = current_eta[0];
+    }
 
     // Update eta[0] with new entropy
     const entropy = @import("entropy.zig");

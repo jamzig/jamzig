@@ -54,18 +54,21 @@ pub fn transition(
     // Now simulate the state transitions tested in this test vector
     const stf = @import("../stf.zig");
 
-    // Since the vector tests correct progression of time
-    _ = try stf.transitionTime(current_state.tau.?, input.slot);
-    const eta_prime = stf.transitionEta(&current_state.eta.?, input.entropy);
-
     const transition_time = params.Time().init(current_state.tau.?, input.slot);
+
+    // Construct a new state_delta
+    var state_delta = state.JamState(params){};
+
+    // Since the vector tests correct progression of time
+    state_delta.tau = try stf.transitionTime(current_state.tau.?, input.slot);
+    state_delta.eta = stf.transitionEta(params, &transition_time, &current_state.eta.?, input.entropy);
 
     // we need to transition eta here first using the entropy
     var result = stf.transitionSafrole(
         params,
         allocator,
         &transition_time,
-        &eta_prime,
+        &state_delta.eta.?,
         &current_state.kappa.?,
         &current_state.gamma.?,
         &current_state.iota.?,
@@ -89,6 +92,7 @@ pub fn transition(
     };
     defer result.deinit(allocator);
 
+    try current_state.merge(&state_delta, allocator);
     try current_state.merge(&result.post_state, allocator);
 
     const test_vector_post_state = try JamStateToTestVectorState(
