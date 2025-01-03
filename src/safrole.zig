@@ -55,6 +55,20 @@ pub fn Result(params: jam_params.Params) type {
                 allocator.free(marker.tickets);
             }
         }
+
+        /// Takes ownership of the epoch marker and sets it to null
+        pub fn takeEpochMarker(self: *@This()) ?types.EpochMark {
+            const marker = self.epoch_marker;
+            self.epoch_marker = null;
+            return marker;
+        }
+
+        /// Takes ownership of the ticket marker and sets it to null
+        pub fn takeTicketMarker(self: *@This()) ?types.TicketsMark {
+            const marker = self.ticket_marker;
+            self.ticket_marker = null;
+            return marker;
+        }
     };
 }
 
@@ -166,14 +180,12 @@ fn transitionEpoch(
     defer span.deinit();
     span.debug("Starting epoch transition", .{});
 
-    // Rotate validator keys
-    span.debug("Rotating validator keys", .{});
-
     // Performs epoch transition by rotating validator keys:
     // - λ gets current κ
     // - κ gets current γ.k
     // - γ.k gets ι (with offenders zeroed out)
     // Note: ι persists unchanged until updated by privileged service Performs epoch transition by rotating validator keys:
+    span.debug("Rotating validator keys", .{});
     var state_delta = state.JamState(params){};
     state_delta.lambda = try current_kappa.deepClone(allocator);
     state_delta.kappa = try current_gamma.k.deepClone(allocator);
@@ -219,7 +231,7 @@ fn transitionEpoch(
             params.epoch_length,
         });
         gamma_s.* = .{
-            .keys = try gammaS_Fallback(allocator, eta_prime[2], params.epoch_length, current_kappa.*),
+            .keys = try gammaS_Fallback(allocator, eta_prime[2], params.epoch_length, state_delta.kappa.?),
         };
     }
 

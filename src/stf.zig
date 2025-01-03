@@ -96,7 +96,7 @@ pub fn stateTransition(
     span.debug("Starting time transition (τ')", .{});
     state_delta.tau = try transitionTime(
         current_state.tau.?,
-        new_block.header,
+        new_block.header.slot,
     );
     span.trace("Updated tau value: {d}", .{state_delta.tau.?});
 
@@ -273,19 +273,19 @@ pub fn stateTransition(
 
 pub fn transitionTime(
     current_tau: state.Tau,
-    header: Header,
+    header_slot: types.TimeSlot,
 ) !state.Tau {
     const span = trace.span(.transition_time);
     defer span.deinit();
     span.debug("Starting time transition", .{});
-    span.trace("Current tau: {d}, Header slot: {d}", .{ current_tau, header.slot });
+    span.trace("Current tau: {d}, Header slot: {d}", .{ current_tau, header_slot });
 
-    if (header.slot <= current_tau) {
-        span.err("Invalid slot: new slot {d} <= current tau {d}", .{ header.slot, current_tau });
+    if (header_slot <= current_tau) {
+        span.err("Invalid slot: new slot {d} <= current tau {d}", .{ header_slot, current_tau });
         return Error.BadSlot;
     }
 
-    return header.slot;
+    return header_slot;
 }
 
 /// Performs the eta transition by rotating entropy values and integrating new entropy
@@ -349,7 +349,6 @@ pub fn transitionSafrole(
 ) !safrole.Result(params) {
     const span = trace.span(.transition_safrole);
     defer span.deinit();
-    span.debug("Starting Safrole transition", .{});
 
     return try safrole.transition(
         params,

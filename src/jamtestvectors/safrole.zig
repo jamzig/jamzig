@@ -62,7 +62,7 @@ pub const Output = union(enum) {
         writer: anytype,
     ) !void {
         switch (self) {
-            .err => try writer.print("err = {?s}", .{self.err}),
+            .err => try writer.print("err = {s}", .{@tagName(self.err)}),
             .ok => |marks| try writer.print("ok = {any}", .{marks}),
         }
     }
@@ -86,7 +86,7 @@ pub const OutputMarks = struct {
         writer: anytype,
     ) !void {
         const epoch_len = if (self.epoch_mark) |epoch| epoch.validators.len else 0;
-        const tickets_len = if (self.tickets_mark) |tickets| tickets.len else 0;
+        const tickets_len = if (self.tickets_mark) |tickets| tickets.tickets.len else 0;
 
         try writer.print("epoch_mark.len = {}, tickets_mark.len = {}", .{ epoch_len, tickets_len });
     }

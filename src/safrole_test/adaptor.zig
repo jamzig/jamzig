@@ -30,30 +30,35 @@ pub fn transition(
     pre_state: safrole_test_vector.State,
     input: safrole_test_vector.Input,
 ) !TransitionResult {
-    var post_psi = state.Psi.init(allocator);
-    try post_psi.registerOffenders(pre_state.post_offenders);
+    var current_state = state.JamState(params){};
+    defer current_state.deinit(allocator);
 
-    const gamma = try GammaFromTestVectorState(
+    current_state.psi = init_psi: {
+        var current_psi = state.Psi.init(allocator);
+        errdefer current_psi.deinit();
+        try current_psi.registerOffenders(pre_state.post_offenders);
+        break :init_psi current_psi;
+    };
+    current_state.tau = pre_state.gamma.tau;
+    current_state.eta = pre_state.gamma.eta;
+    current_state.lambda = try pre_state.gamma.lambda.deepClone(allocator);
+    current_state.kappa = try pre_state.gamma.kappa.deepClone(allocator);
+    current_state.gamma = try GammaFromTestVectorState(
         params.validators_count,
         params.epoch_length,
         allocator,
         pre_state,
     );
-    defer gamma.deinit(allocator);
+    current_state.iota = try pre_state.gamma.iota.deepClone(allocator);
 
-    const iota = try pre_state.gamma.iota.deepClone(allocator);
-    defer iota.deinit(allocator);
-
-    const kappa = try pre_state.gamma.kappa.deepClone(allocator);
-    defer kappa.deinit(allocator);
-
-    const lambda = try pre_state.gamma.lambda.deepClone(allocator);
-    defer lambda.deinit(allocator);
-
-    const transition_time = params.Time().init(pre_state.gamma.tau, input.slot);
-
+    // Now simulate the state transitions tested in this test vector
     const stf = @import("../stf.zig");
-    const eta_prime = stf.transitionEta(&pre_state.gamma.eta, input.entropy);
+
+    // Since the vector tests correct progression of time
+    _ = try stf.transitionTime(current_state.tau.?, input.slot);
+    const eta_prime = stf.transitionEta(&current_state.eta.?, input.entropy);
+
+    const transition_time = params.Time().init(current_state.tau.?, input.slot);
 
     // we need to transition eta here first using the entropy
     var result = stf.transitionSafrole(
@@ -61,10 +66,10 @@ pub fn transition(
         allocator,
         &transition_time,
         &eta_prime,
-        &kappa,
-        &gamma,
-        &iota,
-        &post_psi,
+        &current_state.kappa.?,
+        &current_state.gamma.?,
+        &current_state.iota.?,
+        &current_state.psi.?,
         input.extrinsic,
     ) catch |e| {
         const test_vector_error = switch (e) {
@@ -84,22 +89,19 @@ pub fn transition(
     };
     defer result.deinit(allocator);
 
-    const test_vector_post_state = try jamStateToTestVectorState(
+    try current_state.merge(&result.post_state, allocator);
+
+    const test_vector_post_state = try JamStateToTestVectorState(
         params,
         allocator,
-        &transition_time,
-        &eta_prime,
-        &iota,
-        &result.post_state,
-        pre_state.post_offenders,
+        &current_state,
     );
-    std.debug.print("{s}\n", .{types.fmt.format(&test_vector_post_state)});
 
     return TransitionResult{
         .output = .{
             .ok = safrole_test_vector.OutputMarks{
-                .epoch_mark = result.epoch_marker,
-                .tickets_mark = result.ticket_marker,
+                .epoch_mark = result.takeEpochMarker(),
+                .tickets_mark = result.takeTicketMarker(),
             },
         },
         .state = test_vector_post_state,
@@ -145,28 +147,20 @@ fn GammaFromTestVectorState(
     return gamma;
 }
 
-fn jamStateToTestVectorState(
-    comptime params: Params,
-    allocator: std.mem.Allocator,
-    transition_time: *const params.Time(),
-    eta_prime: *const types.Eta,
-    iota: *const types.Iota,
-    jam_state: *const state.JamState(params),
-    post_offenders: []const types.Ed25519Public,
-) !safrole_test_vector.State {
+fn JamStateToTestVectorState(comptime params: Params, allocator: std.mem.Allocator, post_state: *const state.JamState(params)) !safrole_test_vector.State {
     // Create test vector state with gamma from jam state
     return safrole_test_vector.State{
         .gamma = safrole_types.State{
-            .tau = transition_time.current_slot,
-            .eta = eta_prime.*,
-            .lambda = try jam_state.lambda.?.deepClone(allocator),
-            .kappa = try jam_state.kappa.?.deepClone(allocator),
-            .gamma_k = try jam_state.gamma.?.k.deepClone(allocator),
-            .iota = try iota.deepClone(allocator),
-            .gamma_a = try allocator.dupe(types.TicketBody, jam_state.gamma.?.a),
-            .gamma_s = try jam_state.gamma.?.s.deepClone(allocator),
-            .gamma_z = jam_state.gamma.?.z,
+            .tau = post_state.tau.?,
+            .eta = post_state.eta.?,
+            .lambda = try post_state.lambda.?.deepClone(allocator),
+            .kappa = try post_state.kappa.?.deepClone(allocator),
+            .gamma_k = try post_state.gamma.?.k.deepClone(allocator),
+            .iota = try post_state.iota.?.deepClone(allocator),
+            .gamma_a = try allocator.dupe(types.TicketBody, post_state.gamma.?.a),
+            .gamma_s = try post_state.gamma.?.s.deepClone(allocator),
+            .gamma_z = post_state.gamma.?.z,
         },
-        .post_offenders = try allocator.dupe(types.Ed25519Public, post_offenders),
+        .post_offenders = try post_state.psi.?.offendersOwned(allocator),
     };
 }

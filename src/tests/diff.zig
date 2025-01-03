@@ -12,6 +12,7 @@ pub const DiffResult = union(enum) {
         switch (self) {
             .EmptyDiff => {},
             .Diff => |diff| {
+                std.debug.print("\n\n", .{});
                 std.debug.print("\x1b[38;5;208m+ = in expected, not in actual => add to actual\x1b[0m\n", .{});
                 std.debug.print("\x1b[38;5;208m- = in actual, not in expected => remove from actual\x1b[0m\n", .{});
                 std.debug.print("{s}", .{diff});
