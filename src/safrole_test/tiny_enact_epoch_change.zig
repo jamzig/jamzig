@@ -15,8 +15,8 @@ test "safrole/tiny/enact-epoch-change-with-no-tickets-1" {
     defer fixtures.deinit();
 
     var result = try safrole.transition(
-        allocator,
         tiny_params,
+        allocator,
         fixtures.pre_state,
         fixtures.input,
     );
@@ -47,8 +47,8 @@ test "safrole/tiny/enact-epoch-change-with-no-tickets-2" {
     defer fixtures.deinit();
 
     var result = try safrole.transition(
-        allocator,
         tiny_params,
+        allocator,
         fixtures.pre_state,
         fixtures.input,
     );
@@ -71,14 +71,14 @@ test "safrole/tiny/enact-epoch-change-with-no-tickets-3" {
     defer fixtures.deinit();
 
     var result = try safrole.transition(
-        allocator,
         tiny_params,
+        allocator,
         fixtures.pre_state,
         fixtures.input,
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqualDeep(fixtures.post_state.gamma, result.state.?);
+    try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
     try fixtures.expectOkOutputWithNullEpochAndTicketMarkers(result.output);
 }
 
@@ -93,14 +93,14 @@ test "safrole/tiny/enact-epoch-change-with-no-tickets-4" {
     defer fixtures.deinit();
 
     var result = try safrole.transition(
-        allocator,
         tiny_params,
+        allocator,
         fixtures.pre_state,
         fixtures.input,
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqualDeep(fixtures.post_state.gamma, result.state.?);
+    try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
     try fixtures.expectOutput(result.output);
 }
 
@@ -115,13 +115,13 @@ test "safrole/tiny/enact-epoch-change-with-padding-1" {
     defer fixtures.deinit();
 
     var result = try safrole.transition(
-        allocator,
         tiny_params,
+        allocator,
         fixtures.pre_state,
         fixtures.input,
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqualDeep(fixtures.post_state.gamma, result.state.?);
+    try std.testing.expectEqualDeep(fixtures.post_state, result.state.?);
     try fixtures.expectOutput(result.output);
 }

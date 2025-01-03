@@ -11,66 +11,66 @@ pub fn JamState(comptime params: Params) type {
     return struct {
         /// α: Core authorization state and associated queues.
         /// Manipulated in: src/authorization.zig
-        alpha: ?Alpha(params.core_count),
+        alpha: ?Alpha(params.core_count) = null,
 
         /// β: Metadata of the latest block, including block number, timestamps, and cryptographic references.
         /// Manipulated in: src/recent_blocks.zig
-        beta: ?Beta,
+        beta: ?Beta = null,
 
         /// γ: List of current validators and their states, such as stakes and identities.
         /// Manipulated in: src/safrole.zig
-        gamma: ?Gamma(params.validators_count, params.epoch_length),
+        gamma: ?Gamma(params.validators_count, params.epoch_length) = null,
 
         /// δ: Service accounts state, managing all service-related data (similar to smart contracts).
         /// Manipulated in: src/services.zig
-        delta: ?Delta,
+        delta: ?Delta = null,
 
         /// η: On-chain entropy pool used for randomization and consensus mechanisms.
         /// Manipulated in: src/safrole.zig
-        eta: ?Eta,
+        eta: ?Eta = null,
 
         /// ι: Validators enqueued for activation in the upcoming epoch.
         /// Manipulated in: src/safrole.zig
-        iota: ?Iota,
+        iota: ?Iota = null,
 
         /// κ: Active validator set currently responsible for validating blocks and maintaining the network.
         /// Manipulated in: src/safrole.zig
-        kappa: ?Kappa,
+        kappa: ?Kappa = null,
 
         /// λ: Archived validators who have been removed or rotated out of the active set.
         /// Manipulated in: src/safrole.zig
-        lambda: ?Lambda,
+        lambda: ?Lambda = null,
 
         /// ρ: State related to each core’s current assignment, including work packages and reports.
         /// Manipulated in: src/core_assignments.zig
-        rho: ?Rho(params.core_count),
+        rho: ?Rho(params.core_count) = null,
 
         /// τ: Current time, represented in terms of epochs and slots.
         /// Manipulated in: src/safrole.zig
-        tau: ?Tau,
+        tau: ?Tau = null,
 
         /// φ: Authorization queue for tasks or processes awaiting authorization by the network.
         /// Manipulated in: src/authorization.zig
-        phi: ?Phi(params.core_count, params.max_authorizations_queue_items),
+        phi: ?Phi(params.core_count, params.max_authorizations_queue_items) = null,
 
         /// χ: Privileged service identities, which may have special roles within the protocol.
         /// Manipulated in: src/services.zig
-        chi: ?Chi,
+        chi: ?Chi = null,
 
         /// ψ: Judgement state, tracking disputes or reports about validators or state transitions.
         /// Manipulated in: src/disputes.zig
-        psi: ?Psi,
+        psi: ?Psi = null,
 
         /// π: Validator performance statistics, tracking penalties, rewards, and other metrics.
         /// Manipulated in: src/validator_stats.zig
-        pi: ?Pi,
+        pi: ?Pi = null,
 
         /// ξ: Epochs worth history of accumulated work reports
-        xi: ?Xi(params.epoch_length),
+        xi: ?Xi(params.epoch_length) = null,
 
         /// θ: List of available and/or audited but not yet accumulated work
         /// reports
-        theta: ?Theta(params.epoch_length),
+        theta: ?Theta(params.epoch_length) = null,
 
         /// Initialize Alpha component
         pub fn initAlpha(self: *JamState(params), _: std.mem.Allocator) !void {
@@ -86,6 +86,19 @@ pub fn JamState(comptime params: Params) type {
         /// Initialize Gamma component
         pub fn initGamma(self: *JamState(params), allocator: std.mem.Allocator) !void {
             self.gamma = try Gamma(params.validators_count, params.epoch_length).init(allocator);
+        }
+
+        pub fn ensureGamma(
+            self: *JamState(params),
+            allocator: std.mem.Allocator,
+            ensurance: *const Gamma(params.validators_count, params.epoch_length),
+        ) !*Gamma(params.validators_count, params.epoch_length) {
+            if (self.gamma) |*gamma| {
+                return gamma;
+            } else {
+                self.gamma = try ensurance.deepClone(allocator);
+                return &self.gamma.?;
+            }
         }
 
         /// Initialize Delta component
@@ -200,7 +213,7 @@ pub fn JamState(comptime params: Params) type {
 
         /// Checks if the whole state has been initialized. We do not have any
         /// entries which are null
-        pub fn ensureFullyInitialized(self: *const JamState(params)) !void {
+        pub fn ensureFullyInitialized(self: *const JamState(params)) !bool {
             if (self.alpha == null) return error.UninitializedAlpha;
             if (self.beta == null) return error.UninitializedBeta;
             if (self.gamma == null) return error.UninitializedGamma;
@@ -217,6 +230,8 @@ pub fn JamState(comptime params: Params) type {
             if (self.pi == null) return error.UninitializedPi;
             if (self.xi == null) return error.UninitializedXi;
             if (self.theta == null) return error.UninitializedTheta;
+
+            return true;
         }
 
         const state_dict = @import("state_dictionary.zig");

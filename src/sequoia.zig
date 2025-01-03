@@ -577,7 +577,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                     span.trace("    Public key: {s}", .{std.fmt.fmtSliceHexLower(&validator.bandersnatch_keypair.public_key.toBytes())});
 
                     const ticket_id = try ring_vrf.verifyRingSignatureAgainstCommitment(
-                        self.state.gamma.?.z,
+                        &self.state.gamma.?.z,
                         params.validators_count,
                         vrf_input,
                         &[_]u8{},

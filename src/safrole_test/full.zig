@@ -15,8 +15,8 @@ fn testSafroleVector(allocator: std.mem.Allocator, file_name: []const u8) !void 
     defer fixture.deinit();
 
     const actual_result = try safrole.transition(
-        allocator,
         FULL_PARAMS,
+        allocator,
         fixture.pre_state,
         fixture.input,
     );
@@ -25,7 +25,7 @@ fn testSafroleVector(allocator: std.mem.Allocator, file_name: []const u8) !void 
     fixture.expectOutput(actual_result.output) catch {};
     if (actual_result.state) |state| {
         fixture.expectPostState(&state) catch {
-            try fixture.diffAgainstPostStateAndPrint(&state);
+            try fixture.diffAgainstPostStateAndPrint(&state.gamma);
         };
     }
 }

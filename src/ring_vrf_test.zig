@@ -3,16 +3,6 @@ const types = @import("types.zig");
 const Bandersnatch = @import("crypto/bandersnatch.zig").Bandersnatch;
 const ring_vrf = @import("ring_vrf.zig");
 
-fn timeFunction(comptime desc: []const u8, comptime func: anytype, args: anytype) @typeInfo(@TypeOf(func)).@"fn".return_type.? {
-    var timer = std.time.Timer.start() catch unreachable;
-    const result = @call(.auto, func, args);
-    const elapsed_nanos = timer.read();
-    const elapsed_time = @as(f64, @floatFromInt(elapsed_nanos)) / 1_000_000.0;
-
-    std.debug.print(desc ++ " took {d:.3} ms\n", .{elapsed_time});
-    return result;
-}
-
 test "ring_signature.vrf: ring signature and VRF" {
     const RING_SIZE: usize = 10;
     var ring: [RING_SIZE]types.BandersnatchPublic = undefined;
@@ -63,19 +53,19 @@ test "ring_signature.vrf: ring signature and VRF" {
     const aux_data = [_]u8{ 'b', 'a', 'r' };
 
     // Generate ring signature
-    const ring_signature = try timeFunction("genRingSig", ring_vrf.RingProver.sign, .{
+    const ring_signature = try ring_vrf.RingProver.sign(
         &prover,
         &vrf_input_data,
         &aux_data,
-    });
+    );
 
     // Verify ring signature
-    _ = try timeFunction("verifyRingSig", ring_vrf.RingVerifier.verify, .{
+    _ = try ring_vrf.RingVerifier.verify(
         &verifier,
         &vrf_input_data,
         &aux_data,
         &ring_signature,
-    });
+    );
 }
 
 test "verify.commitment: verify against commitment" {
@@ -115,35 +105,23 @@ test "verify.commitment: verify against commitment" {
     const aux_data = [_]u8{ 'd', 'a', 't', 'a' };
 
     // Generate ring signature
-    const ring_signature = try timeFunction(
-        "genRingSig",
-        ring_vrf.RingProver.sign,
-        .{ &prover, &vrf_input_data, &aux_data },
-    );
+    const ring_signature = try ring_vrf.RingProver.sign(&prover, &vrf_input_data, &aux_data);
 
     // Verify ring signature against commitment
-    _ = try timeFunction(
-        "verifyAgainstCommitment",
-        ring_vrf.verifyRingSignatureAgainstCommitment,
-        .{
-            commitment,
-            RING_SIZE,
-            &vrf_input_data,
-            &aux_data,
-            &ring_signature,
-        },
+    _ = try ring_vrf.verifyRingSignatureAgainstCommitment(
+        &commitment,
+        RING_SIZE,
+        &vrf_input_data,
+        &aux_data,
+        &ring_signature,
     );
 
     // For comparison, also verify using the verifier
-    _ = try timeFunction(
-        "verifyWithVerifier",
-        ring_vrf.RingVerifier.verify,
-        .{
-            &verifier,
-            &vrf_input_data,
-            &aux_data,
-            &ring_signature,
-        },
+    _ = try ring_vrf.RingVerifier.verify(
+        &verifier,
+        &vrf_input_data,
+        &aux_data,
+        &ring_signature,
     );
 }
 

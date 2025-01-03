@@ -32,6 +32,23 @@ pub const Psi = struct {
         };
     }
 
+    // Register an offender
+    // TODO: add the test
+    pub fn registerOffender(self: *Psi, key: PublicKey) !void {
+        if (self.punish_set.contains(key)) {
+            return error.OffenderAlreadyReported;
+        }
+        try self.punish_set.put(key, {});
+    }
+
+    // Register a set of offenders
+    // TODO: add the test
+    pub fn registerOffenders(self: *Psi, keys: []const PublicKey) !void {
+        for (keys) |key| {
+            try self.registerOffender(key);
+        }
+    }
+
     // Get offenders slice - no allocation, slice is owned by Psi
     pub fn offendersSlice(self: *const Psi) []const PublicKey {
         return self.punish_set.keys();

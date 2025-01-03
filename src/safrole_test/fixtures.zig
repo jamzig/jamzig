@@ -86,8 +86,8 @@ pub const Fixtures = struct {
         self.output.deinit(self.allocator);
     }
 
-    pub fn expectPostState(self: @This(), actual_state: *const safrole_types.State) !void {
-        try std.testing.expectEqualDeep(self.post_state.gamma, actual_state.*);
+    pub fn expectPostState(self: @This(), actual_state: *const safrole_test_vectors.State) !void {
+        try std.testing.expectEqualDeep(self.post_state, actual_state.*);
     }
 
     pub fn expectOutput(self: @This(), actual_output: safrole_test_vectors.Output) !void {

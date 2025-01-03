@@ -3,8 +3,12 @@ const ArrayList = std.ArrayList;
 
 pub const types = @import("types.zig");
 pub const safrole_types = @import("safrole/types.zig");
-pub const entropy = @import("safrole/entropy.zig");
 pub const state = @import("state.zig");
+pub const time = @import("time.zig");
+
+pub const entropy = @import("entropy.zig");
+
+pub const jam_params = @import("jam_params.zig");
 
 const crypto = @import("crypto.zig");
 const ring_vrf = @import("ring_vrf.zig");
@@ -32,59 +36,52 @@ pub const Error = error{
     too_many_tickets_in_extrinsic,
 } || std.mem.Allocator.Error || ring_vrf.Error;
 
-pub const Result = struct {
-    post_state: safrole_types.State,
-    epoch_marker: ?types.EpochMark,
-    ticket_marker: ?types.TicketsMark,
+pub fn Result(params: jam_params.Params) type {
+    return struct {
+        post_state: state.JamState(params),
+        epoch_marker: ?types.EpochMark,
+        ticket_marker: ?types.TicketsMark,
 
-    pub fn deinit(self: *Result, allocator: std.mem.Allocator) void {
-        self.post_state.deinit(allocator);
-        self.deinit_markers(allocator);
-    }
-
-    pub fn deinit_markers(self: *Result, allocator: std.mem.Allocator) void {
-        if (self.epoch_marker) |*marker| {
-            allocator.free(marker.validators);
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            self.post_state.deinit(allocator);
+            self.deinit_markers(allocator);
         }
-        if (self.ticket_marker) |*marker| {
-            allocator.free(marker.tickets);
-        }
-    }
-};
 
-// TODO: swap params and allocator, use params first
-pub fn transition(
+        pub fn deinit_markers(self: *@This(), allocator: std.mem.Allocator) void {
+            if (self.epoch_marker) |*marker| {
+                allocator.free(marker.validators);
+            }
+            if (self.ticket_marker) |*marker| {
+                allocator.free(marker.tickets);
+            }
+        }
+    };
+}
+
+// Extracted ticket processing logic
+fn processTicketExtrinsic(
+    comptime params: Params,
     allocator: std.mem.Allocator,
-    params: Params,
-    pre_state: *const safrole_types.State,
-    slot: types.TimeSlot,
-    bandersnatch_vrf_output: types.BandersnatchVrfOutput,
+    transition_time: *const params.Time(),
     ticket_extrinsic: types.TicketsExtrinsic,
-    offenders: []const types.Ed25519Public,
-) Error!Result {
-    const span = trace.span(.transition);
+    gamma_a: types.GammaA,
+    gamma_z: *const types.GammaZ,
+    eta_prime: *const types.Eta,
+) Error![]types.TicketBody {
+    const span = trace.span(.process_ticket_extrinsic);
     defer span.deinit();
-    span.debug("Starting state transition", .{});
-    span.trace("Input parameters: slot={d}, vrf_output={any}, num_tickets={d}, num_offenders={d}", .{
-        slot,
-        std.fmt.fmtSliceHexLower(&bandersnatch_vrf_output),
-        ticket_extrinsic.data.len,
-        offenders.len,
-    });
+    span.debug("Processing ticket extrinsic", .{});
 
-    // Equation 41: H_t ∈ N_T, P(H)_t < H_t ∧ H_t · P ≤ T
-    if (slot <= pre_state.tau) {
-        span.err("Invalid slot: new slot {d} <= current tau {d}", .{ slot, pre_state.tau });
-        return Error.bad_slot;
+    // Process tickets if not in epoch's tail
+    if (transition_time.current_slot >= params.ticket_submission_end_epoch_slot) {
+        if (ticket_extrinsic.data.len > 0) {
+            span.err("Received ticket extrinsic in epoch's tail", .{});
+            return Error.unexpected_ticket;
+        }
     }
-
-    // The slot inside this epoch
-    const prev_epoch_slot = pre_state.tau % params.epoch_length;
-    const epoch_slot = slot % params.epoch_length;
 
     // Chapter 6.7 Ticketing and extrensics
-    // Check the number of ticket attempts in the input when more
-    // than N we have a bad ticket attempt
+    // Check the number of ticket attempts in the input when more than N we have a bad ticket attempt
     for (ticket_extrinsic.data) |extrinsic| {
         if (extrinsic.attempt >= params.max_ticket_entries_per_validator) {
             std.debug.print("attempt {d}\n", .{extrinsic.attempt});
@@ -97,60 +94,45 @@ pub fn transition(
         return Error.too_many_tickets_in_extrinsic;
     }
 
-    // We shuold not have any tickets when the epoch slot < Y
-    if (epoch_slot >= params.ticket_submission_end_epoch_slot) {
-        if (ticket_extrinsic.data.len > 0) {
-            return Error.unexpected_ticket;
-        }
-    }
-
-    // NOTE: we are using pre_state n2 which is weird as I expected n'2 which is post state
+    // Verify ticket envelope
     const verified_extrinsic = verifyTicketEnvelope(
         allocator,
         params.validators_count,
-        pre_state.gamma_z,
-        pre_state.eta[2],
+        gamma_z,
+        eta_prime[2],
         ticket_extrinsic.data,
     ) catch |e| {
         if (e == error.SignatureVerificationFailed) {
             return Error.bad_ticket_proof;
         } else return e;
     };
-    defer allocator.free(verified_extrinsic);
 
-    // Chapter 6.7: The tickets should be in order of their implied identifier.
-    // Duplicate tickets are not allowed.
+    // Chapter 6.7: The tickets should be in order of their implied identifier
     var index: usize = 0;
     while (index < verified_extrinsic.len) : (index += 1) {
         const current_ticket = verified_extrinsic[index];
 
-        // Since the list should be ordered, we only need to check the previous
-        // ticket for order and duplicates within verified_extrinsic.
-        // This replaces the O(n^2) duplicate check with an O(n) check.
+        // Check order and duplicates with previous ticket
         if (index > 0) {
             const order = std.mem.order(u8, &current_ticket.id, &verified_extrinsic[index - 1].id);
             switch (order) {
-                .lt => return Error.bad_ticket_order, // Out of order
-                .eq => return Error.duplicate_ticket, // Duplicate found
-                .gt => {}, // Correct ordering
+                .lt => return Error.bad_ticket_order,
+                .eq => return Error.duplicate_ticket,
+                .gt => {},
             }
         }
 
         // Check for duplicates in gamma_a using binary search
-        // This is already efficient (O(log n)) and doesn't need modification
-        // Verify gamma_a is sorted (debug only)
-        // TODO: move this into a module for debug level assertions
         std.debug.assert(blk: {
-            if (pre_state.gamma_a.len <= 1) break :blk true;
+            if (gamma_a.len <= 1) break :blk true;
             var i: usize = 1;
-            while (i < pre_state.gamma_a.len) : (i += 1) {
-                if (!std.mem.lessThan(u8, &pre_state.gamma_a[i - 1].id, &pre_state.gamma_a[i].id)) break :blk false;
+            while (i < gamma_a.len) : (i += 1) {
+                if (!std.mem.lessThan(u8, &gamma_a[i - 1].id, &gamma_a[i].id)) break :blk false;
             }
             break :blk true;
         });
 
-        // NOTE: we only check on id for duplicates
-        const position = std.sort.binarySearch(types.TicketBody, pre_state.gamma_a, current_ticket, struct {
+        const position = std.sort.binarySearch(types.TicketBody, gamma_a, current_ticket, struct {
             fn order(context: types.TicketBody, item: types.TicketBody) std.math.Order {
                 return std.mem.order(u8, &context.id, &item.id);
             }
@@ -159,197 +141,183 @@ pub fn transition(
         if (position != null) {
             span.warn("Found duplicate ticket ID: {s}", .{std.fmt.fmtSliceHexLower(&current_ticket.id)});
             span.trace("Current gamma_a contents:", .{});
-            for (pre_state.gamma_a, 0..) |ticket, idx| {
+            for (gamma_a, 0..) |ticket, idx| {
                 span.trace("  [{d}] ID: {s}", .{ idx, std.fmt.fmtSliceHexLower(&ticket.id) });
             }
             return Error.duplicate_ticket;
         }
     }
 
-    var post_state = try pre_state.deepClone(allocator);
-    errdefer post_state.deinit(allocator);
+    return verified_extrinsic;
+}
 
-    // Update the tau
-    post_state.tau = slot;
+// Extracted epoch transition logic
+fn transitionEpoch(
+    comptime params: Params,
+    allocator: std.mem.Allocator,
+    transition_time: *const params.Time(),
+    current_kappa: *const state.Kappa,
+    current_gamma: *const state.Gamma(params.validators_count, params.epoch_length),
+    current_iota: *const state.Iota,
+    eta_prime: *const state.Eta,
+    offenders: []const types.Ed25519Public,
+) !state.JamState(params) {
+    const span = trace.span(.transition_epoch);
+    defer span.deinit();
+    span.debug("Starting epoch transition", .{});
 
-    // Calculate epoch and slot phase
-    const prev_epoch = pre_state.tau / params.epoch_length;
-    // const prev_slot_phase = pre_state.tau % EPOCH_LENGTH;
-    const current_epoch = slot / params.epoch_length;
-    // const current_slot_phase = input.slot % EPOCH_LENGTH;
+    // Rotate validator keys
+    span.debug("Rotating validator keys", .{});
 
-    span.trace("Epoch transition check: current_epoch={d}, prev_epoch={d}", .{ current_epoch, prev_epoch });
-    if (current_epoch > prev_epoch) {
-        span.debug("Starting epoch transition", .{});
-        // (67) Perform epoch transition logic here
-        span.trace("Rotating entropy values: eta[2]={any}, eta[1]={any}, eta[0]={any}", .{
-            std.fmt.fmtSliceHexLower(&post_state.eta[2]),
-            std.fmt.fmtSliceHexLower(&post_state.eta[1]),
-            std.fmt.fmtSliceHexLower(&post_state.eta[0]),
+    // Performs epoch transition by rotating validator keys:
+    // - λ gets current κ
+    // - κ gets current γ.k
+    // - γ.k gets ι (with offenders zeroed out)
+    // Note: ι persists unchanged until updated by privileged service Performs epoch transition by rotating validator keys:
+    var state_delta = state.JamState(params){};
+    state_delta.lambda = try current_kappa.deepClone(allocator);
+    state_delta.kappa = try current_gamma.k.deepClone(allocator);
+
+    state_delta.gamma = try current_gamma.deepClone(allocator);
+    state_delta.gamma.?.k.deinit(allocator);
+    state_delta.gamma.?.k = phiZeroOutOffenders(
+        try current_iota.deepClone(allocator),
+        offenders,
+    );
+
+    // Calculate new gamma_z
+    span.debug("Calculating new gamma_z from gamma_k", .{});
+    state_delta.gamma.?.z = try bandersnatchRingRoot(allocator, state_delta.gamma.?.k);
+    span.trace("New gamma_z value: {any}", .{std.fmt.fmtSliceHexLower(&state_delta.gamma.?.z)});
+
+    // Free existing gamma_s before updating
+    const gamma_s = &state_delta.gamma.?.s;
+    gamma_s.deinit(allocator);
+    _ = gamma_s.clearAndTakeOwnership();
+
+    // Update gamma_s based on conditions
+    if (transition_time.current_epoch >= params.ticket_submission_end_epoch_slot and
+        current_gamma.a.len == params.epoch_length and
+        transition_time.current_epoch == transition_time.prior_epoch + 1)
+    {
+        span.debug("Operating in ticket mode for gamma_s", .{});
+        span.trace("Conditions met: prev_slot({d}) >= Y({d}), gamma_a.len({d}) == epoch_length({d})", .{
+            transition_time.prior_slot_in_epoch,
+            params.ticket_submission_end_epoch_slot,
+            current_gamma.a.len,
+            params.epoch_length,
         });
-        post_state.eta[3] = post_state.eta[2];
-        post_state.eta[2] = post_state.eta[1];
-        post_state.eta[1] = post_state.eta[0];
-
-        // (57) Validator keys are rotated at the beginning of each epoch. The
-        // current active set of validator keys κ is replaced by the queued
-        // set, and any offenders (validators removed from the set) are
-        // replaced with zeroed keys.
-        //
-        // NOTE: using post_state to update post_state as we are moving pointers around
-        const lamda = post_state.lambda; // X
-        const kappa = post_state.kappa; // X
-        const gamma_k = post_state.gamma_k; // X
-        const iota = post_state.iota; // X
-
-        span.debug("Rotating validator keys", .{});
-        span.trace("Current kappa size: {d}, gamma_k size: {d}", .{ post_state.kappa.len(), gamma_k.len() });
-        post_state.kappa = gamma_k;
-        span.debug("Applying offender removal to iota", .{});
-        post_state.gamma_k = phiZeroOutOffenders(
-            // Need to deepClone, as we also need post_state.iota to
-            // stay unchanged
-            try iota.deepClone(allocator),
-            offenders,
-        );
-        post_state.lambda = kappa;
-        // lambda is phasing out, so we can free it
-        lamda.deinit(allocator);
-        // post_state.iota seems to stay the same
-
-        // gamma_z is the epoch’s root, a Bandersnatch ring root composed with the
-        // one Bandersnatch key of each of the next epoch’s validators, defined
-        // in gamma_k
-        span.debug("Calculating new gamma_z from gamma_k", .{});
-        post_state.gamma_z = try bandersnatchRingRoot(allocator, post_state.gamma_k);
-        span.trace("New gamma_z value: {any}", .{std.fmt.fmtSliceHexLower(&post_state.gamma_z)});
-
-        // Check the state of gamma_s union
-        //
-        // (48) either keys or ticketsare in fallback mode.
-        // γs is the current epoch’s slot-sealer series, which is either a
-        // full complement of E tickets or, in the case of a fallback
-        // mode, a series of E Bandersnatch keys:
-
-        // (68) The posterior slot key sequence gamma_s' is one of three expressions
-        // depending on the circumstance of the block. If the block is not the
-        // first in an epoch, then it remains unchanged from the prior γs. If
-        // the block signals the next epoch (by epoch index) and the previous
-        // block’s slot was within the closing period of the previous epoch,
-        // then it takes the value of the prior ticket accumulator γa.
-
-        // Gamma_S
-        // Free memory here since we are sure we are going to
-        // update the value following.
-
-        // NOTE: take ownership as post_state.gamma_s is going to be updated
-        // but could fail. Which would trigger the errdefer which would
-        // lead to a double free.
-        post_state.gamma_s.deinit(allocator);
-        _ = post_state.gamma_s.clearAndTakeOwnership();
-
-        // (68) e′ = e + 1 ∧ m ≥ Y ∧ ∣γa∣ = E
-        if (prev_epoch_slot >= params.ticket_submission_end_epoch_slot and
-            post_state.gamma_a.len == params.epoch_length and
-            // only if e' = e + 1
-            current_epoch == prev_epoch + 1)
-        {
-            span.debug("Operating in ticket mode for gamma_s", .{});
-            span.trace("Conditions met: prev_slot({d}) >= Y({d}), gamma_a.len({d}) == epoch_length({d})", .{
-                prev_epoch_slot,
-                params.ticket_submission_end_epoch_slot,
-                post_state.gamma_a.len,
-                params.epoch_length,
-            });
-            post_state.gamma_s = .{
-                .tickets = try Z_outsideInOrdering(types.TicketBody, allocator, post_state.gamma_a),
-            };
-        } else {
-            span.warn("Falling back to key mode for gamma_s", .{});
-            span.trace("Conditions: prev_slot({d}) >= Y({d}), gamma_a.len({d}) == epoch_length({d})", .{
-                prev_epoch_slot,
-                params.ticket_submission_end_epoch_slot,
-                post_state.gamma_a.len,
-                params.epoch_length,
-            });
-            post_state.gamma_s = .{
-                .keys = try gammaS_Fallback(allocator, post_state.eta[2], params.epoch_length, post_state.kappa),
-            };
-        }
-
-        // On an new epoch gamma_a will be reset to 0
-        span.debug("Resetting gamma_a ticket accumulator at epoch boundary", .{});
-        span.trace("Freeing previous gamma_a with {d} tickets", .{post_state.gamma_a.len});
-        allocator.free(post_state.gamma_a);
-        post_state.gamma_a = &[_]types.TicketBody{};
+        gamma_s.* = .{
+            .tickets = try Z_outsideInOrdering(types.TicketBody, allocator, state_delta.gamma.?.a),
+        };
+    } else {
+        span.warn("Falling back to key mode for gamma_s", .{});
+        span.trace("Conditions: prev_slot({d}) >= Y({d}), gamma_a.len({d}) == epoch_length({d})", .{
+            transition_time.prior_slot_in_epoch,
+            params.ticket_submission_end_epoch_slot,
+            current_gamma.a.len,
+            params.epoch_length,
+        });
+        gamma_s.* = .{
+            .keys = try gammaS_Fallback(allocator, eta_prime[2], params.epoch_length, current_kappa.*),
+        };
     }
 
-    // GP0.3.6@(66) Combine previous entropy accumulator (η0) with new entropy
-    // input η′0 ≡H(η0 ⌢ Y(Hv))
-    span.debug("Updating entropy accumulator eta[0]", .{});
-    span.trace("Current eta[0]={any}, vrf_output={any}", .{
-        std.fmt.fmtSliceHexLower(&post_state.eta[0]),
-        std.fmt.fmtSliceHexLower(&bandersnatch_vrf_output),
-    });
-    post_state.eta[0] = entropy.update(post_state.eta[0], bandersnatch_vrf_output);
-    span.trace("New eta[0]={any}", .{std.fmt.fmtSliceHexLower(&post_state.eta[0])});
+    // Reset gamma_a
+    span.debug("Resetting gamma_a ticket accumulator at epoch boundary", .{});
+    span.trace("Freeing previous gamma_a with {d} tickets", .{current_gamma.a.len});
+    allocator.free(state_delta.gamma.?.a);
+    state_delta.gamma.?.a = &[_]types.TicketBody{};
 
-    // Section 6.7 Ticketing
-    // GP0.3.6@(78) Merge the gamma_a and extrinsic tickets into a new ticket
-    // within the range ticket competition is happening
-    span.trace("Ticket submission check: epoch_slot={d}, submission_end={d}", .{ epoch_slot, params.ticket_submission_end_epoch_slot });
-    if (epoch_slot < params.ticket_submission_end_epoch_slot) {
+    return state_delta;
+}
+
+// Main transition function using extracted components
+pub fn transition(
+    comptime params: Params,
+    allocator: std.mem.Allocator,
+    transition_time: *const params.Time(),
+    eta_prime: *const state.Eta,
+    current_kappa: *const state.Kappa,
+    current_gamma: *const state.Gamma(params.validators_count, params.epoch_length),
+    current_iota: *const state.Iota,
+    post_psi: *const state.Psi,
+    ticket_extrinsic: types.TicketsExtrinsic,
+) Error!Result(params) {
+    const span = trace.span(.transition);
+    defer span.deinit();
+    span.debug("Starting state transition", .{});
+
+    // Process ticket extrinsic
+    const verified_extrinsic = try processTicketExtrinsic(
+        params,
+        allocator,
+        transition_time,
+        ticket_extrinsic,
+        current_gamma.a,
+        &current_gamma.z,
+        eta_prime,
+    );
+    defer allocator.free(verified_extrinsic);
+
+    // Handle epoch transition if needed
+    var state_delta = state.JamState(params){};
+    if (transition_time.isNewEpoch()) {
+        state_delta = try transitionEpoch(
+            params,
+            allocator,
+            transition_time,
+            current_kappa,
+            current_gamma,
+            current_iota,
+            eta_prime,
+            post_psi.offendersSlice(),
+        );
+        errdefer state_delta.deinit(allocator);
+    }
+
+    // Process tickets within submission window
+    if (transition_time.is_in_ticket_submission_period) {
         span.debug("Processing ticket submissions", .{});
-
-        // Merge the tickets into the ticket accumulator
         const merged_gamma_a = try mergeTicketsIntoTicketAccumulatorGammaA(
             allocator,
-            post_state.gamma_a,
+            current_gamma.a,
             verified_extrinsic,
             params.epoch_length,
         );
-        allocator.free(post_state.gamma_a);
-        post_state.gamma_a = merged_gamma_a;
+        (try state_delta.ensureGamma(allocator, current_gamma)).a = merged_gamma_a;
     }
 
+    // Generate markers
     span.debug("Determining output markers", .{});
     var epoch_marker: ?types.EpochMark = null;
     var winning_ticket_marker: ?types.TicketsMark = null;
 
-    span.trace("Epoch marker check: current_epoch={d}, prev_epoch={d}", .{ current_epoch, prev_epoch });
-    if (current_epoch > prev_epoch) {
+    if (transition_time.isNewEpoch()) {
         span.debug("Creating epoch marker", .{});
         epoch_marker = .{
-            .entropy = post_state.eta[1],
-            .tickets_entropy = post_state.eta[2], // TODO: check GP for what this is
-            // TODO: place this function on the validator set level.
-            .validators = try extractBandersnatchKeys(allocator, post_state.gamma_k),
+            .entropy = eta_prime[1],
+            .tickets_entropy = eta_prime[2],
+            .validators = try extractBandersnatchKeys(allocator, state_delta.gamma.?.k),
         };
     }
-    errdefer if (epoch_marker) |*marker| {
-        allocator.free(marker.validators);
-    };
 
-    // (72)@GP0.3.6 e′ = e ∧ m < Y ≤ m′ ∧ ∣γa∣ = E
-    // Not crossing an epoch boundary
-    if (current_epoch == prev_epoch and
-        // But crosses the Y boundary
-        prev_epoch_slot < params.ticket_submission_end_epoch_slot and
-        params.ticket_submission_end_epoch_slot <= epoch_slot and
-        // And we have a full epoch worth of tickets accumulated
-        post_state.gamma_a.len == params.epoch_length)
+    if (transition_time.current_epoch == transition_time.prior_epoch and
+        transition_time.prior_slot_in_epoch < params.ticket_submission_end_epoch_slot and
+        params.ticket_submission_end_epoch_slot <= transition_time.current_slot_in_epoch and
+        current_gamma.a.len == params.epoch_length)
     {
         winning_ticket_marker = .{
             .tickets = try Z_outsideInOrdering(
                 types.TicketBody,
                 allocator,
-                pre_state.gamma_a,
+                current_gamma.a,
             ),
         };
     }
 
-    return Result{
-        .post_state = post_state,
+    return Result(params){
+        .post_state = state_delta,
         .epoch_marker = epoch_marker,
         .ticket_marker = winning_ticket_marker,
     };
@@ -358,7 +326,7 @@ pub fn transition(
 fn verifyTicketEnvelope(
     allocator: std.mem.Allocator,
     ring_size: usize,
-    gamma_z: types.BandersnatchVrfRoot,
+    gamma_z: *const types.BandersnatchVrfRoot,
     n2: types.Entropy,
     extrinsic: []const types.TicketEnvelope,
 ) ![]types.TicketBody {
@@ -367,7 +335,7 @@ fn verifyTicketEnvelope(
     span.debug("Verifying {d} ticket envelopes", .{extrinsic.len});
     span.trace("Ring size: {d}, gamma_z: {any}, n2: {any}", .{
         ring_size,
-        std.fmt.fmtSliceHexLower(&gamma_z),
+        std.fmt.fmtSliceHexLower(gamma_z),
         std.fmt.fmtSliceHexLower(&n2),
     });
 

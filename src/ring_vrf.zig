@@ -271,7 +271,7 @@ extern fn vrf_verify_ring_signature_against_commitment(
 ) callconv(.C) bool;
 
 pub fn verifyRingSignatureAgainstCommitment(
-    commitment: types.BandersnatchVrfRoot,
+    commitment: *const types.BandersnatchVrfRoot,
     ring_size: usize,
     vrf_input: []const u8,
     aux_data: []const u8,
@@ -280,7 +280,7 @@ pub fn verifyRingSignatureAgainstCommitment(
     var vrf_output: types.BandersnatchVrfOutput = undefined;
 
     const result = vrf_verify_ring_signature_against_commitment(
-        @ptrCast(&commitment),
+        @ptrCast(commitment),
         ring_size,
         @ptrCast(vrf_input.ptr),
         vrf_input.len,
