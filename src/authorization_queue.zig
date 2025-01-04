@@ -37,6 +37,29 @@ pub fn Phi(
             return .{ .queue = queue, .allocator = allocator };
         }
 
+        // Create a deep copy of the AuthorizationQueue
+        pub fn deepClone(self: *const @This()) !@This() {
+            // Initialize a new queue with the same allocator
+            var cloned: @This() = .{
+                .allocator = self.allocator,
+                .queue = undefined,
+            };
+
+            // Deep copy each core's queue
+            for (0..core_count) |i| {
+                // Create a new ArrayList with exact capacity needed
+                cloned.queue[i] = try std.ArrayList(AuthorizerHash).initCapacity(
+                    self.allocator,
+                    self.queue[i].items.len,
+                );
+
+                // Copy all items from the original queue
+                try cloned.queue[i].appendSlice(self.queue[i].items);
+            }
+
+            return cloned;
+        }
+
         // Deinitialize the AuthorizationQueue
         pub fn deinit(self: *Phi(core_count, max_authorizations_queue_items)) void {
             for (0..core_count) |i| {
