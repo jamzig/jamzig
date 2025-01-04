@@ -43,12 +43,8 @@ pub const Result = struct {
     epoch_marker: ?types.EpochMark,
     ticket_marker: ?types.TicketsMark,
 
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        self.deinit_markers(allocator);
-    }
-
     // TODO: this can be removed
-    pub fn deinit_markers(self: *@This(), allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         if (self.epoch_marker) |*marker| {
             allocator.free(marker.validators);
         }

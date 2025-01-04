@@ -235,12 +235,54 @@ pub const Delta = struct {
         try @import("state_json/services.zig").jsonStringify(self, jw);
     }
 
-    pub fn deinit(self: *Delta) void {
+    pub fn deepClone(self: *const Delta) !Delta {
+        var clone = Delta.init(self.allocator);
+        errdefer clone.deinit();
+
+        // Iterate through all accounts in the source Delta
         var it = self.accounts.iterator();
         while (it.next()) |entry| {
-            entry.value_ptr.deinit();
+            const account = entry.value_ptr;
+            // Create a new ServiceAccount instance for each account
+            // using the same allocator as the parent Delta
+            var new_account = ServiceAccount.init(self.allocator);
+            errdefer new_account.deinit();
+
+            // Clone the storage map - each value in storage needs its own
+            // memory allocation since we're doing a deep copy
+            var storage_it = account.storage.iterator();
+            while (storage_it.next()) |storage_entry| {
+                const new_value = try clone.allocator.dupe(u8, storage_entry.value_ptr.*);
+                try new_account.storage.put(storage_entry.key_ptr.*, new_value);
+            }
+
+            // Clone the preimages map - similar to storage, each preimage
+            // needs its own memory allocation
+            var preimage_it = account.preimages.iterator();
+            while (preimage_it.next()) |preimage_entry| {
+                const new_value = try clone.allocator.dupe(u8, preimage_entry.value_ptr.*);
+                try new_account.preimages.put(preimage_entry.key_ptr.*, new_value);
+            }
+
+            // Clone preimage lookups - since PreimageLookup contains only
+            // simple types (fixed-size arrays of optionals), we can copy directly
+            var lookup_it = account.preimage_lookups.iterator();
+            while (lookup_it.next()) |lookup_entry| {
+                try new_account.preimage_lookups.put(lookup_entry.key_ptr.*, lookup_entry.value_ptr.*);
+            }
+
+            // Copy simple fields that don't require allocation
+            new_account.code_hash = account.code_hash;
+            new_account.balance = account.balance;
+            new_account.min_gas_accumulate = account.min_gas_accumulate;
+            new_account.min_gas_on_transfer = account.min_gas_on_transfer;
+
+            // Store the fully constructed account in our new Delta
+            // using the same ServiceId (key) as the original
+            try clone.putAccount(entry.key_ptr.*, new_account);
         }
-        self.accounts.deinit();
+
+        return clone;
     }
 
     // TODO: change serviceindex to serviceid in types
@@ -303,6 +345,14 @@ pub const Delta = struct {
             from_account.balance -= transfer.amount;
             to_account.balance += transfer.amount;
         }
+    }
+
+    pub fn deinit(self: *Delta) void {
+        var it = self.accounts.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        self.accounts.deinit();
     }
 };
 

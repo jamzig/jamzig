@@ -92,34 +92,27 @@ pub fn stateTransition(
 
     std.debug.assert(current_state.ensureFullyInitialized() catch false);
 
-    const state_transition = try StateTransition(params).init(allocator, current_state);
+    const stx_time = params.Time().init(current_state.tau.?, new_block.header.slot);
+    var stx = try StateTransition(params).init(allocator, current_state, stx_time);
+    errdefer stx.deinit();
 
     span.debug("Starting time transition (τ')", .{});
     try transitionTime(
-        &state_transition,
-        new_block.header.slot,
-    );
-    span.trace("Updated tau value: {d}", .{state_transition.ensure(.tau_prime)});
-
-    const transition_time = params.Time().init(
-        current_state.tau.?,
+        params,
+        &stx,
         new_block.header.slot,
     );
 
     span.debug("Starting recent history transition (β')", .{});
-    state_d.beta = try transitionRecentHistory(
+    try transitionRecentHistory(
         params,
-        allocator,
-        &current_state.beta.?,
+        &stx,
         new_block,
     );
-    span.trace("Updated beta block count: {d}", .{state_d.beta.?.blocks.items.len});
 
     // TODO: it seems safrole needs updated psi with offenders now
     // putting it here to make it work
     span.debug("Starting PSI initialization", .{});
-    state_d.psi = try current_state.psi.?.deepClone();
-    span.trace("Offender count in PSI: {d}", .{state_d.psi.?.punish_set.count()});
 
     // Step 3-5: Safrole Consensus Mechanism Transition (γ', η', ι', κ', λ')
     // Purpose: Update the consensus-related state components based on the Safrole rules.
@@ -134,6 +127,7 @@ pub fn stateTransition(
     span.debug("Starting Safrole consensus transition", .{});
 
     // Extract entropy from block header's entropy source
+    // TODO: cleanup
     span.debug("Extracting entropy from block header", .{});
     const entropy = try @import("crypto/bandersnatch.zig")
         .Bandersnatch.Signature
@@ -142,23 +136,18 @@ pub fn stateTransition(
     span.trace("Block entropy={any}", .{std.fmt.fmtSliceHexLower(&entropy)});
 
     span.debug("Starting epoch transition", .{});
-    state_d.eta = transitionEta(&current_state.eta.?, entropy);
+    try transitionEta(params, &stx, entropy);
 
-    var safrole_transition = try transitionSafrole(
+    span.debug("Starting safrole transition", .{});
+    var markers = try transitionSafrole(
         params,
-        allocator,
-        &transition_time,
-        &state_d.eta.?,
-        &current_state.kappa.?,
-        &current_state.gamma.?,
-        &current_state.iota.?,
-        &state_d.psi.?, // offenders
+        &stx,
         new_block.extrinsic.tickets,
     );
+
     // NOTE: only deinit the markers as we are using rest of allocated
     // fiels in the new state
-    defer safrole_transition.deinit_markers(allocator);
-    try state_d.merge(&safrole_transition.post_state, allocator);
+    defer markers.deinit(allocator);
 
     span.debug("State transition completed successfully", .{});
 
@@ -269,7 +258,7 @@ pub fn stateTransition(
     //     &new_state.kappa,
     // );
 
-    return state_d;
+    return try stx.cloneBaseAndMerge();
 }
 
 pub fn transitionTime(
@@ -322,20 +311,20 @@ pub fn transitionEta(comptime params: Params, stx: *StateTransition(params), new
 // TODO: optimize this by not deepcloning and sharing pointers
 pub fn transitionRecentHistory(
     comptime params: Params,
-    allocator: Allocator,
-    current_beta: *const state.Beta,
+    stx: *StateTransition(params),
     new_block: *const Block,
-) !state.Beta {
+) !void {
     const span = trace.span(.transition_recent_history);
     defer span.deinit();
+
+    var beta_prime = try stx.ensure(.beta_prime);
+
     span.debug("Starting recent history transition", .{});
-    span.trace("Current beta block count: {d}", .{current_beta.blocks.items.len});
+    span.trace("Current beta block count: {d}", .{beta_prime.blocks.items.len});
 
     const RecentBlock = @import("recent_blocks.zig").RecentBlock;
     // Transition β with information from the new block
-    var new_beta = try current_beta.deepClone(allocator);
-    try new_beta.import(try RecentBlock.fromBlock(params, allocator, new_block));
-    return new_beta;
+    try beta_prime.import(try RecentBlock.fromBlock(params, stx.allocator, new_block));
 }
 
 const safrole = @import("safrole.zig");

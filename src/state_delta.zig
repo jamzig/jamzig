@@ -216,6 +216,20 @@ pub fn StateTransition(comptime params: Params) type {
             field_ptr.* = value;
         }
 
+        /// Merges changes into a new state, invalidating prime dn thus the state_transiton object
+        pub fn cloneBaseAndMerge(self: *Self) !State {
+            var cloned = try self.base.deepClone(self.allocator);
+            try cloned.merge(&self.prime, self.allocator);
+            return cloned;
+        }
+
+        /// Takes ownership of prime/dagger states to create merged state, consuming the prime state and
+        /// altering base.
+        pub fn takeBaseAndMerge(self: *Self) !State {
+            try self.base.merge(&self.prime, self.allocator);
+            return self.base;
+        }
+
         /// frees all owned memory except non-owned self.base
         pub fn deinit(self: *Self) void {
             self.prime.deinit(self.allocator);

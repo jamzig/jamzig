@@ -170,24 +170,7 @@ pub fn JamState(comptime params: Params) type {
             // TODO: maybe remove parameter
             _: std.mem.Allocator,
         ) !JamState(params) {
-            return JamState(params){
-                .tau = null,
-                .eta = null,
-                .alpha = null,
-                .beta = null,
-                .chi = null,
-                .delta = null,
-                .gamma = null,
-                .iota = null,
-                .kappa = null,
-                .lambda = null,
-                .phi = null,
-                .pi = null,
-                .psi = null,
-                .rho = null,
-                .theta = null,
-                .xi = null,
-            };
+            return JamState(params){};
         }
 
         /// Initialize an empty genesis state with all components properly initialized
@@ -252,6 +235,39 @@ pub fn JamState(comptime params: Params) type {
             var map = try self.buildStateMerklizationDictionaryWithConfig(allocator, config);
             defer map.deinit();
             return try @import("state_merklization.zig").merklizeStateDictionary(allocator, &map);
+        }
+
+        pub fn deepClone(self: *const JamState(params), allocator: std.mem.Allocator) !JamState(params) {
+            var clone = JamState(params){};
+
+            inline for (std.meta.fields(JamState(params))) |field| {
+                if (@typeInfo(field.type) != .optional) continue;
+
+                const FieldType = std.meta.Child(field.type);
+                const FieldTypeInfo = @typeInfo(FieldType);
+
+                if (FieldTypeInfo == .@"struct" or FieldTypeInfo == .@"union") {
+                    if (@field(self, field.name)) |value| {
+                        if (@hasDecl(FieldType, "deepClone")) {
+                            // Check if deepClone takes an allocator
+                            const info = @typeInfo(@TypeOf(FieldType.deepClone));
+                            if (info == .@"fn" and info.@"fn".params.len > 1) {
+                                @field(clone, field.name) = try value.deepClone(allocator);
+                            } else {
+                                @field(clone, field.name) = try value.deepClone();
+                            }
+                        } else {
+                            @panic("Please implement deepClone for: " ++ @typeName(FieldType));
+                        }
+                    }
+                } else {
+                    // For simple types that can be copied directly
+                    if (@field(self, field.name)) |value| {
+                        @field(clone, field.name) = value;
+                    }
+                }
+            }
+            return clone;
         }
 
         /// Deinitialize and free resources
