@@ -1,17 +1,16 @@
 /// Adapts the TestVector format to our transition function
 const std = @import("std");
 
-pub const types = @import("../types.zig");
-pub const state = @import("../state.zig");
-pub const safrole_types = @import("../safrole/types.zig");
-pub const safrole_test_vector = @import("../jamtestvectors/safrole.zig");
+const types = @import("../types.zig");
+const state = @import("../state.zig");
+const safrole_types = @import("../safrole/types.zig");
+const safrole_test_vector = @import("../jamtestvectors/safrole.zig");
+const stf = @import("../stf.zig");
+const safrole = @import("../safrole.zig");
+const dstate = @import("../state_delta.zig");
 
 const Allocator = std.mem.Allocator;
-pub const Params = @import("../jam_params.zig").Params;
-
-pub const safrole = @import("../safrole.zig");
-
-const dstate = @import("../state_delta.zig");
+const Params = @import("../jam_params.zig").Params;
 
 // Constant
 pub const TransitionResult = struct {
@@ -54,21 +53,13 @@ pub fn transition(
     current_state.iota = try pre_state.gamma.iota.deepClone(allocator);
 
     const transition_time = params.Time().init(current_state.tau.?, input.slot);
-    var transition_state = try dstate.StateTransition(params).init(allocator, &current_state, transition_time);
+    var stx = try dstate.StateTransition(params).init(allocator, &current_state, transition_time);
 
-    // Now simulate the state transitions tested in this test vector
-    const stf = @import("../stf.zig");
-
-    // Since the vector tests correct progression of time
-    try stf.transitionTime(params, &transition_state, input.slot);
-    try stf.transitionEta(params, &transition_state, input.entropy);
-
-    // we need to transition eta here first using the entropy
-    var result = stf.transitionSafrole(
+    var result = performTransitions(
         params,
         allocator,
-        &transition_state,
-        input.extrinsic,
+        &stx,
+        input,
     ) catch |e| {
         const test_vector_error = switch (e) {
             error.bad_slot => safrole_test_vector.ErrorCode.bad_slot,
@@ -89,7 +80,7 @@ pub fn transition(
 
     // We need to do something with transition_state
     // TODO: this can be done with transition_state
-    try current_state.merge(&transition_state.prime, allocator);
+    try current_state.merge(&stx.prime, allocator);
 
     const test_vector_post_state = try JamStateToTestVectorState(
         params,
@@ -106,6 +97,24 @@ pub fn transition(
         },
         .state = test_vector_post_state,
     };
+}
+
+fn performTransitions(
+    comptime params: Params,
+    allocator: std.mem.Allocator,
+    stx: *dstate.StateTransition(params),
+    input: safrole_test_vector.Input,
+) !safrole.Result {
+
+    // Perform all transitions in sequence, propagating any errors
+    try stf.transitionTime(params, stx, input.slot);
+    try stf.transitionEta(params, stx, input.entropy);
+    return try stf.transitionSafrole(
+        params,
+        allocator,
+        stx,
+        input.extrinsic,
+    );
 }
 
 fn GammaFromTestVectorState(
