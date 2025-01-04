@@ -259,7 +259,28 @@ pub fn JamState(comptime params: Params) type {
     };
 }
 
-// Helper functions that will be used by our generated methods
+pub const Alpha = @import("authorization.zig").Alpha;
+pub const Beta = @import("recent_blocks.zig").RecentHistory;
+
+// History and Queuing or work reports
+pub const Xi = @import("accumulated_reports.zig").Xi;
+pub const Theta = @import("available_reports.zig").Theta;
+
+// TODO: move this to a seperate file
+pub const Gamma = @import("safrole_state.zig").Gamma;
+pub const Delta = @import("services.zig").Delta;
+pub const Eta = types.Eta;
+pub const Iota = types.Iota;
+pub const Kappa = types.Kappa;
+pub const Lambda = types.Lambda;
+pub const Rho = @import("pending_reports.zig").Rho;
+pub const Tau = types.TimeSlot;
+pub const Phi = @import("authorization_queue.zig").Phi;
+pub const Chi = @import("services_priviledged.zig").Chi;
+pub const Psi = @import("disputes.zig").Psi;
+pub const Pi = @import("validator_stats.zig").Pi;
+
+// Helper functions that will be used by our comptime methods
 const StateHelpers = struct {
     // Helper for merging a single field
     fn mergeField(self: anytype, other: anytype, struct_field: *const std.builtin.Type.StructField, allocator: std.mem.Allocator) !void {
@@ -368,24 +389,3 @@ const StateHelpers = struct {
         return @Type(.{ .error_set = &error_fields });
     }
 };
-
-pub const Alpha = @import("authorization.zig").Alpha;
-pub const Beta = @import("recent_blocks.zig").RecentHistory;
-
-// History and Queuing or work reports
-pub const Xi = @import("accumulated_reports.zig").Xi;
-pub const Theta = @import("available_reports.zig").Theta;
-
-// TODO: move this to a seperate file
-pub const Gamma = @import("safrole_state.zig").Gamma;
-pub const Delta = @import("services.zig").Delta;
-pub const Eta = types.Eta;
-pub const Iota = types.Iota;
-pub const Kappa = types.Kappa;
-pub const Lambda = types.Lambda;
-pub const Rho = @import("pending_reports.zig").Rho;
-pub const Tau = types.TimeSlot;
-pub const Phi = @import("authorization_queue.zig").Phi;
-pub const Chi = @import("services_priviledged.zig").Chi;
-pub const Psi = @import("disputes.zig").Psi;
-pub const Pi = @import("validator_stats.zig").Pi;
