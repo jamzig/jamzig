@@ -181,40 +181,6 @@ pub fn JamState(comptime params: Params) type {
             return state;
         }
 
-        /// Checks if the whole state has been initialized. We do not have any
-        /// entries which are null
-        ///
-        // Helper function to build the InitError type at compile time
-        fn buildInitErrorType(comptime T: type) type {
-            // Get all fields of the state struct
-            const fields = std.meta.fields(T);
-
-            // Create a tuple type containing all our error tags
-            var error_fields: [fields.len]std.builtin.Type.Error = undefined;
-            for (fields, 0..) |field, i| {
-                error_fields[i] = .{
-                    .name = "Uninitialized" ++ field.name,
-                };
-            }
-
-            // Create and return the error set type
-            return @Type(.{ .error_set = &error_fields });
-        }
-
-        pub fn ensureFullyInitialized(self: *const JamState(params)) !bool {
-            // Define our error type at compile time
-            const InitError = comptime buildInitErrorType(@TypeOf(self.*));
-
-            // Check each field using inline for
-            inline for (std.meta.fields(@TypeOf(self.*))) |field| {
-                if (@field(self, field.name) == null) {
-                    // Create the error name dynamically
-                    return @field(InitError, "Uninitialized" ++ field.name);
-                }
-            }
-            return true;
-        }
-
         const state_dict = @import("state_dictionary.zig");
         pub fn buildStateMerklizationDictionary(self: *const JamState(params), allocator: std.mem.Allocator) !state_dict.MerklizationDictionary {
             return try state_dict.buildStateMerklizationDictionary(params, allocator, self);
@@ -237,6 +203,20 @@ pub fn JamState(comptime params: Params) type {
 
         // Comptime patterns
         usingnamespace StateHelpers;
+
+        pub fn ensureFullyInitialized(self: *const JamState(params)) !bool {
+            // Define our error type at compile time
+            const InitError = comptime StateHelpers.buildInitErrorType(@TypeOf(self.*));
+
+            // Check each field using inline for
+            inline for (std.meta.fields(@TypeOf(self.*))) |field| {
+                if (@field(self, field.name) == null) {
+                    // Create the error name dynamically
+                    return @field(InitError, "Uninitialized" ++ field.name);
+                }
+            }
+            return true;
+        }
 
         pub fn deepClone(self: *const JamState(params), allocator: std.mem.Allocator) !JamState(params) {
             var clone = JamState(params){};
@@ -366,6 +346,26 @@ const StateHelpers = struct {
             2 => value.deinit(allocator),
             else => @panic("deinit must take 0 or 1 parameters for: " ++ @typeName(ValueType)),
         }
+    }
+
+    /// Checks if the whole state has been initialized. We do not have any
+    /// entries which are null
+    ///
+    // Helper function to build the InitError type at compile time
+    fn buildInitErrorType(comptime T: type) type {
+        // Get all fields of the state struct
+        const fields = std.meta.fields(T);
+
+        // Create a tuple type containing all our error tags
+        var error_fields: [fields.len]std.builtin.Type.Error = undefined;
+        for (fields, 0..) |field, i| {
+            error_fields[i] = .{
+                .name = "Uninitialized" ++ field.name,
+            };
+        }
+
+        // Create and return the error set type
+        return @Type(.{ .error_set = &error_fields });
     }
 };
 
