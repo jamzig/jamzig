@@ -1,11 +1,16 @@
 const std = @import("std");
-const state_d = @import("../state_delta.zig");
-const StateTransition = state_d.StateTransition;
-const Params = @import("../jam_params.zig").Params;
-const types = @import("../types.zig");
+
 const state = @import("../state.zig");
+const types = @import("../types.zig");
 const utils = @import("../utils.zig");
 const disputes = @import("../disputes.zig");
+
+const Params = @import("../jam_params.zig").Params;
+const StateTransition = @import("../state_delta.zig").StateTransition;
+
+pub const Error = error{
+    invalid_disputes_extrinsic,
+};
 
 pub fn transition(
     comptime validators_count: u32,

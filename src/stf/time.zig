@@ -1,10 +1,15 @@
 const std = @import("std");
-const state_d = @import("../state_delta.zig");
-const StateTransition = state_d.StateTransition;
-const Params = @import("../jam_params.zig").Params;
+
 const types = @import("../types.zig");
-const tracing = @import("../tracing.zig");
-const trace = tracing.scoped(.stf);
+
+const Params = @import("../jam_params.zig").Params;
+const StateTransition = @import("../state_delta.zig").StateTransition;
+
+const trace = @import("../tracing.zig").scoped(.stf);
+
+pub const Error = error{
+    bad_slot,
+};
 
 pub fn transition(
     comptime params: Params,

@@ -1,11 +1,16 @@
 const std = @import("std");
+
 const state_d = @import("../state_delta.zig");
-const StateTransition = state_d.StateTransition;
-const Params = @import("../jam_params.zig").Params;
 const types = @import("../types.zig");
 
-const tracing = @import("../tracing.zig");
-const trace = tracing.scoped(.stf);
+const Params = @import("../jam_params.zig").Params;
+const StateTransition = state_d.StateTransition;
+
+const trace = @import("../tracing.zig").scoped(.stf);
+
+pub const Error = error{
+    invalid_entropy,
+};
 
 pub fn transition(comptime params: Params, stx: *StateTransition(params), new_entropy: types.Entropy) !void {
     const span = trace.span(.transition_eta);

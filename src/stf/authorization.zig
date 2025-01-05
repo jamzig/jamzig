@@ -1,6 +1,11 @@
 const std = @import("std");
+
 const state = @import("../state.zig");
 const types = @import("../types.zig");
+
+pub const Error = error{
+    invalid_guarantees,
+};
 
 pub fn transition(
     allocator: std.mem.Allocator,
