@@ -158,32 +158,14 @@ pub const RecentHistory = struct {
 
     /// Performs a deep clone of the RecentHistory as efficiently as possible
     pub fn deepClone(self: *const Self, allocator: Allocator) !Self {
-        var new_history = try Self.init(allocator, self.max_blocks);
-        errdefer new_history.deinit();
+        var clone = try Self.init(allocator, self.max_blocks);
+        errdefer clone.deinit();
 
         for (self.blocks.items) |block| {
             const cloned_block = try block.deepClone(allocator);
-            try new_history.addBlockInfo(cloned_block);
+            try clone.addBlockInfo(cloned_block);
         }
-        return new_history;
-    }
-
-    /// Merges another RecentHistory into this one, replacing all blocks
-    /// with those from the other history.
-    /// TODO: do this smarter and more efficiently
-    pub fn merge(self: *Self, other: *const Self) !void {
-        while (self.blocks.popOrNull()) |*block| {
-            block.deinit(self.allocator);
-        }
-
-        // Update max_blocks if needed
-        self.max_blocks = other.max_blocks;
-
-        // Clone and add all blocks from other
-        for (other.blocks.items) |block| {
-            const cloned_block = try block.deepClone(self.allocator);
-            try self.addBlockInfo(cloned_block);
-        }
+        return clone;
     }
 };
 

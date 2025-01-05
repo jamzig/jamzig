@@ -2,11 +2,79 @@ const std = @import("std");
 const types = @import("../types.zig");
 
 /// Represents a Safrole state of the system as referenced in the GP γ.
+pub const Gamma = struct {
+    /// τ: The most recent block's timeslot, crucial for maintaining the temporal
+    /// context in block production.
+    tau: types.TimeSlot,
+
+    /// η: The entropy accumulator, which contributes to the system's randomness
+    /// and is updated with each block.
+    eta: types.Eta,
+
+    /// λ: Validator keys and metadata from the previous epoch, essential for
+    /// ensuring continuity and validating current operations.
+    lambda: types.Lambda,
+
+    /// κ: Validator keys and metadata that are currently active, representing the
+    /// validators responsible for the current epoch.
+    kappa: types.Kappa,
+
+    /// γₖ: The keys for the validators of the next epoch, which help in planning
+    /// the upcoming validation process.
+    gamma_k: types.GammaK,
+
+    /// ι: Validator keys and metadata to be drawn from next, which indicates the
+    /// future state and validators likely to be active.
+    iota: types.Iota,
+
+    /// γₐ: The sealing lottery ticket accumulator, part of the process ensuring
+    /// randomness and fairness in block sealing.
+    gamma_a: types.GammaA,
+
+    /// γₛ: the current epoch’s slot-sealer series, which is either a
+    // full complement of E tickets or, in the case of a fallback
+    // mode, a series of E Bandersnatch keys
+    gamma_s: types.GammaS,
+
+    /// γ𝑧: The Bandersnatch root for the current epoch’s ticket submissions,
+    /// which is a cryptographic commitment to the current state of ticket
+    /// submissions.
+    gamma_z: types.GammaZ,
+
+    /// Frees all allocated memory in the State struct.
+    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        self.lambda.deinit(allocator);
+        self.kappa.deinit(allocator);
+        self.gamma_k.deinit(allocator);
+        self.iota.deinit(allocator);
+
+        allocator.free(self.gamma_a);
+
+        self.gamma_s.deinit(allocator);
+    }
+
+    /// Creates a deep clone of the State struct.
+    pub fn deepClone(self: *const State, allocator: std.mem.Allocator) !State {
+        return State{
+            .tau = self.tau,
+            .eta = self.eta,
+            .lambda = try self.lambda.deepClone(allocator),
+            .kappa = try self.kappa.deepClone(allocator),
+            .gamma_k = try self.gamma_k.deepClone(allocator),
+            .iota = try self.iota.deepClone(allocator),
+            .gamma_a = try allocator.dupe(types.TicketBody, self.gamma_a),
+            .gamma_s = try self.gamma_s.deepClone(allocator),
+            .gamma_z = self.gamma_z,
+        };
+    }
+};
+
+/// Represents a Safrole state of the system as referenced in the GP γ.
 pub const State = struct {
     // NOTE: Using the raw safrole State type to maintain binary compatibility
     // during serialization/deserialization, since post_offenders was added
     // as an extension to the original state.
-    gamma: @import("../safrole/types.zig").State,
+    gamma: Gamma,
 
     /// [ψ_o'] Posterior offenders sequence.
     post_offenders: []types.Ed25519Public,
@@ -62,7 +130,7 @@ pub const Output = union(enum) {
         writer: anytype,
     ) !void {
         switch (self) {
-            .err => try writer.print("err = {?s}", .{self.err}),
+            .err => try writer.print("err = {s}", .{@tagName(self.err)}),
             .ok => |marks| try writer.print("ok = {any}", .{marks}),
         }
     }
@@ -86,7 +154,7 @@ pub const OutputMarks = struct {
         writer: anytype,
     ) !void {
         const epoch_len = if (self.epoch_mark) |epoch| epoch.validators.len else 0;
-        const tickets_len = if (self.tickets_mark) |tickets| tickets.len else 0;
+        const tickets_len = if (self.tickets_mark) |tickets| tickets.tickets.len else 0;
 
         try writer.print("epoch_mark.len = {}, tickets_mark.len = {}", .{ epoch_len, tickets_len });
     }

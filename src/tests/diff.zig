@@ -12,6 +12,7 @@ pub const DiffResult = union(enum) {
         switch (self) {
             .EmptyDiff => {},
             .Diff => |diff| {
+                std.debug.print("\n\n", .{});
                 std.debug.print("\x1b[38;5;208m+ = in expected, not in actual => add to actual\x1b[0m\n", .{});
                 std.debug.print("\x1b[38;5;208m- = in actual, not in expected => remove from actual\x1b[0m\n", .{});
                 std.debug.print("{s}", .{diff});
@@ -43,6 +44,21 @@ pub const DiffResult = union(enum) {
         }
     }
 };
+
+pub fn diffBasedOnTypesFormat(
+    allocator: std.mem.Allocator,
+    actual: anytype,
+    expected: anytype,
+) !DiffResult {
+
+    // Print both before and after states
+    const actual_str = try tfmt.formatAlloc(allocator, actual);
+    defer allocator.free(actual_str);
+    const expected_str = try tfmt.formatAlloc(allocator, expected);
+    defer allocator.free(expected_str);
+
+    return diffBasedOnStrings(allocator, actual_str, expected_str);
+}
 
 pub fn diffBasedOnFormat(
     allocator: std.mem.Allocator,

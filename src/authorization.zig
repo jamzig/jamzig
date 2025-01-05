@@ -1,7 +1,9 @@
 const std = @import("std");
 const types = @import("types.zig");
 
-// Constants TODO: Move to configuration
+// Constants
+// TODO: Move to configuration
+//  max_authorizations_pool_items: u8 = 8, // O
 const O: usize = 8; // Maximum number of items in the authorizations pool
 
 // Types
@@ -60,6 +62,21 @@ pub fn Alpha(comptime core_count: u16) type {
             }
         }
 
+        pub fn deepClone(self: *const @This()) !@This() {
+            var clone = @This(){
+                .pools = undefined,
+            };
+
+            // Clone each pool
+            for (0..core_count) |i| {
+                clone.pools[i] = try AuthorizationPool.init(0);
+                // Copy all hashes from the original pool
+                try clone.pools[i].appendSlice(self.pools[i].constSlice());
+            }
+
+            return clone;
+        }
+
         pub fn format(
             self: @This(),
             comptime fmt: []const u8,
@@ -67,6 +84,10 @@ pub fn Alpha(comptime core_count: u16) type {
             writer: anytype,
         ) !void {
             try @import("state_format/authorization.zig").format(core_count, self, fmt, options, writer);
+        }
+
+        pub fn deinit(_: *@This()) void {
+            // No need to deinitialize self since it was stack-allocated
         }
     };
 }

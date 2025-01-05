@@ -11,66 +11,66 @@ pub fn JamState(comptime params: Params) type {
     return struct {
         /// α: Core authorization state and associated queues.
         /// Manipulated in: src/authorization.zig
-        alpha: ?Alpha(params.core_count),
+        alpha: ?Alpha(params.core_count) = null,
 
         /// β: Metadata of the latest block, including block number, timestamps, and cryptographic references.
         /// Manipulated in: src/recent_blocks.zig
-        beta: ?Beta,
+        beta: ?Beta = null,
 
         /// γ: List of current validators and their states, such as stakes and identities.
         /// Manipulated in: src/safrole.zig
-        gamma: ?Gamma(params.validators_count, params.epoch_length),
+        gamma: ?Gamma(params.validators_count, params.epoch_length) = null,
 
         /// δ: Service accounts state, managing all service-related data (similar to smart contracts).
         /// Manipulated in: src/services.zig
-        delta: ?Delta,
+        delta: ?Delta = null,
 
         /// η: On-chain entropy pool used for randomization and consensus mechanisms.
         /// Manipulated in: src/safrole.zig
-        eta: ?Eta,
+        eta: ?Eta = null,
 
         /// ι: Validators enqueued for activation in the upcoming epoch.
         /// Manipulated in: src/safrole.zig
-        iota: ?Iota,
+        iota: ?Iota = null,
 
         /// κ: Active validator set currently responsible for validating blocks and maintaining the network.
         /// Manipulated in: src/safrole.zig
-        kappa: ?Kappa,
+        kappa: ?Kappa = null,
 
         /// λ: Archived validators who have been removed or rotated out of the active set.
         /// Manipulated in: src/safrole.zig
-        lambda: ?Lambda,
+        lambda: ?Lambda = null,
 
         /// ρ: State related to each core’s current assignment, including work packages and reports.
         /// Manipulated in: src/core_assignments.zig
-        rho: ?Rho(params.core_count),
+        rho: ?Rho(params.core_count) = null,
 
         /// τ: Current time, represented in terms of epochs and slots.
         /// Manipulated in: src/safrole.zig
-        tau: ?Tau,
+        tau: ?Tau = null,
 
         /// φ: Authorization queue for tasks or processes awaiting authorization by the network.
         /// Manipulated in: src/authorization.zig
-        phi: ?Phi(params.core_count, params.max_authorizations_queue_items),
+        phi: ?Phi(params.core_count, params.max_authorizations_queue_items) = null,
 
         /// χ: Privileged service identities, which may have special roles within the protocol.
         /// Manipulated in: src/services.zig
-        chi: ?Chi,
+        chi: ?Chi = null,
 
         /// ψ: Judgement state, tracking disputes or reports about validators or state transitions.
         /// Manipulated in: src/disputes.zig
-        psi: ?Psi,
+        psi: ?Psi = null,
 
         /// π: Validator performance statistics, tracking penalties, rewards, and other metrics.
         /// Manipulated in: src/validator_stats.zig
-        pi: ?Pi,
+        pi: ?Pi = null,
 
         /// ξ: Epochs worth history of accumulated work reports
-        xi: ?Xi(params.epoch_length),
+        xi: ?Xi(params.epoch_length) = null,
 
         /// θ: List of available and/or audited but not yet accumulated work
         /// reports
-        theta: ?Theta(params.epoch_length),
+        theta: ?Theta(params.epoch_length) = null,
 
         /// Initialize Alpha component
         pub fn initAlpha(self: *JamState(params), _: std.mem.Allocator) !void {
@@ -157,24 +157,7 @@ pub fn JamState(comptime params: Params) type {
             // TODO: maybe remove parameter
             _: std.mem.Allocator,
         ) !JamState(params) {
-            return JamState(params){
-                .tau = null,
-                .eta = null,
-                .alpha = null,
-                .beta = null,
-                .chi = null,
-                .delta = null,
-                .gamma = null,
-                .iota = null,
-                .kappa = null,
-                .lambda = null,
-                .phi = null,
-                .pi = null,
-                .psi = null,
-                .rho = null,
-                .theta = null,
-                .xi = null,
-            };
+            return JamState(params){};
         }
 
         /// Initialize an empty genesis state with all components properly initialized
@@ -198,27 +181,6 @@ pub fn JamState(comptime params: Params) type {
             return state;
         }
 
-        /// Checks if the whole state has been initialized. We do not have any
-        /// entries which are null
-        pub fn ensureFullyInitialized(self: *const JamState(params)) !void {
-            if (self.alpha == null) return error.UninitializedAlpha;
-            if (self.beta == null) return error.UninitializedBeta;
-            if (self.gamma == null) return error.UninitializedGamma;
-            if (self.delta == null) return error.UninitializedDelta;
-            if (self.eta == null) return error.UninitializedEta;
-            if (self.iota == null) return error.UninitializedIota;
-            if (self.kappa == null) return error.UninitializedKappa;
-            if (self.lambda == null) return error.UninitializedLambda;
-            if (self.rho == null) return error.UninitializedRho;
-            if (self.tau == null) return error.UninitializedTau;
-            if (self.phi == null) return error.UninitializedPhi;
-            if (self.chi == null) return error.UninitializedChi;
-            if (self.psi == null) return error.UninitializedPsi;
-            if (self.pi == null) return error.UninitializedPi;
-            if (self.xi == null) return error.UninitializedXi;
-            if (self.theta == null) return error.UninitializedTheta;
-        }
-
         const state_dict = @import("state_dictionary.zig");
         pub fn buildStateMerklizationDictionary(self: *const JamState(params), allocator: std.mem.Allocator) !state_dict.MerklizationDictionary {
             return try state_dict.buildStateMerklizationDictionary(params, allocator, self);
@@ -239,22 +201,50 @@ pub fn JamState(comptime params: Params) type {
             return try @import("state_merklization.zig").merklizeStateDictionary(allocator, &map);
         }
 
+        // Comptime patterns
+        usingnamespace StateHelpers;
+
+        pub fn ensureFullyInitialized(self: *const JamState(params)) !bool {
+            // Define our error type at compile time
+            const InitError = comptime StateHelpers.buildInitErrorType(@TypeOf(self.*));
+
+            // Check each field using inline for
+            inline for (std.meta.fields(@TypeOf(self.*))) |field| {
+                if (@field(self, field.name) == null) {
+                    // Create the error name dynamically
+                    return @field(InitError, "Uninitialized" ++ field.name);
+                }
+            }
+            return true;
+        }
+
+        pub fn deepClone(self: *const JamState(params), allocator: std.mem.Allocator) !JamState(params) {
+            var clone = JamState(params){};
+            inline for (std.meta.fields(JamState(params))) |field| {
+                @field(clone, field.name) = try self.cloneField(&field, allocator);
+            }
+            return clone;
+        }
+
+        /// Destructively merges `other` state into this one.
+        /// Non-null fields from `other` override corresponding fields here.
+        /// NOTE: Performs a simple state merge operation for Milestone 1.
+        /// Future versions will implement optimized merge strategies.
+        pub fn merge(
+            self: *JamState(params),
+            other: *JamState(params),
+            allocator: std.mem.Allocator,
+        ) !void {
+            inline for (std.meta.fields(@This())) |field| {
+                try self.mergeField(other, &field, allocator);
+            }
+        }
+
         /// Deinitialize and free resources
         pub fn deinit(self: *JamState(params), allocator: std.mem.Allocator) void {
-            // NOTE: alpha has no allocations, yet?
-            if (self.beta) |*beta| beta.deinit(); // TODO: check and make consistent to take allocator
-            if (self.chi) |*chi| chi.deinit();
-            if (self.delta) |*delta| delta.deinit();
-            if (self.gamma) |*gamma| gamma.deinit(allocator);
-            if (self.iota) |iota| iota.deinit(allocator);
-            if (self.kappa) |kappa| kappa.deinit(allocator);
-            if (self.lambda) |lambda| lambda.deinit(allocator);
-            if (self.phi) |*phi| phi.deinit();
-            if (self.pi) |*pi| pi.deinit();
-            if (self.psi) |*psi| psi.deinit();
-            if (self.rho) |*rho| rho.deinit();
-            if (self.theta) |*theta| theta.deinit();
-            if (self.xi) |*xi| xi.deinit();
+            inline for (std.meta.fields(@This())) |field| {
+                self.deinitField(&field, allocator);
+            }
         }
 
         /// Format
@@ -265,38 +255,6 @@ pub fn JamState(comptime params: Params) type {
             writer: anytype,
         ) !void {
             try @import("state_format/jam_state.zig").format(params, self, fmt, options, writer);
-        }
-
-        /// Destructively merges `other` state into this one.
-        /// Non-null fields from `other` override corresponding fields here.
-        /// NOTE: `other` becomes invalid after merge.
-        /// NOTE: Performs a simple state merge operation for Milestone 1.
-        /// Future versions will implement optimized merge strategies.
-        pub fn merge(
-            self: *JamState(params),
-            other: *JamState(params),
-            allocator: std.mem.Allocator,
-        ) !void {
-            if (other.tau) |tau| self.tau = tau;
-            if (other.eta) |eta| self.eta = eta;
-            // if (source.alpha) |alpha| self.alpha = alpha;
-            if (other.beta) |*beta| try self.beta.?.merge(beta);
-            // if (source.chi) |chi| self.chi = chi;
-            // if (source.delta) |delta| self.delta = delta;
-            if (other.gamma) |*gamma|
-                self.gamma.?.merge(gamma, allocator);
-            if (other.iota) |*iota|
-                self.iota.?.merge(iota, allocator);
-            if (other.kappa) |*kappa|
-                self.kappa.?.merge(kappa, allocator);
-            if (other.lambda) |*lambda|
-                self.lambda.?.merge(lambda, allocator);
-            // if (source.phi) |phi| self.phi = phi;
-            // if (source.pi) |pi| self.pi = pi;
-            // if (source.psi) |psi| self.psi = psi;
-            // if (source.rho) |rho| self.rho = rho;
-            // if (source.theta) |theta| self.theta = theta;
-            // if (source.xi) |xi| self.xi = xi;
         }
     };
 }
@@ -321,3 +279,113 @@ pub const Phi = @import("authorization_queue.zig").Phi;
 pub const Chi = @import("services_priviledged.zig").Chi;
 pub const Psi = @import("disputes.zig").Psi;
 pub const Pi = @import("validator_stats.zig").Pi;
+
+// Helper functions that will be used by our comptime methods
+const StateHelpers = struct {
+    // Helper for merging a single field
+    fn mergeField(self: anytype, other: anytype, struct_field: *const std.builtin.Type.StructField, allocator: std.mem.Allocator) !void {
+        const field = @field(other, struct_field.name);
+        if (field) |other_value| {
+            // If the other state has this field
+            if (@field(self, struct_field.name)) |*self_value| {
+                // Clean up our existing value if needed
+                callDeinit(self_value, allocator);
+            }
+            // Transfer ownership
+            @field(self, struct_field.name) = other_value;
+            @field(other, struct_field.name) = null;
+        }
+    }
+
+    // Helper for deep cloning a single field
+    fn cloneField(self: anytype, struct_field: *const std.builtin.Type.StructField, allocator: std.mem.Allocator) !std.meta.Child(struct_field.type) {
+        const field_type = std.meta.Child(struct_field.type);
+
+        if (comptime isComplexType(field_type)) {
+            if (@field(self, struct_field.name)) |value| {
+                if (@hasDecl(field_type, "deepClone")) {
+                    const info = @typeInfo(@TypeOf(field_type.deepClone));
+                    if (info == .@"fn" and info.@"fn".params.len > 1) {
+                        return try value.deepClone(allocator);
+                    } else {
+                        return try value.deepClone();
+                    }
+                } else {
+                    @panic("Please implement deepClone for: " ++ @typeName(field_type));
+                }
+            }
+        } else {
+            // For simple types that can be copied directly
+            if (@field(self, struct_field.name)) |value| {
+                return value;
+            }
+        }
+        unreachable;
+    }
+
+    // Helper for deinitializing a single field
+    fn deinitField(self: anytype, struct_field: *const std.builtin.Type.StructField, allocator: std.mem.Allocator) void {
+        var field = @field(self, struct_field.name);
+        if (field) |*value| {
+            callDeinit(value, allocator);
+        }
+    }
+
+    // Helper function to check if a type is a struct or union
+    fn isComplexType(comptime T: type) bool {
+        const type_info = @typeInfo(T);
+        return type_info == .@"struct" or type_info == .@"union";
+    }
+
+    fn callDeinit(value: anytype, allocator: std.mem.Allocator) void {
+        const ValueType = std.meta.Child(@TypeOf(value));
+
+        // return early, as we have nothing to call here
+        if (!comptime isComplexType(ValueType)) {
+            return;
+        }
+
+        // Check if the type has a deinit method
+        if (!@hasDecl(ValueType, "deinit")) {
+            @panic("Please implement deinit for: " ++ @typeName(ValueType));
+        }
+
+        // Get the type information about the deinit function
+        const deinit_info = @typeInfo(@TypeOf(@field(ValueType, "deinit")));
+
+        // Ensure it's actually a function
+        if (deinit_info != .@"fn") {
+            @panic("deinit must be a function for: " ++ @typeName(ValueType));
+        }
+
+        // Check the number of parameters the deinit function expects
+        const params_len = deinit_info.@"fn".params.len;
+
+        // Call deinit with the appropriate number of parameters
+        switch (params_len) {
+            1 => value.deinit(),
+            2 => value.deinit(allocator),
+            else => @panic("deinit must take 0 or 1 parameters for: " ++ @typeName(ValueType)),
+        }
+    }
+
+    /// Checks if the whole state has been initialized. We do not have any
+    /// entries which are null
+    ///
+    // Helper function to build the InitError type at compile time
+    fn buildInitErrorType(comptime T: type) type {
+        // Get all fields of the state struct
+        const fields = std.meta.fields(T);
+
+        // Create a tuple type containing all our error tags
+        var error_fields: [fields.len]std.builtin.Type.Error = undefined;
+        for (fields, 0..) |field, i| {
+            error_fields[i] = .{
+                .name = "Uninitialized" ++ field.name,
+            };
+        }
+
+        // Create and return the error set type
+        return @Type(.{ .error_set = &error_fields });
+    }
+};

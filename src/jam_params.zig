@@ -1,4 +1,5 @@
 const std = @import("std");
+const time = @import("time.zig");
 
 /// This struct defines the protocol parameters used throughout the system.
 /// Each field represents a specific constant derived from the protocol's
@@ -89,6 +90,10 @@ pub const Params = struct {
     // NOTE: this has to be here for the codec,
     // -- (cores-count + 7) / 8
     avail_bitfield_bytes: usize = (341 + 7) / 8,
+
+    pub fn Time(comptime self: *const Params) type {
+        return time.Time(self.epoch_length, self.slot_period, self.ticket_submission_end_epoch_slot);
+    }
 
     // Default format parameters
     pub fn format(

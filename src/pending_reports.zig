@@ -250,6 +250,29 @@ pub fn Rho(comptime core_count: u16) type {
             return false;
         }
 
+        pub fn deepClone(self: *const @This(), allocator: std.mem.Allocator) !@This() {
+            const span = trace.span(.deep_clone);
+            defer span.deinit();
+            span.debug("Deep cloning Rho state with {d} cores", .{core_count});
+
+            // Initialize a new Rho instance with the same allocator
+            var cloned = @This().init(allocator);
+
+            // Clone each report entry
+            for (self.reports, 0..) |maybe_report, index| {
+                span.trace("Processing core {d}", .{index});
+                if (maybe_report) |report| {
+                    span.debug("Cloning report for core {d}", .{index});
+                    cloned.reports[index] = try report.deepClone(allocator);
+                } else {
+                    span.trace("Core {d} has no report to clone", .{index});
+                    cloned.reports[index] = null;
+                }
+            }
+
+            return cloned;
+        }
+
         pub fn deinit(self: *const @This()) void {
             const span = trace.span(.deinit);
             defer span.deinit();

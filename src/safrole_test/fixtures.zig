@@ -6,11 +6,11 @@ const TestCase = safrole_test_vectors.TestCase;
 
 const tests = @import("../tests.zig");
 const safrole = @import("../safrole.zig");
-const safrole_types = @import("../safrole/types.zig");
 
 const adaptor = @import("adaptor.zig");
 
-const diff = @import("../safrole_test/diffz.zig");
+const diff = @import("../tests/diff.zig");
+const expect = @import("../tests/expect.zig");
 
 pub const Fixtures = struct {
     pre_state: safrole_test_vectors.State,
@@ -20,24 +20,21 @@ pub const Fixtures = struct {
 
     allocator: std.mem.Allocator,
 
-    pub fn diffStates(self: @This()) ![]const u8 {
-        return try diff.diffStates(self.allocator, &self.pre_state, &self.post_state);
+    pub fn diffStates(self: @This()) !diff.DiffResult {
+        return try diff.diffBasedOnTypesFormat(self.allocator, &self.pre_state, &self.post_state);
     }
 
     pub fn diffStatesAndPrint(self: @This()) !void {
-        const diff_result = self.diffStates() catch |err| {
-            std.debug.print("DiffStates err {any}\n", .{err});
-            return err;
-        };
-        defer self.allocator.free(diff_result);
-        try std.io.getStdErr().writer().print("{s}\n", .{diff_result});
+        const diff_result = try self.diffStates();
+        defer diff_result.deinit(self.allocator);
+        diff_result.debugPrint();
     }
 
     pub fn diffAgainstPostState(
         self: @This(),
-        state: *const safrole_types.State,
-    ) ![]const u8 {
-        return try diff.diffStates(
+        state: *const safrole_test_vectors.Gamma,
+    ) !diff.DiffResult {
+        return try diff.diffBasedOnFormat(
             self.allocator,
             &self.post_state.gamma,
             state,
@@ -46,37 +43,11 @@ pub const Fixtures = struct {
 
     pub fn diffAgainstPostStateAndPrint(
         self: @This(),
-        state: *const safrole_types.State,
+        state: *const safrole_test_vectors.Gamma,
     ) !void {
-        const diff_result = self.diffAgainstPostState(state) catch |err| {
-            std.debug.print("DiffAgainstPostState err {any}\n", .{err});
-            return err;
-        };
-        defer self.allocator.free(diff_result);
-        try std.io.getStdErr().writer().print("{s}\n", .{diff_result});
-    }
-
-    pub fn printInput(self: @This()) !void {
-        try std.io.getStdErr().writer().print("Input: {any}\n", .{self.input});
-    }
-
-    pub fn printPreState(self: @This()) !void {
-        try std.io.getStdErr().writer().print("PreState: {any}\n", .{self.pre_state});
-    }
-
-    pub fn printPostState(self: @This()) !void {
-        try std.io.getStdErr().writer().print("PostState: {any}\n", .{self.post_state});
-    }
-
-    pub fn printOutput(self: @This()) !void {
-        try std.io.getStdErr().writer().print("Output: {any}\n", .{self.output});
-    }
-
-    pub fn printInputStateChangesAndOutput(self: @This()) !void {
-        std.debug.print("Fixture input, state changes and expected output:\n", .{});
-        try self.printInput();
-        try self.diffStatesAndPrint();
-        try self.printOutput();
+        const diff_result = try self.diffAgainstPostState(state);
+        defer diff_result.deinit(self.allocator);
+        diff_result.debugPrint();
     }
 
     pub fn deinit(self: @This()) void {
@@ -86,8 +57,8 @@ pub const Fixtures = struct {
         self.output.deinit(self.allocator);
     }
 
-    pub fn expectPostState(self: @This(), actual_state: *const safrole_types.State) !void {
-        try std.testing.expectEqualDeep(self.post_state.gamma, actual_state.*);
+    pub fn expectPostState(self: @This(), actual_state: *const safrole_test_vectors.State) !void {
+        try expect.expectTypesFmtEqual(self.post_state, actual_state.*);
     }
 
     pub fn expectOutput(self: @This(), actual_output: safrole_test_vectors.Output) !void {
@@ -96,6 +67,8 @@ pub const Fixtures = struct {
                 try std.testing.expectEqual(expected_err, actual_output.err);
             },
             .ok => |expected_ok| {
+                if (actual_output == .err) return error.UnexpectedError;
+
                 const actual_ok = actual_output.ok;
 
                 if (expected_ok.epoch_mark) |expected_epoch_mark| {
@@ -153,12 +126,8 @@ pub const Fixtures = struct {
 const TEST_VECTOR_PREFIX = "src/jamtestvectors/data/safrole/";
 
 const Params = @import("../jam_params.zig").Params;
-pub fn buildFixtures(comptime params: Params, allocator: std.mem.Allocator, name: []const u8) !Fixtures {
-    const full_path = try std.fs.path.join(allocator, &[_][]const u8{ TEST_VECTOR_PREFIX, name });
-    defer allocator.free(full_path);
-
+pub fn buildFixtures(comptime params: Params, allocator: std.mem.Allocator, full_path: []const u8) !Fixtures {
     const test_case = try loader.loadAndDeserializeTestVector(TestCase, params, allocator, full_path);
-    // defer test_case.deinit();
 
     return .{
         .pre_state = test_case.pre_state,

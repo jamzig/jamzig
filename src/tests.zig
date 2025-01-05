@@ -21,7 +21,6 @@ comptime {
     _ = @import("guarantor_assignments_test.zig");
 
     _ = @import("safrole_test.zig");
-    _ = @import("safrole_test/diffz.zig");
 
     _ = @import("ring_vrf_test.zig");
 
