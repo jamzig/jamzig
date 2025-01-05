@@ -121,6 +121,29 @@ pub const AvailableAssignments = struct {
         return self.inner;
     }
 
+    /// Returns allocated slice of WorkReport pointers. Caller owns the slice.
+    pub fn getWorkReportRefs(self: @This(), allocator: std.mem.Allocator) ![]*const types.WorkReport {
+        var reports = try allocator.alloc(*const types.WorkReport, self.inner.len);
+        errdefer allocator.free(reports);
+
+        for (self.inner, 0..) |assignment, i| {
+            reports[i] = &assignment.report;
+        }
+
+        return reports;
+    }
+    /// Returns allocated slice of WorkReport pointers. Caller owns the slice.
+    pub fn getWorkReports(self: @This(), allocator: std.mem.Allocator) ![]types.WorkReport {
+        var reports = try allocator.alloc(types.WorkReport, self.inner.len);
+        errdefer allocator.free(reports);
+
+        for (self.inner, 0..) |assignment, i| {
+            reports[i] = assignment.report;
+        }
+
+        return reports;
+    }
+
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         for (self.items()) |*assignment| {
             assignment.deinit(allocator);

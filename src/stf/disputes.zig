@@ -2,7 +2,6 @@ const std = @import("std");
 
 const state = @import("../state.zig");
 const types = @import("../types.zig");
-const utils = @import("../utils.zig");
 const disputes = @import("../disputes.zig");
 
 const Params = @import("../jam_params.zig").Params;
@@ -22,22 +21,10 @@ pub fn transition(
     xtdisputes: types.DisputesExtrinsic,
 ) !state.Psi {
     // Map current_kappa to extract Edwards public keys
-    const current_kappa_keys = try utils.mapAlloc(
-        types.ValidatorData,
-        types.Ed25519Public,
-        allocator,
-        current_kappa.items(),
-        validator_key,
-    );
+    const current_kappa_keys = try current_kappa.getEd25519PublicKeys(allocator);
     defer allocator.free(current_kappa_keys);
 
-    const current_lambda_keys = try utils.mapAlloc(
-        types.ValidatorData,
-        types.Ed25519Public,
-        allocator,
-        current_lambda.items(),
-        validator_key,
-    );
+    const current_lambda_keys = try current_lambda.getEd25519PublicKeys(allocator);
     defer allocator.free(current_lambda_keys);
 
     // Verify correctness of the disputes extrinsic
@@ -62,8 +49,4 @@ pub fn transition(
     try disputes.verifyDisputesExtrinsicPost(xtdisputes, &posterior_state);
 
     return posterior_state;
-}
-
-fn validator_key(validator: types.ValidatorData) types.Ed25519Public {
-    return validator.ed25519;
 }

@@ -499,6 +499,15 @@ pub const ValidatorSet = struct {
         return keys;
     }
 
+    /// Returns an allocated slice of Bandersnatch public keys from all validators
+    pub fn getEd25519PublicKeys(self: ValidatorSet, allocator: std.mem.Allocator) ![]BandersnatchPublic {
+        var keys = try allocator.alloc(BandersnatchPublic, self.validators.len);
+        for (self.validators, 0..) |validator, i| {
+            keys[i] = validator.ed25519;
+        }
+        return keys;
+    }
+
     pub fn clearAndTakeOwnership(self: *@This()) []ValidatorData {
         const current = self.validators;
         self.validators = &[_]ValidatorData{};
