@@ -7,7 +7,7 @@ const types = @import("../types.zig");
 const tracing = @import("../tracing.zig");
 const trace = tracing.scoped(.stf);
 
-pub fn transitionEta(comptime params: Params, stx: *StateTransition(params), new_entropy: types.Entropy) !void {
+pub fn transition(comptime params: Params, stx: *StateTransition(params), new_entropy: types.Entropy) !void {
     const span = trace.span(.transition_eta);
     defer span.deinit();
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const state = @import("../state.zig");
 const types = @import("../types.zig");
 
-pub fn transitionServiceAccounts(
+pub fn transition(
     allocator: std.mem.Allocator,
     current_delta: *const state.Delta,
     xtpreimages: types.PreimagesExtrinsic,

@@ -2,7 +2,7 @@ const std = @import("std");
 const state = @import("../state.zig");
 const types = @import("../types.zig");
 
-pub fn transitionAuthorizations(
+pub fn transition(
     allocator: std.mem.Allocator,
     current_alpha: *const state.Alpha,
     updated_phi: *const state.Phi,

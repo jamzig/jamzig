@@ -7,7 +7,7 @@ const safrole = @import("../safrole.zig");
 const tracing = @import("../tracing.zig");
 const trace = tracing.scoped(.stf);
 
-pub fn transitionSafrole(
+pub fn transition(
     comptime params: Params,
     stx: *StateTransition(params),
     extrinsic_tickets: types.TicketsExtrinsic,

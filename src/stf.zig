@@ -37,13 +37,13 @@ pub fn stateTransition(
     var state_transition = try StateTransition(params).init(allocator, current_state, transition_time);
     errdefer state_transition.deinit();
 
-    try time.transitionTime(
+    try time.transition(
         params,
         &state_transition,
         new_block.header.slot,
     );
 
-    try recent_history.transitionRecentHistory(
+    try recent_history.transition(
         params,
         &state_transition,
         new_block,
@@ -57,11 +57,9 @@ pub fn stateTransition(
         .outputHash();
     span.trace("Block entropy={any}", .{std.fmt.fmtSliceHexLower(&entropy)});
 
-    span.debug("Starting epoch transition", .{});
-    try eta.transitionEta(params, &state_transition, entropy);
+    try eta.transition(params, &state_transition, entropy);
 
-    span.debug("Starting safrole transition", .{});
-    var markers = try safrole.transitionSafrole(
+    var markers = try safrole.transition(
         params,
         &state_transition,
         new_block.extrinsic.tickets,

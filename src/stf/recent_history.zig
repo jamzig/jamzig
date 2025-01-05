@@ -6,7 +6,7 @@ const types = @import("../types.zig");
 const tracing = @import("../tracing.zig");
 const trace = tracing.scoped(.stf);
 
-pub fn transitionRecentHistory(
+pub fn transition(
     comptime params: Params,
     stx: *StateTransition(params),
     new_block: *const types.Block,

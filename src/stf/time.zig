@@ -6,7 +6,7 @@ const types = @import("../types.zig");
 const tracing = @import("../tracing.zig");
 const trace = tracing.scoped(.stf);
 
-pub fn transitionTime(
+pub fn transition(
     comptime params: Params,
     stx: *StateTransition(params),
     header_slot: types.TimeSlot,
@@ -21,6 +21,6 @@ pub fn transitionTime(
         return error.bad_slot;
     }
 
-    const tau_prime = try stx.ensure(.tau_prime);  
+    const tau_prime = try stx.ensure(.tau_prime);
     tau_prime.* = header_slot;
 }

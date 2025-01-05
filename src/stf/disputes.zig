@@ -7,7 +7,7 @@ const state = @import("../state.zig");
 const utils = @import("../utils.zig");
 const disputes = @import("../disputes.zig");
 
-pub fn transitionDisputes(
+pub fn transition(
     comptime validators_count: u32,
     comptime core_count: u16,
     allocator: std.mem.Allocator,
