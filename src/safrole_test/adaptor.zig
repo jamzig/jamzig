@@ -104,9 +104,9 @@ fn performTransitions(
 ) !safrole.Result {
 
     // Perform all transitions in sequence, propagating any errors
-    try stf.transitionTime(params, stx, input.slot);
-    try stf.transitionEta(params, stx, input.entropy);
-    return try stf.transitionSafrole(
+    try stf.time.transitionTime(params, stx, input.slot);
+    try stf.eta.transitionEta(params, stx, input.entropy);
+    return try stf.safrole.transitionSafrole(
         params,
         stx,
         input.extrinsic,
