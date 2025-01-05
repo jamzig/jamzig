@@ -32,12 +32,21 @@ pub fn Time(comptime epoch_length: u32, comptime slot_period: u32, comptime tick
             };
         }
 
+        // New method to check if we're at an epoch boundary
         pub inline fn isNewEpoch(self: Self) bool {
             return self.is_new_epoch;
         }
 
+        pub inline fn isConsecutiveEpoch(self: Self) bool {
+            return self.prior_epoch + 1 == self.current_epoch;
+        }
+
         pub inline fn isInTicketSubmissionPeriod(self: Self) bool {
             return self.is_in_ticket_submission_period;
+        }
+
+        pub inline fn isOutsideTicketSubmissionPeriod(self: Self) bool {
+            return !self.is_in_ticket_submission_period;
         }
 
         pub fn slotsUntilNextEpoch(self: Self) u32 {
@@ -52,6 +61,10 @@ pub fn Time(comptime epoch_length: u32, comptime slot_period: u32, comptime tick
         // Calculate expected time for next epoch in seconds
         pub fn secondsUntilNextEpoch(self: Self) u64 {
             return @as(u64, self.slotsUntilNextEpoch()) * slot_period;
+        }
+
+        pub fn progressSlots(self: Self, slots: u32) Self {
+            return Self.init(self.current_slot, self.current_slot + slots);
         }
 
         pub fn format(

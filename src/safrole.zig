@@ -210,9 +210,9 @@ fn transitionEpoch(
     _ = gamma_s.clearAndTakeOwnership();
 
     // Update gamma_s based on conditions
-    if (stx.time.prior_slot_in_epoch >= params.ticket_submission_end_epoch_slot and
+    if (stx.time.isOutsideTicketSubmissionPeriod() and
         current_gamma.a.len == params.epoch_length and
-        stx.time.current_epoch == stx.time.prior_epoch + 1)
+        stx.time.isConsecutiveEpoch())
     {
         span.debug("Operating in ticket mode for gamma_s", .{});
         span.trace("Conditions met: prev_slot({d}) >= Y({d}) and gamma_a.len({d}) == epoch_length({d}) and current_epoch({d}) == prior_epoch({d}) + 1)", .{

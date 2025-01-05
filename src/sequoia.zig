@@ -172,7 +172,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         // Registry of tickets mapping ticket IDs to validator indices & entry indices
         const TicketRegistryEntry = struct {
             validator_index: types.ValidatorIndex,
-            entry_index: u8,
+            attempt: u8,
         };
 
         config: GenesisConfig(params),
@@ -180,15 +180,14 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         allocator: std.mem.Allocator,
         state: jamstate.JamState(params),
 
-        prior_slot: types.TimeSlot = 0,
-        current_slot: types.TimeSlot = 0,
+        block_time: params.Time(),
 
         last_header_hash: ?types.Hash,
         last_state_root: ?types.Hash,
 
         rng: *std.Random,
 
-        validator_tickets: [params.validators_count]u8,
+        tickets_submitted: [params.validators_count]u8,
 
         // Within a block authoring epoch, block production privileges are granted based on tickets that were submitted in the
         // prior epoch. These tickets use anonymous ring signature proofs, so while everyone can verify tickets came from valid
@@ -212,12 +211,11 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 .allocator = allocator,
                 .config = config,
                 .state = try config.buildJamState(allocator, rng),
-                .prior_slot = config.initial_slot,
-                .current_slot = config.initial_slot,
+                .block_time = params.Time().init(config.initial_slot, config.initial_slot),
                 .last_header_hash = null,
                 .last_state_root = null,
                 .rng = rng,
-                .validator_tickets = std.mem.zeroes([params.validators_count]u8),
+                .tickets_submitted = std.mem.zeroes([params.validators_count]u8),
                 .ticket_registry_current = registry_current,
                 .ticket_registry_previous = registry_previous,
             };
@@ -383,26 +381,25 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         pub fn buildNextBlock(self: *Self) !types.Block {
             const span = trace.span(.build_next_block);
             defer span.deinit();
-            span.debug("Building next block at slot {d}", .{self.current_slot + 1});
 
-            // Progress time
-            // TODO: lets make it possible to skip random slots
-            self.current_slot = self.prior_slot + 1;
-            defer self.prior_slot = self.current_slot;
-
+            // TODO: add an config option to skip slots, simulating failing or delayed block production
+            // Ensure new slot is greater than parent
             // Process epoch transition if needed
-            const current_time = time.Time(params.epoch_length, params.slot_period, params.ticket_submission_end_epoch_slot)
-                .init(self.prior_slot, self.current_slot);
+            self.block_time = self.block_time.progressSlots(1);
 
             span.debug("Building next block at slot {d} (epoch {d}, slot in epoch {d})", .{
-                current_time.current_slot,
-                current_time.current_epoch,
-                current_time.current_slot_in_epoch,
+                self.block_time.current_slot,
+                self.block_time.current_epoch,
+                self.block_time.current_slot_in_epoch,
             });
 
+            // Select block producer for this slot
+            const author_index = try self.selectBlockAuthor();
+            span.debug("Selected block author index: {d}", .{author_index});
+
             // Process epoch transition if needed
-            if (current_time.isNewEpoch()) {
-                span.debug("Processing epoch transition - {d} slots until next epoch", .{current_time.slotsUntilNextEpoch()});
+            if (self.block_time.isNewEpoch()) {
+                span.debug("Processing epoch transition - {d} slots until next epoch", .{self.block_time.slotsUntilNextEpoch()});
 
                 // Swap ticket registry maps at epoch boundary
                 const previous = self.ticket_registry_previous;
@@ -411,36 +408,17 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 self.ticket_registry_current.clearRetainingCapacity();
 
                 // Reset ticket counts for next epoch
-                self.validator_tickets = std.mem.zeroes([params.validators_count]u8);
+                self.tickets_submitted = std.mem.zeroes([params.validators_count]u8);
             }
 
-            // Select block producer for this slot
-            const author_index = try self.selectBlockAuthor();
-            span.debug("Selected block author index: {d}", .{author_index});
-
             const author_keys = self.config.validator_keys[author_index];
-
-            // TODO: add an config option to skip slots, simulating failing or delayed block production
-
-            const previous_epoch = self.current_slot / params.epoch_length;
-            const previous_slot_position = self.current_slot & params.epoch_length;
-
-            // Ensure new slot is greater than parent
-            const new_slot = @max(
-                self.current_slot + 1,
-                self.state.tau.? + 1,
-            );
-            self.current_slot = new_slot;
-
-            const current_epoch = self.current_slot / params.epoch_length;
-            const current_epoch_slot = self.current_slot % params.epoch_length;
 
             // Header's epoch marker (He): empty, or for first block in epoch:
             // - Next epoch randomness
             // - Current epoch randomness
             // - Next epoch's Bandersnatch validator keys
             var epoch_mark: ?types.EpochMark = null;
-            if (current_epoch > previous_epoch) {
+            if (self.block_time.isNewEpoch()) {
                 epoch_mark = .{
                     .entropy = self.state.eta.?[0],
                     .tickets_entropy = self.state.eta.?[1],
@@ -449,24 +427,25 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             }
 
             var tickets_mark: ?types.TicketsMark = null;
-            if (current_epoch == previous_epoch //
-            and current_epoch_slot > params.ticket_submission_end_epoch_slot //
-            and previous_slot_position <= params.ticket_submission_end_epoch_slot //
+            if (!self.block_time.isNewEpoch() // Same epoch
+            and !self.block_time.isInTicketSubmissionPeriod() // Current slot after submission end
+            and self.block_time.isConsecutiveEpoch() // We did not skip an epoch
             and self.state.gamma.?.a.len == params.epoch_length //
             ) {
+
                 // TODO: untested, need ticket submission first
                 tickets_mark = .{ .tickets = try safrole.Z_outsideInOrdering(types.TicketBody, self.allocator, self.state.gamma.?.a) };
             }
 
             const entropy_source = switch (self.state.gamma.?.s) {
-                .tickets => |tickets| try generateEntropySourceTicket(author_keys, tickets[current_epoch_slot]),
+                .tickets => |tickets| try generateEntropySourceTicket(author_keys, tickets[self.block_time.current_slot_in_epoch]),
                 .keys => try generateEntropySourceFallback(author_keys, &self.state.eta.?),
             };
 
             // TODO: Get eta_prime for this slot
             const eta_current = &self.state.eta.?;
             var eta_prime = self.state.eta.?;
-            if (current_epoch > previous_epoch) {
+            if (self.block_time.isNewEpoch()) {
                 // Rotate the entropy values
                 eta_prime[3] = eta_current[2];
                 eta_prime[2] = eta_current[1];
@@ -479,7 +458,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 .parent = if (self.last_header_hash) |hash| hash else std.mem.zeroes(types.Hash),
                 .parent_state_root = if (self.last_state_root) |root| root else std.mem.zeroes(types.Hash),
                 .extrinsic_hash = std.mem.zeroes(types.Hash),
-                .slot = self.current_slot,
+                .slot = self.block_time.current_slot,
                 .author_index = author_index,
                 .epoch_mark = epoch_mark,
                 .tickets_mark = tickets_mark,
@@ -501,23 +480,14 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                     &header,
                     author_keys,
                     &eta_prime,
-                    tickets[current_epoch_slot],
+                    tickets[self.block_time.current_slot_in_epoch],
                 ),
             };
             header.seal = block_seal.toBytes();
 
-            if (current_epoch > previous_epoch) {
-                // Swap ticket registry maps, and clear the current one
-                span.debug("New epoch - swapping ticket registries and clearing current one", .{});
-                const previous = self.ticket_registry_previous;
-                self.ticket_registry_previous = self.ticket_registry_current;
-                self.ticket_registry_current = previous;
-                self.ticket_registry_current.clearRetainingCapacity();
-            }
-
             var tickets = types.TicketsExtrinsic{ .data = &[_]types.TicketEnvelope{} };
-            if (current_time.isInTicketSubmissionPeriod()) {
-                if (current_time.slotsUntilTicketSubmissionEnds()) |remaining_slots| {
+            if (self.block_time.isInTicketSubmissionPeriod()) {
+                if (self.block_time.slotsUntilTicketSubmissionEnds()) |remaining_slots| {
                     span.debug("Processing ticket submission - {d} slots remaining", .{remaining_slots});
                     tickets = .{ .data = try self.generateTickets(&eta_prime) };
                 }
@@ -576,7 +546,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             // For each validator, randomly decide if they submit a ticket this block
             for (self.config.validator_keys, 0..) |validator, idx| {
                 // Skip if validator already submitted max tickets
-                if (self.validator_tickets[idx] >= params.max_ticket_entries_per_validator) {
+                if (self.tickets_submitted[idx] >= params.max_ticket_entries_per_validator) {
                     span.trace("Validator {d} already submitted max tickets", .{idx});
                     continue;
                 }
@@ -594,8 +564,8 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                     defer prover.deinit();
 
                     // Sign with prover to generate ticket
-                    const entry_idx = self.validator_tickets[idx];
-                    const vrf_input = "jam_ticket_seal" ++ eta_prime[2] ++ [_]u8{entry_idx};
+                    const attempt_idx = self.tickets_submitted[idx];
+                    const vrf_input = "jam_ticket_seal" ++ eta_prime[2] ++ [_]u8{attempt_idx};
                     const vrf_proof = try prover.sign(
                         vrf_input,
                         &[_]u8{},
@@ -603,7 +573,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
                     span.trace("Ticket generation values:", .{});
                     span.trace("  Validator index: {d}", .{idx});
-                    span.trace("  Attempt number: {d}", .{entry_idx});
+                    span.trace("  Attempt number: {d}", .{attempt_idx});
 
                     span.trace("  Ring size: {d}", .{params.validators_count});
                     span.trace("  Ring values:", .{});
@@ -626,22 +596,25 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
                     // Create and append ticket
                     const ticket = types.TicketEnvelope{
-                        .attempt = entry_idx,
+                        .attempt = attempt_idx,
                         .signature = vrf_proof,
                     };
                     try generated.append(.{ .envelope = ticket, .id = ticket_id });
 
                     // After creating the ticket and getting its ID:
                     try self.ticket_registry_current.put(ticket_id, .{
-                        .validator_index = try self.state.kappa.?.findValidatorIndex(.BandersnatchPublic, validator.bandersnatch_keypair.public_key.toBytes()),
-                        .entry_index = entry_idx,
+                        .validator_index = try self.state.kappa.?.findValidatorIndex(
+                            .BandersnatchPublic,
+                            validator.bandersnatch_keypair.public_key.toBytes(),
+                        ),
+                        .attempt = attempt_idx,
                     });
 
                     // Increment ticket count for this validator
-                    self.validator_tickets[idx] += 1;
+                    self.tickets_submitted[idx] += 1;
 
                     // Only include up to K tickets per block
-                    if (generated.items.len >= params.max_ticket_entries_per_validator) {
+                    if (generated.items.len >= params.max_tickets_per_extrinsic) {
                         span.debug("Reached max tickets per block ({d})", .{params.max_ticket_entries_per_validator});
                         break;
                     }
@@ -682,19 +655,20 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             const ticket = tickets[slot_in_epoch];
 
             // Look up the validator who created this ticket
-            if (self.ticket_registry_previous.get(ticket.id)) |registry_entry| {
-                span.debug("Found ticket registry entry - validator: {d}, attempt: {d}", .{ registry_entry.validator_index, registry_entry.entry_index });
+            if (self.ticket_registry_previous.get(ticket.id)) |entry| {
+                span.debug("Found ticket registry entry - validator: {d}, attempt: {d}", .{ entry.validator_index, entry.attempt });
 
                 // Validate the entry index matches
-                if (registry_entry.entry_index == ticket.attempt) {
-                    span.err("Ticket attempt index mismatch", .{});
-                    return registry_entry.validator_index;
+                if (entry.attempt != ticket.attempt) {
+                    span.err("Ticket attempt index mismatch entry.attempt {d} != ticket.attempt {d}", .{ entry.attempt, ticket.attempt });
+                    return error.TicketAttemptMismatch;
                 }
-            }
 
+                return entry.validator_index;
+            }
             // No valid author found
-            span.err("No validator found for ticket", .{});
-            return error.NoValidatorFound;
+            span.err("Could not find validator ticket in the ticket_registry", .{});
+            return error.ValidatorTicketNotFoundInRegistry;
         }
 
         fn selectBlockAuthorFromKeys(self: *Self, keys: []const types.BandersnatchPublic, slot_in_epoch: u64) !types.ValidatorIndex {
@@ -739,11 +713,11 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         fn selectBlockAuthor(self: *Self) !types.ValidatorIndex {
             const span = trace.span(.select_block_author);
             defer span.deinit();
-            span.debug("Selecting block author for slot {d}", .{self.current_slot});
+            span.debug("Selecting block author for slot {d}", .{self.block_time.current_slot});
 
             if (self.state.gamma) |gamma| {
                 // Get index into gamma_s using current slot
-                const slot_in_epoch = self.current_slot % params.epoch_length;
+                const slot_in_epoch = self.block_time.current_slot_in_epoch;
                 span.debug("Slot in epoch: {d}", .{slot_in_epoch});
 
                 // Select based on gamma_s mode
