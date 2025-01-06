@@ -16,11 +16,12 @@ pub const TransitionResult = struct {
     output: safrole_test_vector.Output,
     state: ?safrole_test_vector.State,
 
-    pub fn deinit(self: TransitionResult, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *TransitionResult, allocator: std.mem.Allocator) void {
         if (self.state != null) {
             self.state.?.deinit(allocator);
         }
         self.output.deinit(allocator);
+        self.* = undefined;
     }
 };
 
@@ -61,13 +62,13 @@ pub fn transition(
         input,
     ) catch |e| {
         const test_vector_error = switch (e) {
-            error.bad_slot => safrole_test_vector.ErrorCode.bad_slot,
-            error.unexpected_ticket => safrole_test_vector.ErrorCode.unexpected_ticket,
-            error.bad_ticket_order => safrole_test_vector.ErrorCode.bad_ticket_order,
-            error.bad_ticket_proof => safrole_test_vector.ErrorCode.bad_ticket_proof,
-            error.bad_ticket_attempt => safrole_test_vector.ErrorCode.bad_ticket_attempt,
-            error.duplicate_ticket => safrole_test_vector.ErrorCode.duplicate_ticket,
-            error.too_many_tickets_in_extrinsic => @panic("Unmapped error"),
+            error.BadSlot => safrole_test_vector.ErrorCode.bad_slot,
+            error.UnexpectedTicket => safrole_test_vector.ErrorCode.unexpected_ticket,
+            error.BadTicketOrder => safrole_test_vector.ErrorCode.bad_ticket_order,
+            error.BadTicketProof => safrole_test_vector.ErrorCode.bad_ticket_proof,
+            error.BadTicketAttempt => safrole_test_vector.ErrorCode.bad_ticket_attempt,
+            error.DuplicateTicket => safrole_test_vector.ErrorCode.duplicate_ticket,
+            error.TooManyTicketsInExtrinsic => @panic("Unmapped error"),
             else => @panic("unmapped error"),
         };
         return .{
@@ -104,9 +105,9 @@ fn performTransitions(
 ) !safrole.Result {
 
     // Perform all transitions in sequence, propagating any errors
-    try stf.transitionTime(params, stx, input.slot);
-    try stf.transitionEta(params, stx, input.entropy);
-    return try stf.transitionSafrole(
+    try stf.time.transition(params, stx, input.slot);
+    try stf.eta.transition(params, stx, input.entropy);
+    return try stf.safrole.transition(
         params,
         stx,
         input.extrinsic,

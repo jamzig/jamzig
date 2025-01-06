@@ -26,6 +26,7 @@ pub const ValidatedAssuranceExtrinsic = struct {
 
     pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
         self.inner.deinit(allocator);
+        self.* = undefined;
     }
 
     /// Validates the AssuranceExtrinsic according to protocol rules
@@ -120,11 +121,35 @@ pub const AvailableAssignments = struct {
         return self.inner;
     }
 
-    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+    /// Returns allocated slice of WorkReport pointers. Caller owns the slice.
+    pub fn getWorkReportRefs(self: @This(), allocator: std.mem.Allocator) ![]*const types.WorkReport {
+        var reports = try allocator.alloc(*const types.WorkReport, self.inner.len);
+        errdefer allocator.free(reports);
+
+        for (self.inner, 0..) |assignment, i| {
+            reports[i] = &assignment.report;
+        }
+
+        return reports;
+    }
+    /// Returns allocated slice of WorkReport pointers. Caller owns the slice.
+    pub fn getWorkReports(self: @This(), allocator: std.mem.Allocator) ![]types.WorkReport {
+        var reports = try allocator.alloc(types.WorkReport, self.inner.len);
+        errdefer allocator.free(reports);
+
+        for (self.inner, 0..) |assignment, i| {
+            reports[i] = assignment.report;
+        }
+
+        return reports;
+    }
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         for (self.items()) |*assignment| {
             assignment.deinit(allocator);
         }
         allocator.free(self.inner);
+        self.* = undefined;
     }
 };
 
@@ -195,7 +220,7 @@ pub fn processAssuranceExtrinsic(
     // Track which cores have super-majority assurance
     var assured_reports = std.ArrayList(types.AvailabilityAssignment).init(allocator);
     errdefer {
-        for (assured_reports.items) |r| {
+        for (assured_reports.items) |*r| {
             r.deinit(allocator);
         }
         assured_reports.deinit();

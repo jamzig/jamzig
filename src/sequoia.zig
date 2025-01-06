@@ -122,7 +122,7 @@ pub fn GenesisConfig(params: jam_params.Params) type {
             // Gamma_s with initial empty tickets from the start
             state.gamma.?.s.deinit(allocator);
             state.gamma.?.s = .{
-                .keys = try safrole.gammaS_Fallback(allocator, state.eta.?[2], params.epoch_length, state.kappa.?),
+                .keys = try safrole.epoch_handler.entropyBasedKeySelector(allocator, state.eta.?[2], params.epoch_length, state.kappa.?),
             };
 
             // Calculate gamma_z (Bandersnatch ring root) from gamma_k validators
@@ -139,6 +139,7 @@ pub fn GenesisConfig(params: jam_params.Params) type {
 
         pub fn deinit(self: *GenesisConfig(params), allocator: std.mem.Allocator) void {
             allocator.free(self.validator_keys);
+            self.* = undefined;
         }
     };
 }
@@ -226,6 +227,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             self.state.deinit(self.allocator);
             self.ticket_registry_current.deinit();
             self.ticket_registry_previous.deinit();
+            self.* = undefined;
         }
 
         fn generateVrfOutputFallback(author_keys: *const ValidatorKeySet, eta_prime: *const types.Eta) !types.BandersnatchVrfOutput {
@@ -440,7 +442,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             ) {
 
                 // TODO: untested, need ticket submission first
-                tickets_mark = .{ .tickets = try safrole.Z_outsideInOrdering(types.TicketBody, self.allocator, self.state.gamma.?.a) };
+                tickets_mark = .{ .tickets = try safrole.ordering.outsideInOrdering(types.TicketBody, self.allocator, self.state.gamma.?.a) };
             }
 
             const entropy_source = switch (self.state.gamma.?.s) {

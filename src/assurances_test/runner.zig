@@ -58,7 +58,7 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
 
     // First validate the assurance extrinsic
 
-    const process_result = validateAndProcessAssuranceExtrinsic(
+    var process_result = validateAndProcessAssuranceExtrinsic(
         params,
         allocator,
         &test_case,
@@ -66,7 +66,7 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
         pre_state_validators,
     );
     defer {
-        if (process_result) |available_assignments| {
+        if (process_result) |*available_assignments| {
             available_assignments.deinit(allocator);
         } else |_| {}
     }
@@ -95,19 +95,7 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
                 const state_rho = &pre_state_assignments;
                 const state_kappa = &pre_state_validators;
 
-                const available_reports = try @import("../utils.zig").mapAlloc(
-                    types.AvailabilityAssignment,
-                    types.WorkReport,
-                    allocator,
-                    available_assignments.inner,
-                    struct {
-                        pub fn map(assignment: types.AvailabilityAssignment) types.WorkReport {
-                            return assignment.report;
-                        }
-                    }.map,
-                );
-                // NOTE: only slice needs to be freed, available_assignments.deinit will free
-                // inner memory
+                const available_reports = try available_assignments.getWorkReports(allocator);
                 defer allocator.free(available_reports);
 
                 // Verify outputs match expected results

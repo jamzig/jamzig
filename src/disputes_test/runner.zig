@@ -22,7 +22,7 @@ pub fn runDisputeTest(allocator: std.mem.Allocator, comptime params: Params, tes
     defer expected_rho.deinit();
 
     const current_epoch = test_case.pre_state.tau / params.epoch_length;
-    const transition_result = stf.transitionDisputes(
+    const transition_result = stf.disputes.transition(
         params.validators_count,
         params.core_count,
         allocator,
