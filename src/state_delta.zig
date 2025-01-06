@@ -8,6 +8,7 @@ pub const Error = error{
     UninitializedBaseField,
     PreviousStateRequired,
     StateTransitioned,
+    PrimeFieldAlreadySet,
 } || error{OutOfMemory};
 
 const DaggerState = enum {
@@ -43,33 +44,6 @@ pub fn StateTransition(comptime params: Params) type {
         rho_dagger: ?state.Rho(params.core_count) = null,
         rho_double_dagger: ?state.Rho(params.core_count) = null,
 
-        const dagger_states = std.StaticStringMap(DaggerStateInfo).initComptime(.{
-            .{ "beta_dagger", .{
-                .name = "beta",
-                .Type = state.Beta,
-                .requires_previous = true,
-                .blocks_next = false,
-            } },
-            .{ "delta_double_dagger", .{
-                .name = "delta",
-                .Type = state.Delta,
-                .requires_previous = true,
-                .blocks_next = false,
-            } },
-            .{ "rho_dagger", .{
-                .name = "rho",
-                .Type = state.Rho(params.core_count),
-                .requires_previous = true,
-                .blocks_next = true,
-            } },
-            .{ "rho_double_dagger", .{
-                .name = "rho",
-                .Type = state.Rho(params.core_count),
-                .requires_previous = true,
-                .blocks_next = false,
-            } },
-        });
-
         pub fn init(
             allocator: std.mem.Allocator,
             base_state: *const state.JamState(params),
@@ -93,31 +67,8 @@ pub fn StateTransition(comptime params: Params) type {
             return ptr;
         }
 
-        fn handleDaggerState(
-            self: *Self,
-            comptime name: []const u8,
-            comptime field: STAccessors(State),
-        ) !?STAccessorPointerType(State, field) {
-            if (dagger_states.get(name)) |info| {
-                const prime_field = &@field(self.prime, info.name);
-                const dagger_field = &@field(self, name);
-
-                if (prime_field.* == null) return Error.PreviousStateRequired;
-                if (dagger_field.* == null) {
-                    dagger_field.* = try prime_field.*.?.deepClone(self.allocator);
-                }
-                return &dagger_field.*.?;
-            }
-            return null;
-        }
-
         pub fn ensure(self: *Self, comptime field: STAccessors(State)) Error!STAccessorPointerType(State, field) {
             const name = @tagName(field);
-
-            // Handle dagger states
-            if (try self.handleDaggerState(name, field)) |result| {
-                return result;
-            }
 
             // Handle regular prime transitions
             const is_prime = comptime std.mem.endsWith(u8, name, "_prime");
@@ -139,6 +90,11 @@ pub fn StateTransition(comptime params: Params) type {
             }
         }
 
+        /// Type-hinted variant of ensure() for IDE support
+        pub fn ensureT(self: *Self, comptime T: type, comptime field: STAccessors(State)) Error!T {
+            return try self.ensure(field);
+        }
+
         fn cloneField(self: *Self, field: anytype) !@TypeOf(field.?) {
             const T = @TypeOf(field.?);
             return switch (@typeInfo(T)) {
@@ -154,76 +110,20 @@ pub fn StateTransition(comptime params: Params) type {
             };
         }
 
-        fn initializeDaggerState(
-            self: *Self,
-            comptime name: []const u8,
-            value: anytype,
-        ) !bool {
-            if (dagger_states.get(name)) |_| {
-                const field_ptr = &@field(self, name);
-                if (field_ptr.* != null) return Error.StateTransitioned;
-                field_ptr.* = value;
-                return true;
-            }
-            return false;
-        }
-
-        pub fn initialize(self: *Self, comptime field: STAccessors(State), value: STBaseType(State, field)) Error!void {
+        pub fn set(self: *Self, comptime field: STAccessors(State), value: STBaseType(State, field)) Error!void {
             const name = @tagName(field);
 
-            // Handle dagger states
-            if (try self.initializeDaggerState(name, value)) {
-                return;
-            }
-
             // Ensure we're only initializing prime states
-            if (!std.mem.endsWith(u8, name, "_prime")) {
-                return Error.StateTransitioned;
+            if (!comptime std.mem.endsWith(u8, name, "_prime")) {
+                @compileError("can only intialize _prime state: " ++ name);
             }
 
             // Handle prime state initialization
             const base_name = name[0 .. name.len - 6];
             const prime_field = &@field(self.prime, base_name);
 
-            if (prime_field.* != null) return Error.StateTransitioned;
+            if (prime_field.* != null) return Error.PrimeFieldAlreadySet;
             prime_field.* = value;
-        }
-
-        fn overwriteDaggerState(
-            self: *Self,
-            name: []const u8,
-            value: anytype,
-        ) !bool {
-            if (dagger_states.get(name)) |_| {
-                const field_ptr = &@field(self, name);
-                if (field_ptr.* == null) return Error.PreviousStateRequired;
-                field_ptr.* = value;
-                return true;
-            }
-            return false;
-        }
-
-        pub fn overwrite(self: *Self, comptime field: STAccessors(State), value: STBaseType(State, field)) Error!void {
-            const name = @tagName(field);
-
-            // Handle dagger states
-            if (try self.overwriteDaggerState(name, value)) {
-                return;
-            }
-
-            // Handle regular fields
-            const base_name = if (std.mem.endsWith(u8, name, "_prime"))
-                name[0 .. name.len - 6]
-            else
-                name;
-
-            const field_ptr = &@field(if (std.mem.endsWith(u8, name, "_prime"))
-                self.prime
-            else
-                self.base, base_name);
-
-            if (field_ptr.* == null) return Error.UninitializedBaseField;
-            field_ptr.* = value;
         }
 
         /// Merges changes into a new state, invalidating prime dn thus the state_transiton object
@@ -242,9 +142,6 @@ pub fn StateTransition(comptime params: Params) type {
         /// frees all owned memory except non-owned self.base
         pub fn deinit(self: *Self) void {
             self.prime.deinit(self.allocator);
-            inline for (comptime dagger_states.keys()) |k| {
-                if (@field(self, k)) |*field| field.deinit();
-            }
             self.* = undefined;
         }
     };
@@ -285,9 +182,7 @@ pub fn STAccessorPointerType(comptime T: anytype, comptime field: anytype) type 
     const field_name = @tagName(field);
     const BaseType = STBaseType(T, field);
 
-    return if (std.mem.endsWith(u8, field_name, "_prime") or
-        std.mem.endsWith(u8, field_name, "_dagger") or
-        std.mem.endsWith(u8, field_name, "_double_dagger"))
+    return if (std.mem.endsWith(u8, field_name, "_prime"))
         *BaseType
     else
         *const BaseType;
