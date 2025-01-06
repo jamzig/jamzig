@@ -83,6 +83,16 @@ pub fn StateTransition(comptime params: Params) type {
             };
         }
 
+        pub fn initHeap(
+            allocator: std.mem.Allocator,
+            base_state: *const state.JamState(params),
+            transition_time: params.Time(),
+        ) !*Self {
+            const ptr = try allocator.create(Self);
+            ptr.* = try Self.init(allocator, base_state, transition_time);
+            return ptr;
+        }
+
         fn handleDaggerState(
             self: *Self,
             comptime name: []const u8,
