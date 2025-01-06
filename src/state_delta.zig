@@ -6,11 +6,13 @@ const Params = @import("jam_params.zig").Params;
 
 pub const Error = error{
     UninitializedBaseField,
-    UninitializedPrimeField,
+    UninitializedTransientField,
+    CanOnlyModifyTransient,
+    CanOnlyCreateTransient,
+    CanOnlyInializeTransient,
     PreviousStateRequired,
     StateTransitioned,
     PrimeFieldAlreadySet,
-    CanOnlyModifyTransient,
 } || error{OutOfMemory};
 
 const DaggerState = enum {
@@ -113,10 +115,10 @@ pub fn StateTransition(comptime params: Params) type {
             const name = @tagName(field);
 
             // Ensure we're only initializing prime states
-            if (!comptime std.mem.endsWith(u8, name, "_prime") and
-                builtin.mode == .Debug)
+            if (builtin.mode == .Debug and
+                !comptime std.mem.endsWith(u8, name, "_prime"))
             {
-                return Error.CanOnlyModifyPrime;
+                return Error.CanOnlyCreateTransient;
             }
 
             // Handle prime state initialization
@@ -136,7 +138,7 @@ pub fn StateTransition(comptime params: Params) type {
             const name = @tagName(field);
 
             // Ensure we're only initializing prime states
-            if (!comptime std.mem.endsWith(u8, name, "_prime") and
+            if ((!comptime std.mem.endsWith(u8, name, "_prime")) and
                 builtin.mode == .Debug)
             {
                 return Error.CanOnlyInializeTransient;
@@ -175,7 +177,7 @@ pub fn StateTransition(comptime params: Params) type {
                 if (is_prime) {
                     const prime_field = &@field(self.prime, base_name);
                     if (prime_field.* == null) {
-                        return Error.UninitializedPrimeField;
+                        return Error.UninitializedTransientField;
                     }
                     return &prime_field.*.?;
                 } else {
@@ -191,7 +193,7 @@ pub fn StateTransition(comptime params: Params) type {
                     &@field(self.prime, base_name)
                 else
                     &@field(self.base, base_name);
-                return field_ptr.*.?;
+                return &field_ptr.*.?;
             }
         }
         pub fn getT(self: *Self, comptime T: type, comptime field: STAccessors(State)) Error!T {
