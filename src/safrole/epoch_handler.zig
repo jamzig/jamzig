@@ -31,10 +31,10 @@ pub fn handleEpochTransition(
     span.debug("Rotating validator keys", .{});
 
     // λ gets current κ
-    try stx.set(.lambda_prime, try current_kappa.deepClone(stx.allocator));
+    try stx.create(.lambda_prime, try current_kappa.deepClone(stx.allocator));
 
     // κ gets current γ.k
-    try stx.set(.kappa_prime, try current_gamma.k.deepClone(stx.allocator));
+    try stx.create(.kappa_prime, try current_gamma.k.deepClone(stx.allocator));
 
     // Create new gamma state
     var gamma_prime = try stx.ensureT(*state.init.Gamma(params), .gamma_prime);

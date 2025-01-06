@@ -9,6 +9,7 @@ pub const Error = error{
     PreviousStateRequired,
     StateTransitioned,
     PrimeFieldAlreadySet,
+    CanOnlyModifyPrime,
 } || error{OutOfMemory};
 
 const DaggerState = enum {
@@ -67,25 +68,34 @@ pub fn StateTransition(comptime params: Params) type {
             return ptr;
         }
 
+        /// Returns base or prime value. Creates prime by cloning base if needed.
         pub fn ensure(self: *Self, comptime field: STAccessors(State)) Error!STAccessorPointerType(State, field) {
+            const builtin = @import("builtin");
             const name = @tagName(field);
 
             // Handle regular prime transitions
             const is_prime = comptime std.mem.endsWith(u8, name, "_prime");
             const base_name = if (is_prime) name[0 .. name.len - 6] else name;
-            const base_field = &@field(self.base, base_name);
             const prime_field = &@field(self.prime, base_name);
-
-            if (base_field.* == null) {
-                return Error.UninitializedBaseField;
-            }
 
             if (is_prime) {
                 if (prime_field.* == null) {
+                    const base_field = &@field(self.base, base_name);
+                    if (comptime builtin.mode == .Debug) {
+                        if (base_field.* == null) {
+                            return Error.UninitializedBaseField;
+                        }
+                    }
                     prime_field.* = try self.cloneField(base_field.*);
                 }
                 return &prime_field.*.?;
             } else {
+                const base_field = &@field(self.base, base_name);
+                if (comptime builtin.mode == .Debug) {
+                    if (base_field.* == null) {
+                        return Error.UninitializedBaseField;
+                    }
+                }
                 return &base_field.*.?;
             }
         }
@@ -93,6 +103,66 @@ pub fn StateTransition(comptime params: Params) type {
         /// Type-hinted variant of ensure() for IDE support
         pub fn ensureT(self: *Self, comptime T: type, comptime field: STAccessors(State)) Error!T {
             return try self.ensure(field);
+        }
+
+        /// Creates prime value. One-time operation, debug-mode enforced.
+        pub fn create(self: *Self, comptime field: STAccessors(State), value: STBaseType(State, field)) Error!void {
+            const builtin = @import("builtin");
+
+            const name = @tagName(field);
+
+            // Ensure we're only initializing prime states
+            if (!comptime std.mem.endsWith(u8, name, "_prime") and
+                builtin.mode == .Debug)
+            {
+                return Error.CanOnlyModifyPrime;
+            }
+
+            // Handle prime state initialization
+            const base_name = name[0 .. name.len - 6];
+            const prime_field = &@field(self.prime, base_name);
+
+            if (comptime builtin.mode == .Debug) {
+                if (prime_field.* != null) return Error.PrimeFieldAlreadySet;
+            }
+
+            prime_field.* = value;
+        }
+
+        /// Returns field value. Debug mode enforces existence.
+        pub inline fn get(self: *Self, comptime field: STAccessors(State)) !STBaseType(State, field) {
+            const builtin = @import("builtin");
+
+            const name = @tagName(field);
+            const is_prime = comptime std.mem.endsWith(u8, name, "_prime");
+
+            const base_name = if (is_prime)
+                name[0 .. name.len - 6]
+            else
+                name;
+
+            if (comptime builtin.mode == .Debug) {
+                if (is_prime) {
+                    const prime_field = &@field(self.prime, base_name);
+                    if (prime_field.* == null) {
+                        return Error.UnitializedPrimeField;
+                    }
+                    return prime_field.*.?;
+                } else {
+                    const base_field = &@field(self.base, base_name);
+                    if (base_field.* == null) {
+                        return error.UninitializedBaseField;
+                    }
+                    return base_field.*.?;
+                }
+            } else {
+                // In release mode, just get the field directly
+                const field_ptr = if (comptime std.mem.endsWith(u8, name, "_prime"))
+                    &@field(self.prime, base_name)
+                else
+                    &@field(self.base, base_name);
+                return field_ptr.*.?;
+            }
         }
 
         fn cloneField(self: *Self, field: anytype) !@TypeOf(field.?) {
@@ -110,32 +180,16 @@ pub fn StateTransition(comptime params: Params) type {
             };
         }
 
-        pub fn set(self: *Self, comptime field: STAccessors(State), value: STBaseType(State, field)) Error!void {
-            const name = @tagName(field);
-
-            // Ensure we're only initializing prime states
-            if (!comptime std.mem.endsWith(u8, name, "_prime")) {
-                @compileError("can only intialize _prime state: " ++ name);
-            }
-
-            // Handle prime state initialization
-            const base_name = name[0 .. name.len - 6];
-            const prime_field = &@field(self.prime, base_name);
-
-            if (prime_field.* != null) return Error.PrimeFieldAlreadySet;
-            prime_field.* = value;
-        }
-
-        /// Merges changes into a new state, invalidating prime dn thus the state_transiton object
-        pub fn cloneBaseAndMerge(self: *Self) !State {
+        /// Clones base and merges prime into it
+        pub fn cloneBaseAndMergeWithPrime(self: *Self) !State {
             var cloned = try self.base.deepClone(self.allocator);
             try cloned.merge(&self.prime, self.allocator);
             return cloned;
         }
 
-        /// Takes ownership of prime/dagger states to create merged state, consuming the prime state and
-        /// altering base.
-        pub fn takeBaseAndMerge(self: *Self) !void {
+        /// Merges into base destroying prime. We are overriding the *const pointer
+        /// to base to make this work. Prime will be all nulls after
+        pub fn mergePrimeOntoBase(self: *Self) !void {
             try @constCast(self.base).merge(&self.prime, self.allocator);
         }
 

@@ -51,7 +51,7 @@ test "sequoia: State transition with sequoia-generated blocks" {
         var state_transition = try stf.stateTransition(jam_params.TINY_PARAMS, allocator, current_state, &block);
         defer state_transition.deinit();
 
-        try state_transition.takeBaseAndMerge();
+        try state_transition.mergePrimeOntoBase();
 
         // Log block information for debugging after state transition
         // const debug_current_state = try sequoia.logging.allocPrintStateDebug(jam_params.TINY_PARAMS, allocator, current_state);
