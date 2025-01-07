@@ -7,6 +7,7 @@ const SeedGenerator = @import("seed.zig").SeedGenerator;
 const InstructionType = enum {
     NoArgs, // Instructions like trap (0), fallthrough (1)
     OneImm, // Instructions like ecalli (10)
+    OneRegExtImm, // Instructions like load_imm_64 (20)
     OneRegOneImm, // Instructions like jump_ind (50), load_imm (51)
     TwoRegOneImm, // Instructions like store_imm_ind_u8 (110)
     TwoRegTwoImm, // Instructions like load_imm_jump_ind (160)
@@ -23,6 +24,7 @@ const InstructionRange = struct {
 const instruction_ranges = std.StaticStringMap(InstructionRange).initComptime(.{
     .{ "NoArgs", .{ .start = 0, .end = 1 } },
     .{ "OneImm", .{ .start = 10, .end = 10 } },
+    .{ "OneRegExtImm", .{ .start = 20, .end = 20 } },
     .{ "OneRegOneImm", .{ .start = 50, .end = 62 } },
     .{ "TwoRegOneImm", .{ .start = 110, .end = 139 } },
     .{ "TwoRegTwoImm", .{ .start = 160, .end = 160 } },
@@ -169,7 +171,7 @@ pub const ProgramGenerator = struct {
         } else {
             // Generate regular instruction
             const inst_type = @as(InstructionType, @enumFromInt(
-                self.seed_gen.randomIntRange(u8, 2, 5),
+                self.seed_gen.randomIntRange(u8, 0, std.meta.fields(InstructionType).len),
             ));
             const range = instruction_ranges.get(@tagName(inst_type)).?;
             const opcode = self.seed_gen.randomIntRange(u8, range.start, range.end);
@@ -181,6 +183,16 @@ pub const ProgramGenerator = struct {
                 .OneImm => {
                     const imm = self.seed_gen.randomByte();
                     try block.instructions.append(imm);
+                },
+                .OneRegExtImm => {
+                    const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                    try block.instructions.append(reg);
+                    // Generate 8 bytes of immediate value
+                    var i: u8 = 0;
+                    while (i < 8) : (i += 1) {
+                        const imm = self.seed_gen.randomByte();
+                        try block.instructions.append(imm);
+                    }
                 },
                 .OneRegOneImm => {
                     const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
@@ -372,10 +384,13 @@ fn verifyProgramStructure(program: GeneratedProgram) !void {
         const opcode = program.code[i];
         i += 1;
 
+        std.debug.print("pos {d}/{d}: opcode {d}\n", .{ i - 1, program.code.len, opcode });
+
         // Skip operands based on instruction type
         switch (opcode) {
             0, 1 => {}, // No operands (trap, fallthrough)
             10 => i += 1, // OneImm
+            20 => i += 9, // load_imm_64 (1 reg + 8 bytes immediate)
             40 => i += 1, // jump (special case)
             50...62 => i += 2, // OneRegOneImm
             110...139 => i += 3, // TwoRegOneImm
