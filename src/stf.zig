@@ -61,8 +61,6 @@ pub fn stateTransition(
     );
     defer markers.deinit(allocator);
 
-    span.debug("State transition completed successfully", .{});
-
     return state_transition;
 }
 

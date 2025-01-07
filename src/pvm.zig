@@ -249,6 +249,7 @@ pub const PVM = struct {
         self.pc = try updatePc(self.pc, self.executeInstruction(i) catch |err| {
             execution_span.err("Instruction execution failed: {any}", .{err});
             // Charge one extra gas for error handling
+            // NOTE: this is in here to be compatible with
             self.gas -= switch (err) {
                 error.JumpAddressHalt => 0,
                 error.JumpAddressZero => 0,
@@ -279,8 +280,10 @@ pub const PVM = struct {
             span.debug("Step completed successfully", .{});
             return .play;
         } else |err| {
+            // TODO: this mapping is to be compliant with the test vectors,
+            // move this to a test adaptor
             const status = switch (err) {
-                error.Trap => Status.panic,
+                error.Trap => Status.trap,
                 error.OutOfGas => Status.out_of_gas,
                 error.NonExistentHostCall => Status.panic,
                 error.OutOfMemory => Status.panic,
@@ -294,10 +297,10 @@ pub const PVM = struct {
                 error.JumpAddressNotInBasicBlock => Status.panic,
                 error.InvalidInstruction => Status.panic,
                 error.PcUnderflow => Status.panic,
-                error.OutOfBounds => Status.panic,
+                error.OutOfBounds => Status.trap,
                 // else => @panic("Unknown error"),
             };
-            span.info("Step resulted in status: {}", .{status});
+            span.info("Step resulted in err {} => resulting in status: {}", .{ err, status });
             return status;
         }
     }
@@ -327,7 +330,7 @@ pub const PVM = struct {
             .fallthrough => {},
 
             // A.5.2 Instructions with Arguments of One Immediate
-            .ecalli => try self.hostCall(i.args.one_immediate.immediate),
+            .ecalli => try self.hostCall(@intCast(i.args.one_immediate.immediate)),
 
             // A.5.3 Instructions with Arguments of One Register and One Extended Width Immediate
             .load_imm_64 => {
@@ -338,19 +341,19 @@ pub const PVM = struct {
             // A.5.4 Instructions with Arguments of Two Immediates
             .store_imm_u8 => {
                 const args = i.args.two_immediates;
-                try self.storeMemory(args.first_immediate, @intCast(args.second_immediate), 1);
+                try self.storeMemory(@intCast(args.first_immediate), @intCast(args.second_immediate), 1);
             },
             .store_imm_u16 => {
                 const args = i.args.two_immediates;
-                try self.storeMemory(args.first_immediate, @intCast(args.second_immediate), 2);
+                try self.storeMemory(@intCast(args.first_immediate), @intCast(args.second_immediate), 2);
             },
             .store_imm_u32 => {
                 const args = i.args.two_immediates;
-                try self.storeMemory(args.first_immediate, args.second_immediate, 4);
+                try self.storeMemory(@intCast(args.first_immediate), args.second_immediate, 4);
             },
             .store_imm_u64 => {
                 const args = i.args.two_immediates;
-                try self.storeMemory(args.first_immediate, args.second_immediate, 8);
+                try self.storeMemory(@intCast(args.first_immediate), args.second_immediate, 8);
             },
 
             // A.5.5 Instructions with Arguments of One Offset
@@ -367,34 +370,34 @@ pub const PVM = struct {
             },
             .load_u8 => {
                 const args = i.args.one_register_one_immediate;
-                self.registers[args.register_index] = try self.loadMemory(args.immediate, 1);
+                self.registers[args.register_index] = try self.loadMemory(@intCast(args.immediate), 1);
             },
             .load_i8 => {
                 const args = i.args.one_register_one_immediate;
-                const value = try self.loadMemory(args.immediate, 1);
+                const value = try self.loadMemory(@intCast(args.immediate), 1);
                 self.registers[args.register_index] = @as(u64, @bitCast(@as(i64, @intCast(@as(i8, @bitCast(@as(u8, @truncate(value))))))));
             },
             .load_u16 => {
                 const args = i.args.one_register_one_immediate;
-                self.registers[args.register_index] = try self.loadMemory(args.immediate, 2);
+                self.registers[args.register_index] = try self.loadMemory(@intCast(args.immediate), 2);
             },
             .load_i16 => {
                 const args = i.args.one_register_one_immediate;
-                const value = try self.loadMemory(args.immediate, 2);
+                const value = try self.loadMemory(@intCast(args.immediate), 2);
                 self.registers[args.register_index] = @as(u64, @bitCast(@as(i64, @intCast(@as(i16, @bitCast(@as(u16, @truncate(value))))))));
             },
             .load_u32 => {
                 const args = i.args.one_register_one_immediate;
-                self.registers[args.register_index] = try self.loadMemory(args.immediate, 4);
+                self.registers[args.register_index] = try self.loadMemory(@intCast(args.immediate), 4);
             },
             .load_i32 => {
                 const args = i.args.one_register_one_immediate;
-                const value = try self.loadMemory(args.immediate, 4);
+                const value = try self.loadMemory(@intCast(args.immediate), 4);
                 self.registers[args.register_index] = @as(u64, @bitCast(@as(i64, @intCast(@as(i32, @bitCast(@as(u32, @truncate(value))))))));
             },
             .load_u64 => {
                 const args = i.args.one_register_one_immediate;
-                self.registers[args.register_index] = try self.loadMemory(args.immediate, 8);
+                self.registers[args.register_index] = try self.loadMemory(@intCast(args.immediate), 8);
             },
             .store_u8, .store_u16, .store_u32, .store_u64 => {
                 const args = i.args.one_register_one_immediate;
@@ -405,7 +408,7 @@ pub const PVM = struct {
                     .store_u64 => 8,
                     else => unreachable,
                 };
-                try self.storeMemory(args.immediate, self.registers[args.register_index], size);
+                try self.storeMemory(@intCast(args.immediate), self.registers[args.register_index], size);
             },
 
             // A.5.7 Instructions with Arguments of One Register & Two Immediates
@@ -449,10 +452,10 @@ pub const PVM = struct {
                     .branch_le_u_imm => reg <= imm,
                     .branch_ge_u_imm => reg >= imm,
                     .branch_gt_u_imm => reg > imm,
-                    .branch_lt_s_imm => @as(i64, @bitCast(reg)) < @as(i32, @bitCast(imm)),
-                    .branch_le_s_imm => @as(i64, @bitCast(reg)) <= @as(i32, @bitCast(imm)),
-                    .branch_ge_s_imm => @as(i64, @bitCast(reg)) >= @as(i32, @bitCast(imm)),
-                    .branch_gt_s_imm => @as(i64, @bitCast(reg)) > @as(i32, @bitCast(imm)),
+                    .branch_lt_s_imm => @as(i64, @bitCast(reg)) < @as(i64, @bitCast(imm)),
+                    .branch_le_s_imm => @as(i64, @bitCast(reg)) <= @as(i64, @bitCast(imm)),
+                    .branch_ge_s_imm => @as(i64, @bitCast(reg)) >= @as(i64, @bitCast(imm)),
+                    .branch_gt_s_imm => @as(i64, @bitCast(reg)) > @as(i64, @bitCast(imm)),
                     else => unreachable,
                 };
                 if (should_branch) {
@@ -775,9 +778,9 @@ pub const PVM = struct {
                 const args = i.args.two_registers_one_immediate;
                 const result = switch (i.instruction) {
                     .set_lt_u_imm => self.registers[args.second_register_index] < args.immediate,
-                    .set_lt_s_imm => @as(i64, @bitCast(self.registers[args.second_register_index])) < @as(i32, @bitCast(args.immediate)),
+                    .set_lt_s_imm => @as(i64, @bitCast(self.registers[args.second_register_index])) < @as(i64, @bitCast(args.immediate)),
                     .set_gt_u_imm => self.registers[args.second_register_index] > args.immediate,
-                    .set_gt_s_imm => @as(i64, @bitCast(self.registers[args.second_register_index])) > @as(i32, @bitCast(args.immediate)),
+                    .set_gt_s_imm => @as(i64, @bitCast(self.registers[args.second_register_index])) > @as(i64, @bitCast(args.immediate)),
                     else => unreachable,
                 };
                 self.registers[args.first_register_index] = if (result) 1 else 0;
