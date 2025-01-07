@@ -153,81 +153,86 @@ pub const ProgramGenerator = struct {
         return block;
     }
 
-    /// Generate a valid PVM instruction
+    /// Generate a valid PVM instruction with correctly encoded arguments
+    /// Following graypaper sections A.5.1 through A.5.13, using variable-length
+    /// immediate encoding as per section 3.7.2
     fn generateValidInstruction(self: *Self, block: *BasicBlock, is_terminator: bool) !void {
+        var instruction_buffer = std.ArrayList(u8).init(self.allocator);
+        defer instruction_buffer.deinit();
+
+        var encoder = @import("instruction.zig")
+            .encoder(instruction_buffer.writer());
+
         if (is_terminator) {
-            // Generate terminator instruction (trap, fallthrough, or jump)
             const terminator_type = self.seed_gen.randomIntRange(u8, 0, 2);
             switch (terminator_type) {
-                0 => try block.instructions.append(0), // trap
-                1 => try block.instructions.append(1), // fallthrough
-                2 => { // jump
-                    try block.instructions.append(40); // jump opcode
-                    // Jump target will be filled in during linkBlocks()
-                    try block.instructions.append(0); // Placeholder
+                0 => _ = try encoder.encodeNoArgs(0),
+                1 => _ = try encoder.encodeNoArgs(1),
+                2 => {
+                    // Jump target will be encoded as variable-length offset later
+                    _ = try encoder.encodeJump(0);
                 },
                 else => unreachable,
             }
         } else {
-            // Generate regular instruction
             const inst_type = @as(InstructionType, @enumFromInt(
-                self.seed_gen.randomIntRange(u8, 0, std.meta.fields(InstructionType).len),
+                self.seed_gen.randomIntRange(u8, 2, std.meta.fields(InstructionType).len - 1),
             ));
             const range = instruction_ranges.get(@tagName(inst_type)).?;
             const opcode = self.seed_gen.randomIntRange(u8, range.start, range.end);
-            try block.instructions.append(opcode);
 
-            // Add appropriate operands based on instruction type
             switch (inst_type) {
-                .NoArgs => {}, // No operands needed
+                .NoArgs => try encoder.encodeNoArgs(opcode),
+
                 .OneImm => {
-                    const imm = self.seed_gen.randomByte();
-                    try block.instructions.append(imm);
+                    const imm = self.seed_gen.randomImmediate();
+                    _ = try encoder.encodeOneImm(opcode, imm);
                 },
+
                 .OneRegExtImm => {
                     const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    try block.instructions.append(reg);
-                    // Generate 8 bytes of immediate value
-                    var i: u8 = 0;
-                    while (i < 8) : (i += 1) {
-                        const imm = self.seed_gen.randomByte();
-                        try block.instructions.append(imm);
-                    }
+                    const imm = self.seed_gen.randomImmediate();
+                    _ = try encoder.encodeOneRegOneExtImm(opcode, reg, imm);
                 },
+
                 .OneRegOneImm => {
                     const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const imm = self.seed_gen.randomByte();
-                    try block.instructions.append(reg);
-                    try block.instructions.append(imm);
+                    const imm = self.seed_gen.randomImmediate();
+                    _ = try encoder.encodeOneRegOneImm(opcode, reg, imm);
                 },
+
                 .TwoRegOneImm => {
                     const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
                     const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const imm = self.seed_gen.randomByte();
-                    try block.instructions.append(reg1);
-                    try block.instructions.append(reg2);
-                    try block.instructions.append(imm);
+                    const imm = self.seed_gen.randomImmediate();
+                    _ = try encoder.encodeTwoRegOneImm(opcode, reg1, reg2, imm);
                 },
+
                 .TwoRegTwoImm => {
                     const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
                     const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const imm1 = self.seed_gen.randomByte();
-                    const imm2 = self.seed_gen.randomByte();
-                    try block.instructions.append(reg1);
-                    try block.instructions.append(reg2);
-                    try block.instructions.append(imm1);
-                    try block.instructions.append(imm2);
+                    const imm1 = self.seed_gen.randomImmediate();
+                    const imm2 = self.seed_gen.randomImmediate();
+                    _ = try encoder.encodeTwoRegTwoImm(opcode, reg1, reg2, imm1, imm2);
                 },
+
                 .ThreeReg => {
                     const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
                     const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
                     const reg3 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    try block.instructions.append(reg1);
-                    try block.instructions.append(reg2);
-                    try block.instructions.append(reg3);
+                    _ = try encoder.encodeThreeReg(opcode, reg1, reg2, reg3);
                 },
             }
         }
+
+        try block.instructions.appendSlice(instruction_buffer.items);
+    }
+
+    /// Update a jump instruction's target in the instruction stream
+    /// The target will be encoded as a variable-length immediate
+    fn updateJumpTarget(instructions: []u8, offset: usize, target: u32) !void {
+        var fbs = std.io.fixedBufferStream(instructions[offset..]);
+        try codec.writeInteger(target, fbs.writer());
     }
 
     /// Create valid jump targets between blocks

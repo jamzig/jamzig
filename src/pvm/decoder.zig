@@ -92,7 +92,10 @@ pub const Decoder = struct {
 
     fn decodeOneOffset(self: *const Decoder, pc: u32) !InstructionArgs {
         const l_x = @min(4, self.skip_l(pc + 1));
-        const offset = @as(i32, @intCast(try self.decodeImmediateSigned(pc + 1, l_x)));
+        const offset = @as(
+            i32,
+            @intCast(try self.decodeImmediateSigned(pc + 1, l_x)),
+        );
         return .{
             .one_offset = .{
                 .no_of_bytes_to_skip = l_x,

@@ -1,6 +1,5 @@
 const std = @import("std");
 
-/// SeedGenerator provides deterministic random number generation for the fuzzer
 pub const SeedGenerator = struct {
     random: std.Random.DefaultPrng,
     seed: u64,
@@ -40,15 +39,15 @@ pub const SeedGenerator = struct {
 
     /// Generate a random u64 immediate value
     /// Uses a weighted distribution to favor smaller values
-    pub fn randomImmediate(self: *SeedGenerator) u64 {
+    pub fn randomImmediate(self: *SeedGenerator) u32 {
         // 70% chance of small value (0-255)
         // 20% chance of medium value (256-65535)
-        // 10% chance of large value (65536-u64.max)
+        // 10% chance of large value (65536-u32.max)
         const roll = self.randomIntRange(u8, 0, 99);
         return switch (roll) {
-            0...69 => self.randomIntRange(u64, 0, 255),
-            70...89 => self.randomIntRange(u64, 256, 65535),
-            else => self.randomIntRange(u64, 65536, std.math.maxInt(u64)),
+            0...69 => self.randomIntRange(u32, 0, 255),
+            70...89 => self.randomIntRange(u32, 256, 65535),
+            else => self.randomIntRange(u32, 65536, std.math.maxInt(u32)),
         };
     }
 
