@@ -13,15 +13,15 @@ pub fn Encoder(comptime T: type) type {
         }
 
         pub fn encodeOneImm(self: *@This(), opcode: u8, imm: u32) !u8 {
-            const l_x = @min(4, calcLengthNeeded(imm));
+            const l_x = calcLengthNeeded(imm);
             try self.writer.writeByte(opcode);
             try self.writeImm(imm, l_x);
             return l_x;
         }
 
         pub fn encodeTwoImm(self: *@This(), opcode: u8, imm1: u32, imm2: u32) !u8 {
-            const l_x = @min(4, calcLengthNeeded(imm1));
-            const l_y = @min(4, calcLengthNeeded(imm2));
+            const l_x = calcLengthNeeded(imm1);
+            const l_y = calcLengthNeeded(imm2);
             try self.writer.writeByte(opcode);
             try self.writer.writeByte(l_x << 4);
             try self.writeImm(imm1, l_x);
@@ -36,27 +36,24 @@ pub fn Encoder(comptime T: type) type {
             return l_x + 1;
         }
 
-        pub fn encodeOneRegOneExtImm(self: *@This(), opcode: u8, reg: u8, imm: u32) !u8 {
-            const reg_a = @min(12, reg);
+        pub fn encodeOneRegOneExtImm(self: *@This(), opcode: u8, reg_a: u8, imm: u32) !u8 {
             try self.writer.writeByte(opcode);
             try self.writer.writeByte(reg_a);
             try self.writer.writeInt(u32, imm, .little);
             return 2 + 8;
         }
 
-        pub fn encodeOneRegOneImm(self: *@This(), opcode: u8, reg: u8, imm: u32) !u8 {
-            const reg_a = @min(12, reg);
-            const l_x = @min(4, calcLengthNeeded(imm));
+        pub fn encodeOneRegOneImm(self: *@This(), opcode: u8, reg_a: u8, imm: u32) !u8 {
+            const l_x = calcLengthNeeded(imm);
             try self.writer.writeByte(opcode);
             try self.writer.writeByte(reg_a);
             try self.writeImm(imm, l_x);
             return l_x + 1;
         }
 
-        pub fn encodeOneRegTwoImm(self: *@This(), opcode: u8, reg: u8, imm1: u32, imm2: u32) !u8 {
-            const reg_a = @min(12, reg);
-            const l_x = @min(4, calcLengthNeeded(imm1));
-            const l_y = @min(4, calcLengthNeeded(imm2));
+        pub fn encodeOneRegTwoImm(self: *@This(), opcode: u8, reg_a: u8, imm1: u32, imm2: u32) !u8 {
+            const l_x = calcLengthNeeded(imm1);
+            const l_y = calcLengthNeeded(imm2);
             try self.writer.writeByte(opcode);
             try self.writer.writeByte(reg_a | (l_x << 4));
             try self.writeImm(imm1, l_x);
@@ -64,11 +61,9 @@ pub fn Encoder(comptime T: type) type {
             return l_x + l_y + 2;
         }
 
-        pub fn encodeOneRegOneImmOneOffset(self: *@This(), opcode: u8, reg: u8, imm: u32, offset: i32) !u8 {
-            const reg_a = @min(12, reg);
-            const l_x = @min(4, calcLengthNeeded(imm));
-            const l_y = @min(4, calcLengthNeeded(@as(u32, @bitCast(offset))));
-
+        pub fn encodeOneRegOneImmOneOffset(self: *@This(), opcode: u8, reg_a: u8, imm: u32, offset: i32) !u8 {
+            const l_x = calcLengthNeeded(imm);
+            const l_y = calcLengthNeeded(@as(u32, @bitCast(offset)));
             try self.writer.writeByte(opcode);
             try self.writer.writeByte(reg_a | (l_x << 4));
             try self.writeImm(imm, l_x);
@@ -76,45 +71,34 @@ pub fn Encoder(comptime T: type) type {
             return l_x + l_y + 2;
         }
 
-        pub fn encodeTwoReg(self: *@This(), opcode: u8, reg1: u8, reg2: u8) !u8 {
-            const reg_d = @min(12, reg1);
-            const reg_a = @min(12, reg2);
+        pub fn encodeTwoReg(self: *@This(), opcode: u8, reg_a: u8, reg_b: u8) !u8 {
             try self.writer.writeByte(opcode);
-            try self.writer.writeByte(reg_d | (reg_a << 4));
+            try self.writer.writeByte(reg_a | (reg_b << 4));
             return 1;
         }
 
-        pub fn encodeTwoRegOneImm(self: *@This(), opcode: u8, reg1: u8, reg2: u8, imm: u32) !u8 {
-            const reg_a: u8 = @min(12, reg1);
-            const reg_b: u8 = @min(12, reg2);
-            const l_x = @min(4, calcLengthNeeded(imm));
+        pub fn encodeTwoRegOneImm(self: *@This(), opcode: u8, reg_a: u8, reg_b: u8, imm: u32) !u8 {
+            const l_x = calcLengthNeeded(imm);
             try self.writer.writeByte(opcode);
             try self.writer.writeByte(reg_a | (reg_b << 4));
             try self.writeImm(imm, l_x);
             return l_x + 2;
         }
 
-        pub fn encodeTwoRegOneOffset(self: *@This(), opcode: u8, reg1: u8, reg2: u8, offset: i32) !u8 {
-            const reg_a = @min(12, reg1);
-            const reg_b = @min(12, reg2);
-
-            const l_x = @min(4, calcLengthNeeded(@bitCast(offset)));
-
+        pub fn encodeTwoRegOneOffset(self: *@This(), opcode: u8, reg_a: u8, reg_b: u8, offset: i32) !u8 {
+            const l_x = calcLengthNeeded(@bitCast(offset));
             try self.writer.writeByte(opcode);
             try self.writer.writeByte(reg_a | (reg_b << 4));
             try self.writeImm(@bitCast(offset), l_x);
-
             return l_x + 2;
         }
 
-        pub fn encodeTwoRegTwoImm(self: *@This(), opcode: u8, reg1: u8, reg2: u8, imm1: u32, imm2: u32) !u8 {
-            const reg_a: u8 = @min(12, reg1);
-            const reg_b: u8 = @min(12, reg2);
-            const l_x = @min(4, calcLengthNeeded(imm1));
-            const l_y = @min(4, calcLengthNeeded(imm2));
+        pub fn encodeTwoRegTwoImm(self: *@This(), opcode: u8, reg_a: u8, reg_b: u8, imm1: u32, imm2: u32) !u8 {
+            const l_x = calcLengthNeeded(imm1);
+            const l_y = calcLengthNeeded(imm2);
             try self.writer.writeByte(opcode);
             try self.writer.writeByte(reg_a | (reg_b << 4));
-            try self.writer.writeByte(l_x); // Store l_x in a separate byte
+            try self.writer.writeByte(l_x);
             try self.writeImm(imm1, l_x);
             try self.writeImm(imm2, l_y);
             return l_x + l_y + 3;
@@ -128,7 +112,7 @@ pub fn Encoder(comptime T: type) type {
         }
 
         pub fn encodeJump(self: *@This(), target: u32) !u8 {
-            const l_x = @min(4, calcLengthNeeded(target));
+            const l_x = calcLengthNeeded(target);
             try self.writer.writeByte(40);
             try self.writeImm(target, l_x);
             return l_x;
