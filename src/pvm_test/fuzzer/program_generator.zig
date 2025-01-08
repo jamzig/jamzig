@@ -59,174 +59,45 @@ const instruction_ranges = std.StaticStringMap(InstructionRange).initComptime(.{
 
 /// Definition of a basic block for improved tracking
 pub const BasicBlock = struct {
-    /// Starting address of the block
-    address: u32,
     /// Instructions in the block
     instructions: std.ArrayList(u8),
     /// List of valid jump targets from this block
     jump_targets: std.ArrayList(u32),
     /// Mask bits for the block's instructions
     mask_bits: std.ArrayList(bool),
-
-    /// Add an instruction with its length to the block
-    pub fn addInstruction(self: *BasicBlock, bytes: []const u8, length: u8) !void {
-        try self.instructions.appendSlice(bytes);
-
-        // Set mask bit for instruction start
-        try self.mask_bits.append(true);
-
-        // Add false bits for the rest of the instruction
-        var i: usize = 1;
-        while (i < length) : (i += 1) {
-            try self.mask_bits.append(false);
-        }
-    }
-
-    pub fn deinit(self: *BasicBlock) void {
-        self.instructions.deinit();
-        self.jump_targets.deinit();
-    }
-};
-
-/// Represents the complete encoded PVM program
-pub const GeneratedProgram = struct {
-    /// Complete raw encoded program bytes
-    raw_bytes: []u8,
-    /// Component parts for verification/testing
-    code: []u8,
-    mask: []u8,
-    jump_table: []u32,
-
-    pub fn deinit(self: *GeneratedProgram, allocator: Allocator) void {
-        allocator.free(self.raw_bytes);
-        allocator.free(self.code);
-        allocator.free(self.mask);
-        allocator.free(self.jump_table);
-        self.* = undefined;
-    }
-};
-
-pub const ProgramGenerator = struct {
-    allocator: Allocator,
+    /// Reference to seed generator for random values
     seed_gen: *SeedGenerator,
-    basic_blocks: std.ArrayList(BasicBlock),
-    next_address: u32,
+    /// Reference to allocator
+    allocator: std.mem.Allocator,
 
     const Self = @This();
-    const MaxBlockSize = 32; // Maximum instructions in a block
-    const MinBlockSize = 4; // Minimum instructions in a block
     const MaxRegisterIndex = 12; // Maximum valid register index
 
-    pub fn init(allocator: Allocator, seed_gen: *SeedGenerator) Self {
+    pub fn init(allocator: std.mem.Allocator, seed_gen: *SeedGenerator) !@This() {
         return .{
-            .allocator = allocator,
+            .instructions = std.ArrayList(u8).init(allocator),
+            .jump_targets = std.ArrayList(u32).init(allocator),
+            .mask_bits = std.ArrayList(bool).init(allocator),
             .seed_gen = seed_gen,
-            .basic_blocks = std.ArrayList(BasicBlock).init(allocator),
-            .next_address = 0,
+            .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *Self) void {
-        for (self.basic_blocks.items) |*block| {
-            block.deinit();
-        }
-        self.basic_blocks.deinit();
-    }
-
-    /// Generate a valid PVM program with the specified number of basic blocks
-    pub fn generate(self: *Self, num_blocks: u32) !GeneratedProgram {
-        // Clear any existing state
-        self.deinit();
-        self.basic_blocks = std.ArrayList(BasicBlock).init(self.allocator);
-        self.next_address = 0;
-
-        // Generate basic blocks
-        var i: u32 = 0;
-        while (i < num_blocks) : (i += 1) {
-            const block = try self.generateBasicBlock();
-            try self.basic_blocks.append(block);
-        }
-
-        // Add valid jump targets to each block
-        try self.linkBlocks();
-
-        // Build the component parts
-        const code = try self.buildCode();
-        errdefer self.allocator.free(code);
-
-        const mask = try self.buildMask(code.len);
-        errdefer self.allocator.free(mask);
-
-        const jump_table = try self.buildJumpTable();
-        errdefer self.allocator.free(jump_table);
-
-        // Build the complete raw program
-        const program = try self.buildRawProgram(code, mask, jump_table);
-
-        return GeneratedProgram{
-            .raw_bytes = program,
-            .code = code,
-            .mask = mask,
-            .jump_table = jump_table,
-        };
-    }
-
-    /// Generate a single valid basic block
-    fn generateBasicBlock(self: *Self) !BasicBlock {
-        var block = BasicBlock{
-            .address = self.next_address,
-            .instructions = std.ArrayList(u8).init(self.allocator),
-            .jump_targets = std.ArrayList(u32).init(self.allocator),
-            .mask_bits = std.ArrayList(bool).init(self.allocator),
-        };
-
+    /// Generate the block's contents with a sequence of instructions
+    pub fn generate(self: *Self, min_size: u32, max_size: u32) !void {
         // Generate a sequence of valid instructions
-        const num_instructions = self.seed_gen.randomIntRange(u32, MinBlockSize, MaxBlockSize);
+        const num_instructions = self.seed_gen.randomIntRange(u32, min_size, max_size);
         var i: u32 = 0;
         while (i < num_instructions - 1) : (i += 1) {
-            try self.generateValidInstruction(&block, false);
+            try self.generateRegularInstruction();
         }
 
         // End with a valid terminator
-        try self.generateValidInstruction(&block, true);
-
-        // Update next block address
-        self.next_address += @intCast(block.instructions.items.len);
-
-        return block;
-    }
-
-    /// Generate a valid PVM instruction with correctly encoded arguments
-    /// Following graypaper sections A.5.1 through A.5.13, using variable-length
-    /// immediate encoding as per section 3.7.2
-    fn generateValidInstruction(self: *Self, block: *BasicBlock, is_terminator: bool) !void {
-        if (is_terminator) {
-            try self.generateTerminator(block);
-        } else {
-            try self.generateRegularInstruction(block);
-        }
-    }
-
-    /// Generate a terminator instruction (trap, fallthrough, or jump)
-    fn generateTerminator(self: *Self, block: *BasicBlock) !void {
-        var instruction_buffer = std.ArrayList(u8).init(self.allocator);
-        defer instruction_buffer.deinit();
-
-        var encoder = @import("instruction.zig").encoder(instruction_buffer.writer());
-
-        const terminator_type = self.seed_gen.randomIntRange(u8, 0, 2);
-        const length = switch (terminator_type) {
-            0 => try encoder.encodeNoArgs(0), // trap
-            1 => try encoder.encodeNoArgs(1), // fallthrough
-            2 => try encoder.encodeJump(0), // Jump target will be filled in later during block linking
-            else => unreachable,
-        };
-
-        try block.addInstruction(instruction_buffer.items, length);
+        try self.generateTerminator();
     }
 
     /// Generate a regular (non-terminator) instruction
-    fn generateRegularInstruction(self: *Self, block: *BasicBlock) !void {
+    fn generateRegularInstruction(self: *Self) !void {
         var instruction_buffer = std.ArrayList(u8).init(self.allocator);
         defer instruction_buffer.deinit();
 
@@ -234,7 +105,7 @@ pub const ProgramGenerator = struct {
 
         // Select random instruction type (excluding NoArgs which is for terminators)
         const inst_type = @as(InstructionType, @enumFromInt(
-            self.seed_gen.randomIntRange(u8, 3, std.meta.fields(InstructionType).len - 1),
+            self.seed_gen.randomIntRange(u8, 2, std.meta.fields(InstructionType).len - 1),
         ));
         const range = instruction_ranges.get(@tagName(inst_type)).?;
         const opcode = self.seed_gen.randomIntRange(u8, range.start, range.end);
@@ -308,33 +179,152 @@ pub const ProgramGenerator = struct {
             },
         };
 
-        try block.addInstruction(instruction_buffer.items, length);
+        try self.addInstruction(instruction_buffer.items, length);
     }
 
-    /// Create valid jump targets between blocks
-    fn linkBlocks(self: *Self) !void {
-        for (self.basic_blocks.items) |*block| {
-            // Find any jump instructions in the block
-            var i: usize = 0;
-            while (i < block.instructions.items.len) {
-                if (block.instructions.items[i] == 40) { // jump opcode
-                    // Select a valid target block
-                    const target_idx = self.seed_gen.randomIntRange(
-                        usize,
-                        0,
-                        self.basic_blocks.items.len - 1,
-                    );
-                    const target = self.basic_blocks.items[target_idx].address;
-                    try block.jump_targets.append(target);
+    /// Generate a terminator instruction (trap, fallthrough, or jump)
+    fn generateTerminator(self: *Self) !void {
+        var instruction_buffer = std.ArrayList(u8).init(self.allocator);
+        defer instruction_buffer.deinit();
 
-                    // Update the jump instruction's target
-                    if (i + 1 < block.instructions.items.len) {
-                        block.instructions.items[i + 1] = @truncate(target);
-                    }
-                }
-                i += 1;
-            }
+        var encoder = @import("instruction.zig").encoder(instruction_buffer.writer());
+
+        const terminator_type = self.seed_gen.randomIntRange(u8, 0, 2);
+        const length = switch (terminator_type) {
+            0 => try encoder.encodeNoArgs(0), // trap
+            1 => try encoder.encodeNoArgs(1), // fallthrough
+            2 => try encoder.encodeJump(0), // Jump target will be filled in later during block linking
+            else => unreachable,
+        };
+
+        try self.addInstruction(instruction_buffer.items, length);
+    }
+
+    /// Add an instruction with its length to the block
+    pub fn addInstruction(self: *Self, bytes: []const u8, length: u8) !void {
+        try self.instructions.appendSlice(bytes);
+
+        // Set mask bit for instruction start
+        try self.mask_bits.append(true);
+
+        // Add false bits for the rest of the instruction
+        var i: usize = 1;
+        while (i < length) : (i += 1) {
+            try self.mask_bits.append(false);
         }
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.instructions.deinit();
+        self.jump_targets.deinit();
+        self.mask_bits.deinit();
+    }
+};
+
+/// Represents the complete encoded PVM program
+pub const GeneratedProgram = struct {
+    /// Complete raw encoded program bytes
+    raw_bytes: []u8,
+    /// Component parts for verification/testing
+    code: []u8,
+    mask: []u8,
+    jump_table: []u32,
+
+    pub fn deinit(self: *GeneratedProgram, allocator: Allocator) void {
+        allocator.free(self.raw_bytes);
+        allocator.free(self.code);
+        allocator.free(self.mask);
+        allocator.free(self.jump_table);
+        self.* = undefined;
+    }
+};
+
+pub const ProgramGenerator = struct {
+    allocator: Allocator,
+    seed_gen: *SeedGenerator,
+    basic_blocks: std.ArrayList(BasicBlock),
+
+    const Self = @This();
+    const MaxBlockSize = 32; // Maximum instructions in a block
+    const MinBlockSize = 4; // Minimum instructions in a block
+    const MaxRegisterIndex = 12; // Maximum valid register index
+
+    pub fn init(allocator: Allocator, seed_gen: *SeedGenerator) Self {
+        return .{
+            .allocator = allocator,
+            .seed_gen = seed_gen,
+            .basic_blocks = std.ArrayList(BasicBlock).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        for (self.basic_blocks.items) |*block| {
+            block.deinit();
+        }
+        self.basic_blocks.deinit();
+    }
+
+    /// Generate a valid PVM program with the specified number of basic blocks
+    pub fn generate(self: *Self, num_blocks: u32) !GeneratedProgram {
+        // Clear any existing state
+        self.deinit();
+        self.basic_blocks = std.ArrayList(BasicBlock).init(self.allocator);
+
+        // Generate basic blocks
+        var i: u32 = 0;
+        while (i < num_blocks) : (i += 1) {
+            const block = try self.generateBasicBlock();
+            try self.basic_blocks.append(block);
+        }
+
+        // Add valid jump targets to each block
+        // try self.linkBlocks();
+
+        // Build the component parts
+        const code = try self.buildCode();
+        errdefer self.allocator.free(code);
+
+        const mask = try self.buildMask(code.len);
+        errdefer self.allocator.free(mask);
+
+        const jump_table = try self.buildJumpTable();
+        errdefer self.allocator.free(jump_table);
+
+        // Build the complete raw program
+        const program = try self.buildRawProgram(code, mask, jump_table);
+
+        return GeneratedProgram{
+            .raw_bytes = program,
+            .code = code,
+            .mask = mask,
+            .jump_table = jump_table,
+        };
+    }
+
+    /// Generate a single valid basic block
+    fn generateBasicBlock(self: *Self) !BasicBlock {
+        var block = try BasicBlock.init(self.allocator, self.seed_gen);
+        try block.generate(MinBlockSize, MaxBlockSize);
+
+        return block;
+    }
+
+    /// Generate a terminator instruction (trap, fallthrough, or jump)
+    fn generateTerminator(self: *Self, block: *BasicBlock) !void {
+        var instruction_buffer = std.ArrayList(u8).init(self.allocator);
+        defer instruction_buffer.deinit();
+
+        var encoder = @import("instruction.zig").encoder(instruction_buffer.writer());
+
+        const terminator_type = self.seed_gen.randomIntRange(u8, 0, 2);
+        const length = switch (terminator_type) {
+            0 => try encoder.encodeNoArgs(0), // trap
+            1 => try encoder.encodeNoArgs(1), // fallthrough
+            2 => try encoder.encodeJump(0), // Jump target will be filled in later during block linking
+            else => unreachable,
+        };
+
+        try block.addInstruction(instruction_buffer.items, length);
     }
 
     fn buildCode(self: *Self) ![]u8 {
