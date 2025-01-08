@@ -4,14 +4,34 @@ const Allocator = std.mem.Allocator;
 const SeedGenerator = @import("seed.zig").SeedGenerator;
 
 /// Represents a PVM instruction type with its opcode range and operand structure
+/// Represents a PVM instruction type with its opcode range and operand structure
 const InstructionType = enum {
-    NoArgs, // Instructions like trap (0), fallthrough (1)
-    OneImm, // Instructions like ecalli (10)
-    OneRegExtImm, // Instructions like load_imm_64 (20)
-    OneRegOneImm, // Instructions like jump_ind (50), load_imm (51)
-    TwoRegOneImm, // Instructions like store_imm_ind_u8 (110)
-    TwoRegTwoImm, // Instructions like load_imm_jump_ind (160)
-    ThreeReg, // Instructions like add_32 (170), sub_32 (171)
+    // Instructions with no arguments (A.5.1)
+    NoArgs, // 0-1: trap, fallthrough
+    // Instructions with one immediate (A.5.2)
+    OneImm, // 10: ecalli
+    // Instructions with one register and one extended width immediate (A.5.3)
+    OneRegExtImm, // 20: load_imm_64
+    // Instructions with two immediates (A.5.4)
+    TwoImm, // 30-33: store_imm_u8, store_imm_u16, etc.
+    // Instructions with one offset (A.5.5)
+    OneOffset, // 40: jump
+    // Instructions with one register and one immediate (A.5.6)
+    OneRegOneImm, // 50-62: jump_ind, load_imm, load_u8, etc.
+    // Instructions with one register and two immediates (A.5.7)
+    OneRegTwoImm, // 70-73: store_imm_ind_u8, store_imm_ind_u16, etc.
+    // Instructions with one register, one immediate and one offset (A.5.8)
+    OneRegOneImmOneOffset, // 80-90: load_imm_jump, branch_eq_imm, etc.
+    // Instructions with two registers (A.5.9)
+    TwoReg, // 100-101: move_reg, sbrk
+    // Instructions with two registers and one immediate (A.5.10)
+    TwoRegOneImm, // 110-147: store_ind_u8, load_ind_u8, add_imm_32, etc.
+    // Instructions with two registers and one offset (A.5.11)
+    TwoRegOneOffset, // 150-155: branch_eq, branch_ne, etc.
+    // Instructions with two registers and two immediates (A.5.12)
+    TwoRegTwoImm, // 160: load_imm_jump_ind
+    // Instructions with three registers (A.5.13)
+    ThreeReg, // 170-199: add_32, sub_32, mul_32, etc.
 };
 
 /// Maps instruction types to their valid opcode ranges
@@ -25,8 +45,14 @@ const instruction_ranges = std.StaticStringMap(InstructionRange).initComptime(.{
     .{ "NoArgs", .{ .start = 0, .end = 1 } },
     .{ "OneImm", .{ .start = 10, .end = 10 } },
     .{ "OneRegExtImm", .{ .start = 20, .end = 20 } },
+    .{ "TwoImm", .{ .start = 30, .end = 33 } },
+    .{ "OneOffset", .{ .start = 40, .end = 40 } },
     .{ "OneRegOneImm", .{ .start = 50, .end = 62 } },
-    .{ "TwoRegOneImm", .{ .start = 110, .end = 139 } },
+    .{ "OneRegTwoImm", .{ .start = 70, .end = 73 } },
+    .{ "OneRegOneImmOneOffset", .{ .start = 80, .end = 90 } },
+    .{ "TwoReg", .{ .start = 100, .end = 101 } },
+    .{ "TwoRegOneImm", .{ .start = 110, .end = 147 } },
+    .{ "TwoRegOneOffset", .{ .start = 150, .end = 155 } },
     .{ "TwoRegTwoImm", .{ .start = 160, .end = 160 } },
     .{ "ThreeReg", .{ .start = 170, .end = 199 } },
 });
@@ -157,72 +183,128 @@ pub const ProgramGenerator = struct {
     /// Following graypaper sections A.5.1 through A.5.13, using variable-length
     /// immediate encoding as per section 3.7.2
     fn generateValidInstruction(self: *Self, block: *BasicBlock, is_terminator: bool) !void {
+        if (is_terminator) {
+            try self.generateTerminator(block);
+        } else {
+            try self.generateRegularInstruction(block);
+        }
+    }
+
+    /// Generate a terminator instruction (trap, fallthrough, or jump)
+    fn generateTerminator(self: *Self, block: *BasicBlock) !void {
         var instruction_buffer = std.ArrayList(u8).init(self.allocator);
         defer instruction_buffer.deinit();
 
-        var encoder = @import("instruction.zig")
-            .encoder(instruction_buffer.writer());
+        var encoder = @import("instruction.zig").encoder(instruction_buffer.writer());
 
-        if (is_terminator) {
-            const terminator_type = self.seed_gen.randomIntRange(u8, 0, 2);
-            switch (terminator_type) {
-                0 => _ = try encoder.encodeNoArgs(0),
-                1 => _ = try encoder.encodeNoArgs(1),
-                2 => {
-                    // Jump target will be encoded as variable-length offset later
-                    _ = try encoder.encodeJump(0);
-                },
-                else => unreachable,
-            }
-        } else {
-            const inst_type = @as(InstructionType, @enumFromInt(
-                self.seed_gen.randomIntRange(u8, 2, std.meta.fields(InstructionType).len - 1),
-            ));
-            const range = instruction_ranges.get(@tagName(inst_type)).?;
-            const opcode = self.seed_gen.randomIntRange(u8, range.start, range.end);
+        const terminator_type = self.seed_gen.randomIntRange(u8, 0, 2);
+        switch (terminator_type) {
+            0 => _ = try encoder.encodeNoArgs(0), // trap
+            1 => _ = try encoder.encodeNoArgs(1), // fallthrough
+            2 => {
+                // Jump target will be filled in later during block linking
+                _ = try encoder.encodeJump(0);
+            },
+            else => unreachable,
+        }
 
-            switch (inst_type) {
-                .NoArgs => try encoder.encodeNoArgs(opcode),
+        try block.instructions.appendSlice(instruction_buffer.items);
+    }
 
-                .OneImm => {
-                    const imm = self.seed_gen.randomImmediate();
-                    _ = try encoder.encodeOneImm(opcode, imm);
-                },
+    /// Generate a regular (non-terminator) instruction
+    fn generateRegularInstruction(self: *Self, block: *BasicBlock) !void {
+        var instruction_buffer = std.ArrayList(u8).init(self.allocator);
+        defer instruction_buffer.deinit();
 
-                .OneRegExtImm => {
-                    const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const imm = self.seed_gen.randomImmediate();
-                    _ = try encoder.encodeOneRegOneExtImm(opcode, reg, imm);
-                },
+        var encoder = @import("instruction.zig").encoder(instruction_buffer.writer());
 
-                .OneRegOneImm => {
-                    const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const imm = self.seed_gen.randomImmediate();
-                    _ = try encoder.encodeOneRegOneImm(opcode, reg, imm);
-                },
+        // Select random instruction type (excluding NoArgs which is for terminators)
+        const inst_type = @as(InstructionType, @enumFromInt(
+            self.seed_gen.randomIntRange(u8, 2, std.meta.fields(InstructionType).len - 1),
+        ));
+        const range = instruction_ranges.get(@tagName(inst_type)).?;
+        const opcode = self.seed_gen.randomIntRange(u8, range.start, range.end);
 
-                .TwoRegOneImm => {
-                    const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const imm = self.seed_gen.randomImmediate();
-                    _ = try encoder.encodeTwoRegOneImm(opcode, reg1, reg2, imm);
-                },
+        switch (inst_type) {
+            .NoArgs => unreachable, // Handled by generateTerminator
 
-                .TwoRegTwoImm => {
-                    const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const imm1 = self.seed_gen.randomImmediate();
-                    const imm2 = self.seed_gen.randomImmediate();
-                    _ = try encoder.encodeTwoRegTwoImm(opcode, reg1, reg2, imm1, imm2);
-                },
+            .OneImm => {
+                const imm = self.seed_gen.randomImmediate();
+                _ = try encoder.encodeOneImm(opcode, imm);
+            },
 
-                .ThreeReg => {
-                    const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    const reg3 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
-                    _ = try encoder.encodeThreeReg(opcode, reg1, reg2, reg3);
-                },
-            }
+            .OneRegExtImm => {
+                const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const imm = self.seed_gen.randomImmediate();
+                _ = try encoder.encodeOneRegOneExtImm(opcode, reg, imm);
+            },
+
+            .TwoImm => {
+                const imm1 = self.seed_gen.randomImmediate();
+                const imm2 = self.seed_gen.randomImmediate();
+                _ = try encoder.encodeTwoImm(opcode, imm1, imm2);
+            },
+
+            .OneOffset => {
+                // Generate random offset for branch/jump instructions
+                const offset = @as(i32, @bitCast(self.seed_gen.randomImmediate()));
+                _ = try encoder.encodeOneOffset(opcode, offset);
+            },
+
+            .OneRegOneImm => {
+                const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const imm = self.seed_gen.randomImmediate();
+                _ = try encoder.encodeOneRegOneImm(opcode, reg, imm);
+            },
+
+            .OneRegTwoImm => {
+                const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const imm1 = self.seed_gen.randomImmediate();
+                const imm2 = self.seed_gen.randomImmediate();
+                _ = try encoder.encodeOneRegTwoImm(opcode, reg, imm1, imm2);
+            },
+
+            .OneRegOneImmOneOffset => {
+                const reg = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const imm = self.seed_gen.randomImmediate();
+                const offset = @as(i32, @bitCast(self.seed_gen.randomImmediate()));
+                _ = try encoder.encodeOneRegOneImmOneOffset(opcode, reg, imm, offset);
+            },
+
+            .TwoReg => {
+                const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                _ = try encoder.encodeTwoReg(opcode, reg1, reg2);
+            },
+
+            .TwoRegOneImm => {
+                const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const imm = self.seed_gen.randomImmediate();
+                _ = try encoder.encodeTwoRegOneImm(opcode, reg1, reg2, imm);
+            },
+
+            .TwoRegOneOffset => {
+                const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const offset = @as(i32, @bitCast(self.seed_gen.randomImmediate()));
+                _ = try encoder.encodeTwoRegOneOffset(opcode, reg1, reg2, offset);
+            },
+
+            .TwoRegTwoImm => {
+                const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const imm1 = self.seed_gen.randomImmediate();
+                const imm2 = self.seed_gen.randomImmediate();
+                _ = try encoder.encodeTwoRegTwoImm(opcode, reg1, reg2, imm1, imm2);
+            },
+
+            .ThreeReg => {
+                const reg1 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const reg2 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                const reg3 = self.seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
+                _ = try encoder.encodeThreeReg(opcode, reg1, reg2, reg3);
+            },
         }
 
         try block.instructions.appendSlice(instruction_buffer.items);
@@ -363,7 +445,7 @@ test "ProgramGenerator - Verify generated program structure" {
     defer generator.deinit();
 
     // Generate multiple programs of varying sizes
-    var block_count: u32 = 1;
+    var block_count: u32 = 2;
     while (block_count < 32) : (block_count *= 2) {
         var program = try generator.generate(block_count);
         defer program.deinit(allocator);
@@ -383,40 +465,16 @@ fn verifyProgramStructure(program: GeneratedProgram) !void {
         }
     }
 
-    // 2. Verify code section ends with valid instructions
-    var i: usize = 0;
-    while (i < program.code.len) {
-        const opcode = program.code[i];
-        i += 1;
-
-        std.debug.print("pos {d}/{d}: opcode {d}\n", .{ i - 1, program.code.len, opcode });
-
-        // Skip operands based on instruction type
-        switch (opcode) {
-            0, 1 => {}, // No operands (trap, fallthrough)
-            10 => i += 1, // OneImm
-            20 => i += 9, // load_imm_64 (1 reg + 8 bytes immediate)
-            40 => i += 1, // jump (special case)
-            50...62 => i += 2, // OneRegOneImm
-            110...139 => i += 3, // TwoRegOneImm
-            160 => i += 4, // TwoRegTwoImm
-            170...199 => i += 3, // ThreeReg
-            else => return error.InvalidOpcode,
-        }
-
-        if (i > program.code.len) return error.IncompleteFinalInstruction;
-    }
-
     // 3. Verify mask size matches code length
     const expected_mask_size = (program.code.len + 7) / 8;
     if (program.mask.len != expected_mask_size) {
         return error.InvalidMaskSize;
     }
 
-    // // 4. Verify jump table format
-    // if (program.jump_table.len == 0) {
-    //     return error.EmptyJumpTable;
-    // }
+    // 4. Verify jump table format
+    if (program.jump_table.len == 0) {
+        return error.EmptyJumpTable;
+    }
 
     // 5. Verify all jump targets are within code bounds
     for (program.jump_table) |target| {

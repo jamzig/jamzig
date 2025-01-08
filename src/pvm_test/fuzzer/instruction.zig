@@ -30,7 +30,7 @@ pub fn Encoder(comptime T: type) type {
         }
 
         pub fn encodeOneOffset(self: *@This(), opcode: u8, offset: i32) !u8 {
-            const l_x = calcLengthNeeded(@as(i64, @intCast(offset)));
+            const l_x = calcLengthNeeded(@bitCast(offset));
             try self.writer.writeByte(opcode);
             try self.writeImm(@as(u32, @bitCast(offset)), l_x);
             return l_x + 1;
