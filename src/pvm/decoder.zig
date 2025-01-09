@@ -156,7 +156,7 @@ pub const Decoder = struct {
             .one_register_one_extended_immediate = .{
                 .no_of_bytes_to_skip = 9, // 1 byte opcode + 8 bytes immediate
                 .register_index = r_a,
-                .immediate = std.mem.readInt(u64, try self.getCodeSliceAtFixed(pc + 2, 8), .little),
+                .immediate = try self.decodeInt(u64, pc + 2),
             },
         };
     }
@@ -287,6 +287,11 @@ pub const Decoder = struct {
         }
 
         return 0xFF;
+    }
+
+    inline fn decodeInt(self: *const Decoder, comptime T: type, pc: u32) !T {
+        const slice = try self.getCodeSliceAtFixed(pc, @sizeOf(T));
+        return std.mem.readInt(T, slice, .little);
     }
 
     inline fn decodeImmediate(self: *const Decoder, pc: u32, length: u32) !u64 {

@@ -4,13 +4,13 @@ const SeedGenerator = @import("../seed.zig").SeedGenerator;
 
 /// Represents a PVM instruction type with its opcode range and operand structure
 /// Represents a PVM instruction type with its opcode range and operand structure
-const InstructionType = enum {
+pub const InstructionType = enum {
     // Instructions with no arguments (A.5.1)
     NoArgs, // 0-1: trap, fallthrough
     // Instructions with one immediate (A.5.2)
     OneImm, // 10: ecalli
     // Instructions with one register and one extended width immediate (A.5.3)
-    OneRegExtImm, // 20: load_imm_64
+    OneRegOneExtImm, // 20: load_imm_64
     // Instructions with two immediates (A.5.4)
     TwoImm, // 30-33: store_imm_u8, store_imm_u16, etc.
     // Instructions with one offset (A.5.5)
@@ -40,10 +40,10 @@ const InstructionRange = struct {
 };
 
 /// Valid opcode ranges for each instruction type
-const instruction_ranges = std.StaticStringMap(InstructionRange).initComptime(.{
+pub const InstructionRanges = std.StaticStringMap(InstructionRange).initComptime(.{
     .{ "NoArgs", .{ .start = 0, .end = 1 } },
     .{ "OneImm", .{ .start = 10, .end = 10 } },
-    .{ "OneRegExtImm", .{ .start = 20, .end = 20 } },
+    .{ "OneRegOneExtImm", .{ .start = 20, .end = 20 } },
     .{ "TwoImm", .{ .start = 30, .end = 33 } },
     .{ "OneOffset", .{ .start = 40, .end = 40 } },
     .{ "OneRegOneImm", .{ .start = 50, .end = 62 } },
@@ -79,7 +79,7 @@ pub fn generateRegularInstruction(seed_gen: *SeedGenerator) !Instruction {
     const inst_type = @as(InstructionType, @enumFromInt(
         seed_gen.randomIntRange(u8, 1, std.meta.fields(InstructionType).len - 1),
     ));
-    const range = instruction_ranges.get(@tagName(inst_type)).?;
+    const range = InstructionRanges.get(@tagName(inst_type)).?;
     const opcode = seed_gen.randomIntRange(u8, range.start, range.end);
 
     const length = switch (inst_type) {

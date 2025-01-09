@@ -20,6 +20,13 @@ pub fn Encoder(comptime T: type) type {
             return l_x + 1;
         }
 
+        pub fn encodeOneRegOneExtImm(self: *@This(), opcode: u8, reg_a: u8, imm: u32) !u8 {
+            try self.writer.writeByte(opcode);
+            try self.writer.writeByte(reg_a);
+            try self.writer.writeInt(u64, imm, .little);
+            return 2 + 8;
+        }
+
         pub fn encodeTwoImm(self: *@This(), opcode: u8, imm1: u32, imm2: u32) !u8 {
             const l_x = calcLengthNeeded(imm1);
             const l_y = calcLengthNeeded(imm2);
@@ -37,21 +44,6 @@ pub fn Encoder(comptime T: type) type {
             return l_x + 1;
         }
 
-        pub fn encodeOneRegOneExtImm(self: *@This(), opcode: u8, reg_a: u8, imm: u32) !u8 {
-            try self.writer.writeByte(opcode);
-            try self.writer.writeByte(reg_a);
-            try self.writer.writeInt(u32, imm, .little);
-            return 2 + 8;
-        }
-
-        pub fn encodeOneRegOneImm(self: *@This(), opcode: u8, reg_a: u8, imm: u32) !u8 {
-            const l_x = calcLengthNeeded(imm);
-            try self.writer.writeByte(opcode);
-            try self.writer.writeByte(reg_a);
-            try self.writeImm(imm, l_x);
-            return l_x + 1;
-        }
-
         pub fn encodeOneRegTwoImm(self: *@This(), opcode: u8, reg_a: u8, imm1: u32, imm2: u32) !u8 {
             const l_x = calcLengthNeeded(imm1);
             const l_y = calcLengthNeeded(imm2);
@@ -60,6 +52,14 @@ pub fn Encoder(comptime T: type) type {
             try self.writeImm(imm1, l_x);
             try self.writeImm(imm2, l_y);
             return l_x + l_y + 2;
+        }
+
+        pub fn encodeOneRegOneImm(self: *@This(), opcode: u8, reg_a: u8, imm: u32) !u8 {
+            const l_x = calcLengthNeeded(imm);
+            try self.writer.writeByte(opcode);
+            try self.writer.writeByte(reg_a);
+            try self.writeImm(imm, l_x);
+            return l_x + 1;
         }
 
         pub fn encodeOneRegOneImmOneOffset(self: *@This(), opcode: u8, reg_a: u8, imm: u32, offset: i32) !u8 {
