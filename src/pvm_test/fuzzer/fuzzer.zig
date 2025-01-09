@@ -3,7 +3,6 @@ const Allocator = std.mem.Allocator;
 const PVM = @import("../../pvm.zig").PVM;
 const SeedGenerator = @import("seed.zig").SeedGenerator;
 const ProgramGenerator = @import("program_generator.zig").ProgramGenerator;
-const InstructionGenerator = @import("instruction_generator.zig").InstructionGenerator;
 const MemoryConfigGenerator = @import("memory_config_generator.zig").MemoryConfigGenerator;
 
 pub const FuzzConfig = struct {
@@ -31,7 +30,6 @@ pub const PVMFuzzer = struct {
     config: FuzzConfig,
     seed_gen: SeedGenerator,
     program_gen: ProgramGenerator,
-    instruction_gen: InstructionGenerator,
     memory_gen: MemoryConfigGenerator,
     results: std.ArrayList(FuzzResult),
 
@@ -45,7 +43,6 @@ pub const PVMFuzzer = struct {
             .config = config,
             .seed_gen = seed_gen,
             .program_gen = ProgramGenerator.init(allocator, &seed_gen),
-            .instruction_gen = InstructionGenerator.init(&seed_gen),
             .memory_gen = MemoryConfigGenerator.init(allocator, &seed_gen),
             .results = std.ArrayList(FuzzResult).init(allocator),
         };

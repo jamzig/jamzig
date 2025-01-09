@@ -17,7 +17,7 @@ pub fn Encoder(comptime T: type) type {
             const l_x = calcLengthNeeded(imm);
             try self.writer.writeByte(opcode);
             try self.writeImm(imm, l_x);
-            return l_x;
+            return l_x + 1;
         }
 
         pub fn encodeTwoImm(self: *@This(), opcode: u8, imm1: u32, imm2: u32) !u8 {
@@ -120,7 +120,7 @@ pub fn Encoder(comptime T: type) type {
         }
 
         fn calcLengthNeeded(value: u32) u8 {
-            var buffer: [MAX_SIZE_IN_BYTES]u8 = undefined;
+            var buffer: [MAX_SIZE_IN_BYTES]u8 = std.mem.zeroes([MAX_SIZE_IN_BYTES]u8);
             const signed: i32 = @bitCast(value);
             std.mem.writeInt(i32, &buffer, @intCast(signed), .little);
 

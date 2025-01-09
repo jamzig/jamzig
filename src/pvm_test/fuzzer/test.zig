@@ -5,7 +5,6 @@ const PVMFuzzer = @import("fuzzer.zig").PVMFuzzer;
 const FuzzConfig = @import("fuzzer.zig").FuzzConfig;
 const SeedGenerator = @import("seed.zig").SeedGenerator;
 const ProgramGenerator = @import("program_generator.zig").ProgramGenerator;
-const InstructionGenerator = @import("instruction_generator.zig").InstructionGenerator;
 const MemoryConfigGenerator = @import("memory_config_generator.zig").MemoryConfigGenerator;
 
 test "PVM Fuzzer - Basic functionality" {
