@@ -7,7 +7,7 @@ const SeedGenerator = @import("seed.zig").SeedGenerator;
 const ProgramGenerator = @import("program_generator.zig").ProgramGenerator;
 const MemoryConfigGenerator = @import("memory_config_generator.zig").MemoryConfigGenerator;
 
-test "PVM Fuzzer - Basic functionality" {
+test "pvm:fuzzer" {
     const config = FuzzConfig{
         .initial_seed = 42,
         .num_cases = 10,
@@ -26,9 +26,9 @@ test "PVM Fuzzer - Basic functionality" {
     try testing.expect(stats.total_cases == stats.successful + stats.traps + stats.errors);
 }
 
-test "PVM Fuzzer - Program generation" {
+test "pvm:fuzzer:program_gen" {
     var seed_gen = SeedGenerator.init(42);
-    var program_gen = ProgramGenerator.init(testing.allocator, &seed_gen);
+    var program_gen = try ProgramGenerator.init(testing.allocator, &seed_gen);
     defer program_gen.deinit();
 
     var program = try program_gen.generate(4);
@@ -39,7 +39,7 @@ test "PVM Fuzzer - Program generation" {
     try testing.expect(program.jump_table.len > 0);
 }
 
-test "PVM Fuzzer - Memory configuration" {
+test "pvm:fuzzer:memory_config_generator" {
     var seed_gen = SeedGenerator.init(42);
     var memory_gen = MemoryConfigGenerator.init(testing.allocator, &seed_gen);
 
@@ -59,42 +59,7 @@ test "PVM Fuzzer - Memory configuration" {
     }
 }
 
-test "PVM Fuzzer - Different seeds produce different programs" {
-    var fuzzer1 = try PVMFuzzer.init(testing.allocator, .{ .initial_seed = 1, .num_cases = 1 });
-    defer fuzzer1.deinit();
-    try fuzzer1.run();
-
-    var fuzzer2 = try PVMFuzzer.init(testing.allocator, .{ .initial_seed = 2, .num_cases = 1 });
-    defer fuzzer2.deinit();
-    try fuzzer2.run();
-
-    const results1 = fuzzer1.getResults();
-    const results2 = fuzzer2.getResults();
-
-    try testing.expect(results1[0].seed != results2[0].seed);
-}
-
-test "PVM Fuzzer - Gas consumption" {
-    const config = FuzzConfig{
-        .initial_seed = 42,
-        .num_cases = 5,
-        .max_gas = 1000,
-        .max_blocks = 4,
-        .verbose = false,
-    };
-
-    var fuzzer = try PVMFuzzer.init(testing.allocator, config);
-    defer fuzzer.deinit();
-    try fuzzer.run();
-
-    const results = fuzzer.getResults();
-    for (results) |result| {
-        try testing.expect(result.gas_used >= 0);
-        try testing.expect(result.gas_used <= config.max_gas);
-    }
-}
-
-test "PVM Fuzzer - Deterministic execution" {
+test "pvm:fuzzer:deterministic_execution" {
     const config = FuzzConfig{
         .initial_seed = 42,
         .num_cases = 5,

@@ -428,7 +428,7 @@ pub const PVM = struct {
             .load_imm_jump => {
                 const args = i.args.one_register_one_immediate_one_offset;
                 self.registers[args.register_index] = args.immediate;
-                return try self.branch(args.next_pc);
+                return try self.branch(args.offset);
             },
 
             .branch_eq_imm,
@@ -459,7 +459,7 @@ pub const PVM = struct {
                     else => unreachable,
                 };
                 if (should_branch) {
-                    return try self.branch(args.next_pc);
+                    return try self.branch(args.offset);
                 }
             },
 
@@ -506,7 +506,7 @@ pub const PVM = struct {
                     else => unreachable,
                 };
                 if (should_branch) {
-                    return try self.branch(args.next_pc);
+                    return try self.branch(args.offset);
                 }
             },
 
@@ -882,9 +882,11 @@ pub const PVM = struct {
         return @intCast(i.skip_l() + 1);
     }
 
-    fn branch(self: *PVM, b: u32) !PcOffset {
+    fn branch(self: *PVM, o: i32) !PcOffset {
         const span = trace.span(.branch);
         defer span.deinit();
+
+        const b = try updatePc(self.pc, o);
 
         span.debug("Attempting branch to address 0x{X:0>8}", .{b});
 

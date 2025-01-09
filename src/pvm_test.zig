@@ -1,6 +1,8 @@
 const std = @import("std");
 const pvmlib = @import("pvm.zig");
 
+const testing = std.testing;
+
 comptime {
     // TODO: disabled for now, need to reuild host_call bytecode
     // using a 64bit enabled polkavm tool and waiting for test vectors

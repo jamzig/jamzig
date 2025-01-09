@@ -42,7 +42,7 @@ pub const PVMFuzzer = struct {
             .allocator = allocator,
             .config = config,
             .seed_gen = seed_gen,
-            .program_gen = ProgramGenerator.init(allocator, &seed_gen),
+            .program_gen = try ProgramGenerator.init(allocator, &seed_gen),
             .memory_gen = MemoryConfigGenerator.init(allocator, &seed_gen),
             .results = std.ArrayList(FuzzResult).init(allocator),
         };

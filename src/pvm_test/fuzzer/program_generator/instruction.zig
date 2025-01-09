@@ -73,7 +73,7 @@ pub fn generateRegularInstruction(seed_gen: *SeedGenerator) !Instruction {
     var instruction_buffer: [MaxInstructionSize]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&instruction_buffer);
 
-    var encoder = @import("instruction_encoder.zig").encoder(fbs.writer());
+    var encoder = @import("instruction_encoder.zig").buildEncoder(fbs.writer());
 
     // Select random instruction type (excluding NoArgs which is for terminators)
     const inst_type = @as(InstructionType, @enumFromInt(
@@ -88,7 +88,7 @@ pub fn generateRegularInstruction(seed_gen: *SeedGenerator) !Instruction {
             const imm = seed_gen.randomImmediate();
             break :blk try encoder.encodeOneImm(opcode, imm);
         },
-        .OneRegExtImm => blk: {
+        .OneRegOneExtImm => blk: {
             const reg = seed_gen.randomIntRange(u8, 0, MaxRegisterIndex);
             const imm = seed_gen.randomImmediate();
             break :blk try encoder.encodeOneRegOneExtImm(opcode, reg, imm);
@@ -159,7 +159,7 @@ pub fn generateTerminator(seed_gen: *SeedGenerator) !Instruction {
     var instruction_buffer: [MaxInstructionSize]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&instruction_buffer);
 
-    var encoder = @import("instruction_encoder.zig").encoder(fbs.writer());
+    var encoder = @import("instruction_encoder.zig").buildEncoder(fbs.writer());
 
     const terminator_type = seed_gen.randomIntRange(u8, 0, 2);
     const length = switch (terminator_type) {
