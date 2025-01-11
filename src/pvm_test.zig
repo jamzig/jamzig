@@ -30,9 +30,9 @@ test "pvm:simple" {
 
     const result = pvm.run();
 
-    if (result != .trap) {
+    if (result) |_| {} else |err| {
         std.debug.print("Expected .trap got {any}\n", .{result});
-        return error.TestFailed;
+        return err;
     }
 
     // Check final register values
