@@ -992,40 +992,15 @@ pub const PVM = struct {
 
         span.debug("Dynamic jump to address 0x{X:0>8}", .{a});
 
-        const halt_pc = 0xFFFF0000;
-        const ZA = 2;
+        const jump_dest = try self.program.validateJumpAddress(a);
 
-        // Check halt condition
-        if (a == halt_pc) {
-            span.info("Jump to halt address - terminating", .{});
-            return Error.JumpAddressHalt;
-        }
+        span.trace("Jump table lookup destination: 0x{X:0>8}", .{jump_dest});
 
-        // Validate jump address
-        if (a == 0) {
-            span.err("Invalid jump to address 0", .{});
-            return Error.JumpAddressZero;
-        }
-        if (a > self.program.jump_table.len() * ZA) {
-            span.err("Jump address out of range: 0x{X:0>8}", .{a});
-            return Error.JumpAddressOutOfRange;
-        }
-        if (a % ZA != 0) {
-            span.err("Jump address not aligned: 0x{X:0>8}", .{a});
-            return Error.JumpAddressNotAligned;
-        }
+        const offset = if (jump_dest >= self.pc)
+            @as(i32, @intCast(jump_dest - self.pc))
+        else
+            -@as(i32, @intCast(self.pc - jump_dest));
 
-        // Compute jump destination
-        const index = (a / ZA) - 1;
-        const jump_dest = self.program.jump_table.getDestination(index);
-        span.trace("Jump table lookup - index: {d}, destination: 0x{X:0>8}", .{ index, jump_dest });
-
-        if (std.mem.indexOfScalar(u32, self.program.basic_blocks, jump_dest) == null) {
-            span.err("Jump destination not in basic block: 0x{X:0>8}", .{jump_dest});
-            return Error.JumpAddressNotInBasicBlock;
-        }
-
-        const offset = @as(i32, @intCast(@as(i32, @bitCast(jump_dest)) - @as(i32, @bitCast(self.pc))));
         span.debug("Jump offset calculated: {d}", .{offset});
         return offset;
     }

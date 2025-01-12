@@ -152,6 +152,7 @@ pub const Program = struct {
                     } else {
                         return Error.ProgramTooShort;
                     }
+                    // TODO: remove this empty code if we do not do .jump validation
                     switch (opcode) {
                         .jump => {},
                         .jump_ind => {
@@ -239,6 +240,7 @@ pub const Program = struct {
         const jump_dest = self.jump_table.getDestination(index);
 
         // Validate jump destination is in a basic block
+        // FIXME: binary search
         if (std.mem.indexOfScalar(u32, self.basic_blocks, jump_dest) == null) {
             return error.JumpAddressNotInBasicBlock;
         }
