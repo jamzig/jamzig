@@ -26,9 +26,10 @@ pub fn main() !void {
         \\-h, --help                Display this help and exit.
         \\-v, --verbose             Enable verbose output
         \\-s, --seed <u64>          Initial random seed (default: timestamp)
-        \\-c, --cases <u32>         Number of test cases to run (default: 1000)
+        \\-c, --cases <u32>         Number of test cases to run (default: 50000)
         \\-g, --max-gas <i64>       Maximum gas per test case (default: 1000000)
         \\-b, --max-blocks <u32>    Maximum number of basic blocks per program (default: 32)
+        \\-S, --test-seed <u64>     Rerun a single testcase with this seed
         \\
     );
 
@@ -50,11 +51,22 @@ pub fn main() !void {
 
     const config = FuzzConfig{
         .initial_seed = if (res.args.seed) |seed| seed else @as(u64, @intCast(std.time.timestamp())),
-        .num_cases = if (res.args.cases) |cases| cases else 1000,
+        .num_cases = if (res.args.cases) |cases| cases else 50000,
         .max_gas = if (res.args.@"max-gas") |gas| gas else 1000000,
         .max_blocks = if (res.args.@"max-blocks") |blocks| blocks else 32,
         .verbose = res.args.verbose != 0,
     };
+
+    // Initialize and run fuzzer
+    var fuzzer = try PVMFuzzer.init(allocator, config);
+    defer fuzzer.deinit();
+
+    // Print configuration
+    if (res.args.@"test-seed") |test_case_seed| {
+        std.debug.print("\nRunning single test case with seed: {d}\n", .{test_case_seed});
+        _ = try fuzzer.runSingleTest(test_case_seed);
+        return;
+    }
 
     // Print configuration
     std.debug.print("PVM Fuzzer Configuration:\n", .{});
@@ -63,10 +75,6 @@ pub fn main() !void {
     std.debug.print("Max Gas: {d}\n", .{config.max_gas});
     std.debug.print("Max Blocks: {d}\n", .{config.max_blocks});
     std.debug.print("Verbose: {}\n\n", .{config.verbose});
-
-    // Initialize and run fuzzer
-    var fuzzer = try PVMFuzzer.init(allocator, config);
-    defer fuzzer.deinit();
 
     var result = try fuzzer.run();
     defer result.deinit();

@@ -101,11 +101,16 @@ pub const PVMFuzzer = struct {
 
         var test_count: u32 = 0;
         while (test_count < self.config.num_cases) : (test_count += 1) {
+            const test_case_seed = self.seed_gen
+                .buildSeedFromInitialSeedAndCounter(self.config.initial_seed, test_count);
             if (self.config.verbose) {
-                std.debug.print("Running test case {d}/{d} with seed {d}\r", .{ test_count + 1, self.config.num_cases, self.seed_gen.seed });
+                std.debug.print("Running test case {d}/{d} with seed {d}\r", .{ test_count + 1, self.config.num_cases, test_case_seed });
+                if ((test_count + 1) % 10_000 == 0) {
+                    std.debug.print("\n", .{});
+                }
             }
 
-            const result = try self.runSingleTest(self.seed_gen.randomSeed());
+            const result = try self.runSingleTest(test_case_seed);
             try results.data.append(result);
 
             // if (self.config.verbose) {
@@ -115,7 +120,7 @@ pub const PVMFuzzer = struct {
         return results;
     }
 
-    fn runSingleTest(self: *Self, seed: u64) !FuzzResult {
+    pub fn runSingleTest(self: *Self, seed: u64) !FuzzResult {
         var seed_gen = SeedGenerator.init(seed);
 
         var program_gen = try ProgramGenerator.init(self.allocator, &seed_gen);

@@ -17,6 +17,13 @@ pub const SeedGenerator = struct {
         return self.random.random().int(u64);
     }
 
+    /// Use a non-cryptographic hash function to generate hash based on seed and counter.
+    pub fn buildSeedFromInitialSeedAndCounter(_: *SeedGenerator, initial_seed: u64, counter: u64) u64 {
+        var buffer: [8]u8 = undefined;
+        std.mem.writeInt(u64, &buffer, counter, .little);
+        return std.hash.XxHash64.hash(initial_seed, buffer);
+    }
+
     /// Generate a random integer within a range [min, max]
     pub fn randomIntRange(self: *SeedGenerator, comptime T: type, min: T, max: T) T {
         return self.random.random().intRangeAtMost(T, min, max);
