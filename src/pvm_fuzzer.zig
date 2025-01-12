@@ -30,6 +30,8 @@ pub fn main() !void {
         \\-g, --max-gas <i64>       Maximum gas per test case (default: 1000000)
         \\-b, --max-blocks <u32>    Maximum number of basic blocks per program (default: 32)
         \\-S, --test-seed <u64>     Rerun a single testcase with this seed
+        \\-m, --mut-prob <u8>       Program mutation probability (0-100, default: 10)
+        \\-f, --flip-prob <u8>      Bit flip probability (0-100, default: 1)
         \\
     );
 
@@ -55,6 +57,10 @@ pub fn main() !void {
         .max_gas = if (res.args.@"max-gas") |gas| gas else 1000000,
         .max_blocks = if (res.args.@"max-blocks") |blocks| blocks else 32,
         .verbose = res.args.verbose != 0,
+        .mutation = .{
+            .program_mutation_probability = if (res.args.@"mut-prob") |prob| prob else 10,
+            .bit_flip_probability = if (res.args.@"flip-prob") |prob| prob else 1,
+        },
     };
 
     // Initialize and run fuzzer
@@ -74,7 +80,9 @@ pub fn main() !void {
     std.debug.print("Number of Cases: {d}\n", .{config.num_cases});
     std.debug.print("Max Gas: {d}\n", .{config.max_gas});
     std.debug.print("Max Blocks: {d}\n", .{config.max_blocks});
-    std.debug.print("Verbose: {}\n\n", .{config.verbose});
+    std.debug.print("Verbose: {}\n", .{config.verbose});
+    std.debug.print("Mutation Probability: {d}%\n", .{config.mutation.program_mutation_probability});
+    std.debug.print("Bit Flip Probability: {d}%\n\n", .{config.mutation.bit_flip_probability});
 
     var result = try fuzzer.run();
     defer result.deinit();

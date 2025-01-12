@@ -5,6 +5,41 @@ const SeedGenerator = @import("seed.zig").SeedGenerator;
 const ProgramGenerator = @import("program_generator.zig").ProgramGenerator;
 const MemoryConfigGenerator = @import("memory_config_generator.zig").MemoryConfigGenerator;
 
+/// Configuration for program mutations
+pub const MutationConfig = struct {
+    /// Probability (0-100) that any given program will be mutated
+    program_mutation_probability: u8 = 10,
+    /// For programs selected for mutation, probability (0-100) of each bit being flipped
+    bit_flip_probability: u8 = 1,
+};
+
+/// Mutates a program's raw bytes in-place according to the given configuration
+pub fn mutateProgramBytes(
+    bytes: []u8,
+    config: MutationConfig,
+    seed_gen: *SeedGenerator,
+) void {
+    // First decide if we should mutate this program at all
+    if (seed_gen.randomIntRange(u8, 0, 99) >= config.program_mutation_probability) {
+        return;
+    }
+
+    // Calculate total number of bits to flip based on probability
+    const total_bits = bytes.len * 8;
+    const bits_to_flip = (total_bits * config.bit_flip_probability) / 100;
+
+    var i: usize = 0;
+    while (i < bits_to_flip) : (i += 1) {
+        // Pick a random bit position in the entire range
+        const bit_pos = seed_gen.randomIntRange(usize, 0, total_bits - 1);
+        // Calculate which byte and bit to flip
+        const byte_index = bit_pos >> 3; // divide by 8
+        const bit_index = @as(u3, @intCast(bit_pos & 0x7)); // mod 8
+        // Flip the bit
+        bytes[byte_index] ^= @as(u8, 1) << bit_index;
+    }
+}
+
 pub const FuzzConfig = struct {
     /// Starting seed for the random number generator
     initial_seed: u64 = 0,
@@ -16,12 +51,15 @@ pub const FuzzConfig = struct {
     max_blocks: u32 = 32,
     /// Whether to print verbose output
     verbose: bool = false,
+    /// Configuration for program mutations
+    mutation: MutationConfig = .{},
 };
 
 pub const FuzzResult = struct {
     seed: u64,
     status: ?PVM.Error,
     gas_used: i64,
+    was_mutated: bool,
     error_data: ?PVM.ErrorData,
 };
 
@@ -33,6 +71,7 @@ pub const FuzzResults = struct {
         successful: usize,
         errors: usize,
         avg_gas: i64,
+        mutated_cases: usize,
     };
 
     pub fn init(allocator: std.mem.Allocator) @This() {
@@ -48,6 +87,7 @@ pub const FuzzResults = struct {
             .successful = 0,
             .errors = 0,
             .avg_gas = 0,
+            .mutated_cases = 0,
         };
 
         var total_gas: i64 = 0;
@@ -56,6 +96,9 @@ pub const FuzzResults = struct {
                 stats.errors += 1;
             } else {
                 stats.successful += 1;
+            }
+            if (result.was_mutated) {
+                stats.mutated_cases += 1;
             }
             total_gas += result.gas_used;
         }
@@ -136,10 +179,18 @@ pub const PVMFuzzer = struct {
         const page_configs = try memory_gen.generatePageConfigs();
         defer self.allocator.free(page_configs);
 
+        // Get raw program bytes and potentially mutate them
+        const program_bytes = try program.getRawBytes(self.allocator);
+        const will_mutate = seed_gen.randomIntRange(u8, 0, 99) < self.config.mutation.program_mutation_probability;
+
+        if (will_mutate) {
+            mutateProgramBytes(program_bytes, self.config.mutation, &seed_gen);
+        }
+
         // Initialize PVM
         var pvm = try PVM.init(
             self.allocator,
-            try program.getRawBytes(self.allocator),
+            program_bytes,
             self.config.max_gas,
         );
         defer pvm.deinit();
@@ -164,6 +215,7 @@ pub const PVMFuzzer = struct {
             .status = if (status) null else |err| err,
             .gas_used = gas_used,
             .error_data = pvm.error_data,
+            .was_mutated = will_mutate,
         };
     }
 
