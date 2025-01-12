@@ -1,8 +1,10 @@
 const std = @import("std");
-const codec = @import("../codec.zig");
-const JumpTable = @import("decoder/jumptable.zig").JumpTable;
-
 const Allocator = std.mem.Allocator;
+
+const codec = @import("../codec.zig");
+
+const Decoder = @import("decoder.zig").Decoder;
+const JumpTable = @import("decoder/jumptable.zig").JumpTable;
 
 pub const Program = struct {
     code: []const u8,
@@ -21,6 +23,14 @@ pub const Program = struct {
         InvalidProgramCounter,
         InvalidRegisterIndex,
         InvalidImmediateLength,
+    } || JumpError;
+
+    pub const JumpError = error{
+        JumpAddressHalt,
+        JumpAddressZero,
+        JumpAddressOutOfRange,
+        JumpAddressNotAligned,
+        JumpAddressNotInBasicBlock,
     };
 
     pub fn decode(allocator: Allocator, raw_program: []const u8) !Program {
@@ -97,7 +107,7 @@ pub const Program = struct {
         errdefer allocator.free(program.mask);
 
         // Create a safe decoder for validation
-        var decoder = @import("decoder.zig").Decoder.init(program.code, program.mask);
+        var decoder = Decoder.init(program.code, program.mask);
 
         // Initialize basic block and always add 0 as first basic block
         var basic_blocks = std.ArrayList(u32).init(allocator);
@@ -134,51 +144,13 @@ pub const Program = struct {
                 .branch_gt_u_imm,
                 .branch_gt_s_imm,
                 => {
-                    // For jumps, validate the destination
-                    switch (instruction.instruction) {
-                        .jump => {
-                            const args = instruction.args.one_offset;
-                            const target_pc = @as(i64, pc) + 1 + @as(i64, args.no_of_bytes_to_skip) + @as(i64, args.offset);
-                            if (target_pc < 0 or target_pc >= program.code.len) {
-                                return Error.InvalidJumpDestination;
-                            }
-                            try basic_blocks.append(@intCast(target_pc));
-                        },
-                        .jump_ind => {
-                            const args = instruction.args.one_register_one_immediate;
-                            const idx = args.immediate / 2;
-                            if (idx >= program.jump_table.len()) {
-                                return Error.InvalidJumpDestination;
-                            }
-                            const target_pc = program.jump_table.getDestination(@intCast(idx));
-                            if (target_pc >= program.code.len) {
-                                return Error.InvalidJumpDestination;
-                            }
-                            try basic_blocks.append(target_pc);
-                        },
-                        .load_imm_jump => {
-                            const args = instruction.args.one_register_one_immediate_one_offset;
-                            const target_pc = @as(i64, pc) + 1 + @as(i64, args.no_of_bytes_to_skip) + @as(i64, args.offset);
-                            if (target_pc < 0 or target_pc >= program.code.len) {
-                                return Error.InvalidJumpDestination;
-                            }
-                            try basic_blocks.append(@intCast(target_pc));
-                        },
-                        .load_imm_jump_ind => {
-                            const args = instruction.args.two_registers_two_immediates;
-                            const target_pc = program.jump_table.getDestination(@intCast(args.second_immediate / 2));
-                            if (target_pc >= program.code.len) {
-                                return Error.InvalidJumpDestination;
-                            }
-                            try basic_blocks.append(target_pc);
-                        },
-                        else => {
-                            // For branches, the next instruction starts a new basic block
-                            const next_pc = pc + 1 + instruction.args.skip_l();
-                            if (next_pc < program.code.len) {
-                                try basic_blocks.append(next_pc);
-                            }
-                        },
+                    // For branches, the next instruction starts a new basic block
+                    const next_pc = pc + 1 + instruction.args.skip_l();
+                    // Allow 8 byte padding for possible final instruction's immediate value
+                    if (next_pc < program.code.len + Decoder.MaxImmediateSizeInByte) {
+                        try basic_blocks.append(next_pc);
+                    } else {
+                        return Error.ProgramTooShort;
                     }
                 },
                 else => {},
@@ -218,6 +190,47 @@ pub const Program = struct {
         }
 
         return program;
+    }
+
+    /// Validates an indirect jump address and returns the computed jump destination.
+    /// The function performs various validations including:
+    /// - Halt condition check (0xFFFF0000)
+    /// - Zero address check
+    /// - Range validation
+    /// - Alignment check (must be aligned to ZA)
+    /// - Basic block validation
+    pub fn validateJumpAddress(self: *const Program, address: u32) JumpError!u32 {
+        const halt_pc = 0xFFFF0000;
+        const ZA = 2; // Alignment requirement
+
+        // Check halt condition
+        if (address == halt_pc) {
+            return error.JumpAddressHalt;
+        }
+
+        // Validate jump address
+        if (address == 0) {
+            return error.JumpAddressZero;
+        }
+
+        if (address > self.jump_table.len() * ZA) {
+            return error.JumpAddressOutOfRange;
+        }
+
+        if (address % ZA != 0) {
+            return error.JumpAddressNotAligned;
+        }
+
+        // Compute jump destination
+        const index = (address / ZA) - 1;
+        const jump_dest = self.jump_table.getDestination(index);
+
+        // Validate jump destination is in a basic block
+        if (std.mem.indexOfScalar(u32, self.basic_blocks, jump_dest) == null) {
+            return error.JumpAddressNotInBasicBlock;
+        }
+
+        return jump_dest;
     }
 
     pub fn deinit(self: *Program, allocator: Allocator) void {

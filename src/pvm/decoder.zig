@@ -1,8 +1,9 @@
 const std = @import("std");
-pub const Instruction = @import("instruction.zig").Instruction;
 
+pub const Instruction = @import("instruction.zig").Instruction;
 pub const ArgumentType = @import("./decoder/types.zig").ArgumentType;
 
+pub const jumptable = @import("decoder/jumptable.zig");
 const Immediate = @import("./decoder/immediate.zig");
 const Nibble = @import("./decoder/nibble.zig");
 
@@ -274,7 +275,7 @@ pub const Decoder = struct {
         return 0;
     }
 
-    const MaxImmediateSizeInByte = 8;
+    pub const MaxImmediateSizeInByte = 8;
     pub fn getCodeSliceAt(self: *const @This(), buffer: *[MaxImmediateSizeInByte]u8, pc: u32, len: u32) []const u8 {
         std.debug.assert(len <= MaxImmediateSizeInByte);
         const end = pc + len;
