@@ -57,11 +57,93 @@ pub const FuzzConfig = struct {
 
 pub const FuzzResult = struct {
     seed: u64,
-    status: ?PVM.Error,
+    status: PVM.Error!void,
     gas_used: i64,
     was_mutated: bool,
     error_data: ?PVM.ErrorData,
     init_failed: bool = false,
+};
+
+const ErrorStats = struct {
+    // Array to store counts for each error type
+    counts: [error_count]usize,
+
+    // Count of different error types for array size
+    const error_count = blk: {
+        var count: usize = 0;
+        for (std.meta.fields(PVM.Error)) |_| {
+            count += 1;
+        }
+        break :blk count;
+    };
+
+    pub fn init() ErrorStats {
+        return .{
+            .counts = [_]usize{0} ** error_count,
+        };
+    }
+
+    pub fn recordError(self: *ErrorStats, err: PVM.Error) void {
+        const index = comptime blk: {
+            var error_map: [error_count]PVM.Error = undefined;
+            var i: usize = 0;
+            for (std.meta.fields(PVM.Error)) |field| {
+                error_map[i] = @field(PVM.Error, field.name);
+                i += 1;
+            }
+            break :blk error_map;
+        };
+
+        // Find the index of this error type
+        for (index, 0..) |e, i| {
+            if (err == e) {
+                self.counts[i] += 1;
+                return;
+            }
+        }
+    }
+
+    pub fn getErrorCount(self: *const ErrorStats, err: PVM.Error) usize {
+        const index = comptime blk: {
+            var error_map: [error_count]PVM.Error = undefined;
+            var i: usize = 0;
+            for (std.meta.fields(PVM.Error)) |field| {
+                error_map[i] = @field(PVM.Error, field.name);
+                i += 1;
+            }
+            break :blk error_map;
+        };
+
+        // Find the index of this error type
+        for (index, 0..) |e, i| {
+            if (err == e) {
+                return self.counts[i];
+            }
+        }
+        return 0;
+    }
+
+    pub fn writeErrorCounts(self: *const ErrorStats, writer: anytype) !void {
+        const index = comptime blk: {
+            var error_map: [error_count]PVM.Error = undefined;
+            var i: usize = 0;
+            for (std.meta.fields(PVM.Error)) |field| {
+                error_map[i] = @field(PVM.Error, field.name);
+                i += 1;
+            }
+            break :blk error_map;
+        };
+
+        try writer.writeAll("\nError Statistics:\n");
+        for (index, 0..) |err, i| {
+            if (self.counts[i] > 0) {
+                try writer.print("    {s}: {d}\n", .{
+                    @errorName(err),
+                    self.counts[i],
+                });
+            }
+        }
+    }
 };
 
 pub const FuzzResults = struct {
@@ -74,6 +156,7 @@ pub const FuzzResults = struct {
         total_gas: i64 = 0,
         mutated_cases: usize = 0,
         init_failures: usize = 0,
+        error_stats: ErrorStats = ErrorStats.init(),
 
         pub fn avgGas(self: *const @This()) usize {
             return @as(usize, @intCast(self.total_gas)) / self.total_cases;
@@ -95,10 +178,13 @@ pub const FuzzResults = struct {
 
         if (result.init_failed) {
             self.accumulated.init_failures += 1;
-        } else if (result.status == null) {
+        }
+
+        if (result.status) {
             self.accumulated.successful += 1;
-        } else {
+        } else |err| {
             self.accumulated.errors += 1;
+            self.accumulated.error_stats.recordError(err);
         }
 
         if (result.was_mutated) {
@@ -213,7 +299,7 @@ pub const PVMFuzzer = struct {
 
         return FuzzResult{
             .seed = seed,
-            .status = if (status) null else |err| err,
+            .status = status,
             .gas_used = gas_used,
             .error_data = pvm.error_data,
             .was_mutated = will_mutate,
@@ -268,5 +354,6 @@ pub fn fuzzSimple(allocator: Allocator) !void {
     std.debug.print("Successful: {d}\n", .{stats.successful});
     std.debug.print("Traps: {d}\n", .{stats.traps});
     std.debug.print("Errors: {d}\n", .{stats.errors});
+    try stats.error_stats.writeErrorCounts(std.io.getStdErr().writer());
     std.debug.print("Average Gas: {d}\n", .{stats.avg_gas});
 }

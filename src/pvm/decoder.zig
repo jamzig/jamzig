@@ -56,7 +56,6 @@ pub const Decoder = struct {
 
         return InstructionWithArgs{
             .instruction = inst,
-            .args_type = args_type,
             .args = args,
         };
     }

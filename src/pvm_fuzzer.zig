@@ -93,5 +93,6 @@ pub fn main() !void {
     std.debug.print("  Total Cases: {d}\n", .{stats.total_cases});
     std.debug.print("  Successful: {d} ({d}%)\n", .{ stats.successful, (stats.successful * 100) / stats.total_cases });
     std.debug.print("  Errors: {d} ({d}%)\n", .{ stats.errors, (stats.errors * 100) / stats.total_cases });
+    try stats.error_stats.writeErrorCounts(std.io.getStdErr().writer());
     std.debug.print("  Average Gas Used: {d}\n", .{stats.avgGas()});
 }

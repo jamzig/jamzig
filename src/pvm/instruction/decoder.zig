@@ -1,5 +1,10 @@
 const std = @import("std");
+
+const Instruction = @import("../instruction.zig").Instruction;
+const InstructionType = @import("../instruction.zig").InstructionType;
 const InstructionArgs = @import("../instruction.zig").InstructionArgs;
+const InstructionWithArgs = @import("../instruction.zig").InstructionArgs;
+
 const Immediate = @import("immediate.zig");
 const Nibble = @import("nibble.zig");
 
@@ -9,6 +14,37 @@ pub const Error = error{
     InvalidRegIndex,
     SliceTooShort,
 };
+
+/// Takes a byte slice containing instruction opcode and arguments. Slice length determines argument size.
+pub fn decodeInstruction(bytes: []u8) Error!InstructionWithArgs {
+    const inst = std.meta.intToEnum(Instruction, bytes[0]) catch {
+        // std.debug.print("Error decoding instruction at pc {}: code 0x{X:0>2} ({d})\n", .{ pc, self.getCodeAt(pc), self.getCodeAt(pc) });
+        return Error.InvalidInstruction;
+    };
+
+    const inst_type = InstructionType.lookUp(inst);
+    const inst_args = switch (inst_type) {
+        .NoArgs => InstructionArgs{ .NoArgs = .{ .no_of_bytes_to_skip = 0 } },
+        .OneImm => InstructionArgs{ .OneImm = try decodeOneImm(bytes[1..]) },
+        .OneOffset => InstructionArgs{ .OneOffset = try decodeOneOffset(bytes[1..]) },
+        .OneRegOneImm => InstructionArgs{ .OneRegOneImm = try decodeOneRegOneImm(bytes[1..]) },
+        .OneRegOneImmOneOffset => InstructionArgs{ .OneRegOneImmOneOffset = try decodeOneRegOneImmOneOffset(bytes[1..]) },
+        .OneRegOneExtImm => InstructionArgs{ .OneRegOneExtImm = try decodeOneRegOneExtImm(bytes[1..]) },
+        .OneRegTwoImm => InstructionArgs{ .OneRegTwoImm = try decodeOneRegTwoImm(bytes[1..]) },
+        .ThreeReg => InstructionArgs{ .ThreeReg = try decodeThreeReg(bytes[1..]) },
+        .TwoImm => InstructionArgs{ .TwoImm = try decodeTwoImm(bytes[1..]) },
+        .TwoReg => InstructionArgs{ .TwoReg = try decodeTwoReg(bytes[1..]) },
+        .TwoRegOneImm => InstructionArgs{ .TwoRegOneImm = try decodeTwoRegOneImm(bytes[1..]) },
+        .TwoRegOneOffset => InstructionArgs{ .TwoRegOneOffset = try decodeTwoRegOneOffset(bytes[1..]) },
+        .TwoRegTwoImm => InstructionArgs{ .TwoRegTwoImm = try decodeTwoRegTwoImm(bytes[1..]) },
+    };
+
+    return InstructionWithArgs{
+        .instruction = inst,
+        .args_type = inst_type,
+        .args = inst_args,
+    };
+}
 
 /// Helper functions that work directly on bytes
 inline fn getHighNibble(byte: u8) u4 {

@@ -185,7 +185,7 @@ pub const InstructionType = enum {
     ThreeReg, // 170-199: add_32, sub_32, mul_32, etc.
 
     pub fn lookUp(inst: Instruction) InstructionType {
-        return lookupArgumentType(inst);
+        return lookupInstructionType(inst);
     }
 };
 
@@ -336,7 +336,6 @@ pub const InstructionArgs = union(InstructionType) {
 
 pub const InstructionWithArgs = struct {
     instruction: Instruction,
-    args_type: InstructionType, // FIXME: redundant
     args: InstructionArgs,
 
     pub fn isTerminationInstruction(self: *const @This()) bool {
@@ -368,6 +367,10 @@ pub const InstructionWithArgs = struct {
         };
     }
 
+    pub fn instructionType(self: *@This()) InstructionType {
+        return @as(InstructionType, self.args);
+    }
+
     pub fn skip_l(self: *const @This()) u32 {
         return self.args.skip_l();
     }
@@ -382,7 +385,7 @@ pub const InstructionWithArgs = struct {
     }
 };
 
-pub fn lookupArgumentType(instruction: Instruction) InstructionType {
+pub fn lookupInstructionType(instruction: Instruction) InstructionType {
     return switch (instruction) {
         // No argument instructions
         .trap, .fallthrough => .NoArgs,
