@@ -85,7 +85,6 @@ pub fn main() !void {
     std.debug.print("Bit Flip Probability: {d}%\n\n", .{config.mutation.bit_flip_probability});
 
     var result = try fuzzer.run();
-    defer result.deinit();
 
     // Print results
     const stats = result.getStats();
@@ -94,5 +93,5 @@ pub fn main() !void {
     std.debug.print("  Total Cases: {d}\n", .{stats.total_cases});
     std.debug.print("  Successful: {d} ({d}%)\n", .{ stats.successful, (stats.successful * 100) / stats.total_cases });
     std.debug.print("  Errors: {d} ({d}%)\n", .{ stats.errors, (stats.errors * 100) / stats.total_cases });
-    std.debug.print("  Average Gas Used: {d}\n", .{stats.avg_gas});
+    std.debug.print("  Average Gas Used: {d}\n", .{stats.avgGas()});
 }

@@ -65,60 +65,47 @@ pub const FuzzResult = struct {
 };
 
 pub const FuzzResults = struct {
-    data: std.ArrayList(FuzzResult),
+    accumulated: Stats,
 
     const Stats = struct {
-        total_cases: usize,
-        successful: usize,
-        errors: usize,
-        avg_gas: i64,
-        mutated_cases: usize,
-        init_failures: usize,
+        total_cases: usize = 0,
+        successful: usize = 0,
+        errors: usize = 0,
+        total_gas: i64 = 0,
+        mutated_cases: usize = 0,
+        init_failures: usize = 0,
+
+        pub fn avgGas(self: *const @This()) usize {
+            return @as(usize, @intCast(self.total_gas)) / self.total_cases;
+        }
     };
 
-    pub fn init(allocator: std.mem.Allocator) @This() {
+    pub fn getStats(self: *@This()) Stats {
+        return self.accumulated;
+    }
+
+    pub fn init() @This() {
         return .{
-            .data = std.ArrayList(FuzzResult).init(allocator),
+            .accumulated = Stats{},
         };
     }
 
-    /// Get statistics about the test results
-    pub fn getStats(self: *const @This()) Stats {
-        var stats = Stats{
-            .total_cases = self.data.items.len,
-            .successful = 0,
-            .errors = 0,
-            .avg_gas = 0,
-            .mutated_cases = 0,
-            .init_failures = 0,
-        };
+    pub fn accumulate(self: *@This(), result: FuzzResult) void {
+        self.accumulated.total_cases += 1;
 
-        var total_gas: i64 = 0;
-        for (self.data.items) |result| {
-            if (result.init_failed) {
-                stats.init_failures += 1;
-                stats.errors += 1;
-            } else if (result.status) |_| {
-                stats.errors += 1;
-            } else {
-                stats.successful += 1;
-            }
-            if (result.was_mutated) {
-                stats.mutated_cases += 1;
-            }
-            total_gas += result.gas_used;
+        if (result.init_failed) {
+            self.accumulated.init_failures += 1;
+        } else if (result.status == null) {
+            self.accumulated.successful += 1;
+        } else {
+            self.accumulated.errors += 1;
         }
 
-        if (stats.total_cases > 0) {
-            stats.avg_gas = @divTrunc(total_gas, @as(i64, @intCast(stats.total_cases)));
+        if (result.was_mutated) {
+            self.accumulated.mutated_cases += 1;
         }
 
-        return stats;
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.data.deinit();
-        self.* = undefined;
+        self.accumulated.total_gas += result.gas_used;
     }
 };
 
@@ -145,8 +132,7 @@ pub const PVMFuzzer = struct {
     }
 
     pub fn run(self: *Self) !FuzzResults {
-        var results = FuzzResults.init(self.allocator);
-        errdefer results.deinit();
+        var results = FuzzResults.init();
 
         var test_count: u32 = 0;
         while (test_count < self.config.num_cases) : (test_count += 1) {
@@ -160,7 +146,7 @@ pub const PVMFuzzer = struct {
             }
 
             const result = try self.runSingleTest(test_case_seed);
-            try results.data.append(result);
+            results.accumulate(result);
 
             // if (self.config.verbose) {
             //     self.printTestResult(test_count, result);
@@ -263,10 +249,6 @@ pub const PVMFuzzer = struct {
             std.debug.print("  Error data: {any}\n", .{error_data});
         }
     }
-
-    pub fn getResults(self: *Self) []const FuzzResult {
-        return self.results.items;
-    }
 };
 
 /// Run a simple fuzzing session with default configuration
@@ -278,9 +260,9 @@ pub fn fuzzSimple(allocator: Allocator) !void {
     });
     defer fuzzer.deinit();
 
-    try fuzzer.run();
+    const results = try fuzzer.run();
 
-    const stats = fuzzer.getStats();
+    const stats = results.getStats();
     std.debug.print("\nFuzzing Results:\n", .{});
     std.debug.print("Total Cases: {d}\n", .{stats.total_cases});
     std.debug.print("Successful: {d}\n", .{stats.successful});
