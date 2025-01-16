@@ -79,10 +79,10 @@ pub fn main() !void {
     std.debug.print("Initial Seed: {d}\n", .{config.initial_seed});
     std.debug.print("Number of Cases: {d}\n", .{config.num_cases});
     std.debug.print("Max Gas: {d}\n", .{config.max_gas});
-    std.debug.print("Max Blocks: {d}\n", .{config.max_instruction_count});
+    std.debug.print("Max Instructions: {d}\n", .{config.max_instruction_count});
     std.debug.print("Verbose: {}\n", .{config.verbose});
-    std.debug.print("Mutation Probability: {d}%\n", .{config.mutation.program_mutation_probability});
-    std.debug.print("Bit Flip Probability: {d}%\n\n", .{config.mutation.bit_flip_probability});
+    std.debug.print("Mutation Probability: {d}/1_000_000\n", .{config.mutation.program_mutation_probability});
+    std.debug.print("Bit Flip Probability: {d}/1_000\n\n", .{config.mutation.bit_flip_probability});
 
     var result = try fuzzer.run();
 

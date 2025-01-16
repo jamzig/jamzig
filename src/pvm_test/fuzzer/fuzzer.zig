@@ -7,9 +7,9 @@ const MemoryConfigGenerator = @import("memory_config_generator.zig").MemoryConfi
 
 /// Configuration for program mutations
 pub const MutationConfig = struct {
-    /// Probability (0-100) that any given program will be mutated
+    /// Probability (0-1_000_000) that any given program will be mutated
     program_mutation_probability: u8 = 10,
-    /// For programs selected for mutation, probability (0-100) of each bit being flipped
+    /// For programs selected for mutation, probability (0-1_000) of each bit being flipped
     bit_flip_probability: u8 = 1,
 };
 
@@ -20,13 +20,13 @@ pub fn mutateProgramBytes(
     seed_gen: *SeedGenerator,
 ) void {
     // First decide if we should mutate this program at all
-    if (seed_gen.randomIntRange(u8, 0, 99) >= config.program_mutation_probability) {
+    if (seed_gen.randomIntRange(usize, 0, 1_000_000) >= config.program_mutation_probability) {
         return;
     }
 
     // Calculate total number of bits to flip based on probability
     const total_bits = bytes.len * 8;
-    const bits_to_flip = (total_bits * config.bit_flip_probability) / 100;
+    const bits_to_flip = (total_bits * config.bit_flip_probability) / 1_000;
 
     var i: usize = 0;
     while (i < bits_to_flip) : (i += 1) {
