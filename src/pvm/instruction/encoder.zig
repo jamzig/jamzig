@@ -145,7 +145,7 @@ pub fn encodeTwoRegTwoImm(writer: anytype, reg_a: u8, reg_b: u8, imm1: u32, imm2
 pub fn encodeThreeReg(writer: anytype, reg_a: u8, reg_b: u8, reg_d: u8) !u8 {
     try writer.writeByte((reg_a & 0x0F) | (reg_b << 4));
     try writer.writeByte(reg_d & 0x0F);
-    return 3;
+    return 2;
 }
 
 pub fn encodeJump(writer: anytype, target: u32) !u8 {

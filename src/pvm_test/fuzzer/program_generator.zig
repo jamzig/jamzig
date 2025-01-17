@@ -154,7 +154,9 @@ pub const ProgramGenerator = struct {
             const bytes_written = try inst.encode(code_writer);
             pc += bytes_written;
 
-            if (inst.isTerminationInstruction()) {
+            if (inst.isTerminationInstruction() and
+                i != instructions.len - 1) // After last instruction we do not add a block or jump_table
+            {
                 try basic_blocks.append(pc);
                 try jump_table.append(pc);
                 inst_span.debug("Added termination block at pc {d}", .{pc});

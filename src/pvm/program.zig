@@ -137,10 +137,10 @@ pub const Program = struct {
 
         while (pc < program.code.len) {
             const instruction = decoder.decodeInstruction(pc) catch |err| {
-                basic_span.err("PC 0x{d:0>4}: error decoding instruction {d}: {any}", .{ pc, decoder.getCodeAt(pc), err });
+                basic_span.err("PC {d:0>4}: error decoding instruction {d}: {any}", .{ pc, decoder.getCodeAt(pc), err });
                 return err;
             };
-            basic_span.trace("PC 0x{d:0>4}: Instruction: {}", .{ pc, instruction });
+            basic_span.trace("PC {d:0>4}: Instruction: {}", .{ pc, instruction });
 
             // Check if this instruction terminates a basic block
             // const inst_type = instruction.args_type;
@@ -169,7 +169,7 @@ pub const Program = struct {
         var i: usize = 0;
         while (i < program.jump_table.len()) : (i += 1) {
             const destination = program.jump_table.getDestination(i);
-            jump_span.trace("Jump table entry {d}: destination = 0x{d:0>4}", .{ i, destination });
+            jump_span.trace("Jump table entry {d}: destination = {d:0>4}", .{ i, destination });
 
             // Check if destination is within code bounds
             if (destination >= program.code.len) {
@@ -206,7 +206,7 @@ pub const Program = struct {
     pub fn validateJumpAddress(self: *const Program, address: u32) JumpError!u32 {
         const span = trace.span(.validate_jump);
         defer span.deinit();
-        span.debug("Validating jump address: 0x{X:0>8}", .{address});
+        span.debug("Validating jump address: {d:0>8}", .{address});
 
         const halt_pc = 0xFFFF0000;
         const ZA = 2; // Alignment requirement
