@@ -1051,7 +1051,7 @@ pub const PVM = struct {
 
                 const offset = address - page.address;
                 @memcpy(page.data[offset..][0..data.len], data);
-                span.trace("Initialization successful - offset: {d}, data: {any}", .{ offset, data });
+                // span.trace("Initialization successful - offset: {d}, data: {any}", .{ offset, data });
                 return;
             }
         }

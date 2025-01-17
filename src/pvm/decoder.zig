@@ -61,7 +61,7 @@ pub const Decoder = struct {
     }
 
     fn decodeOneImm(self: *const Decoder, pc: u32) Error!InstructionArgs.OneImmType {
-        const l = @min(4, self.skip_l(pc + 1));
+        const l = @min(4, self.skip_l(pc));
         return try decoder.decodeOneImm(
             self.getCodeSliceAt(
                 pc,

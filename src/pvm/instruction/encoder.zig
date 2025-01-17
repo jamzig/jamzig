@@ -62,6 +62,7 @@ pub fn encodeNoArgs(writer: anytype) !u8 {
 
 pub fn encodeOneImm(writer: anytype, imm: u32) !u8 {
     const l_x = calcLengthNeeded(imm);
+    std.debug.print("encodeOneImm l_x {d} {d}\n", .{ l_x, imm });
     try writeImm(writer, imm, l_x);
     return l_x;
 }

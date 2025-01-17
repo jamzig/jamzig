@@ -9,6 +9,8 @@ const MaxInstructionSizeInBytes = @import("../../pvm/instruction.zig").MaxInstru
 const SeedGenerator = @import("seed.zig").SeedGenerator;
 const code_gen = @import("program_generator/code_generator.zig");
 
+const trace = @import("../../tracing.zig").scoped(.pvm);
+
 const JumpAlignmentFactor = 2; // ZA = 2 as per spec
 
 /// Represents the complete encoded PVM program
@@ -21,8 +23,13 @@ pub const GeneratedProgram = struct {
     jump_table: []u32,
 
     pub fn getRawBytes(self: *@This(), allocator: std.mem.Allocator) ![]u8 {
+        const span = trace.span(.get_raw_bytes);
+        defer span.deinit();
+        span.debug("Computing raw bytes for program", .{});
+
         // If we already have the raw bytes computed, return them
         if (self.raw_bytes) |bytes| {
+            span.debug("Returning cached raw bytes, length: {d}", .{bytes.len});
             return bytes;
         }
 
@@ -110,8 +117,13 @@ pub const ProgramGenerator = struct {
 
     /// Generate a valid PVM program with the specified number of basic blocks
     pub fn generate(self: *Self, instruction_count: u32) !GeneratedProgram {
+        const span = trace.span(.generate);
+        defer span.deinit();
+        span.debug("Generating program with {d} instructions", .{instruction_count});
+
         // Generate a random program
         const instructions = try code_gen.generate(self.allocator, self.seed_gen, instruction_count);
+        span.debug("Generated {d} random instructions", .{instructions.len});
         defer self.allocator.free(instructions);
 
         var code = try std.ArrayList(u8).initCapacity(self.allocator, instruction_count * MaxInstructionSizeInBytes);
@@ -130,22 +142,43 @@ pub const ProgramGenerator = struct {
 
         var pc: u32 = 0;
         const code_writer = code.writer();
-        for (instructions) |inst| {
-            pc += try inst.encode(code_writer);
+        const encode_span = span.child(.encode_instructions);
+        defer encode_span.deinit();
+
+        for (instructions, 0..) |inst, i| {
+            const inst_span = encode_span.child(.encode_instruction);
+            defer inst_span.deinit();
+            inst_span.debug("Encoding instruction {d}/{d} at pc: {d}", .{ i + 1, instructions.len, pc });
+            inst_span.trace("Instruction: {any}", .{inst});
+
+            const bytes_written = try inst.encode(code_writer);
+            pc += bytes_written;
+
             if (inst.isTerminationInstruction()) {
                 try basic_blocks.append(pc);
                 try jump_table.append(pc);
+                inst_span.debug("Added termination block at pc {d}", .{pc});
             }
             mask_bitset.set(pc);
+            inst_span.trace("Wrote {d} bytes, new pc: {d}", .{ bytes_written, pc });
         }
 
         // generate the mask, we allocate ceil + 1 as the mask could possible end
-        const mask = try self.allocator.alloc(u8, try std.math.divCeil(usize, pc, 8) + 1);
+        const mask_span = span.child(.generate_mask);
+        defer mask_span.deinit();
+
+        const mask_size = try std.math.divCeil(usize, pc, 8) + 1;
+        mask_span.debug("Allocating mask of size {d} bytes", .{mask_size});
+
+        const mask = try self.allocator.alloc(u8, mask_size);
         @memset(mask, 0);
+
         var mask_iter = mask_bitset.iterator(.{});
         while (mask_iter.next()) |bidx| {
+            mask_span.trace("Mask bit {d} set", .{bidx});
             mask[bidx / 8] |= @as(u8, 1) << @intCast(bidx % 8);
         }
+        mask_span.debug("Generated mask with {d} bytes", .{mask.len});
 
         // On the second pass of our program we need to find the dynamic jumps
         // and let them jump to any of the elements in our jump table to make
