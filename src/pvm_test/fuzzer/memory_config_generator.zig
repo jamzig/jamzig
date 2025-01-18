@@ -56,39 +56,18 @@ pub const MemoryConfigGenerator = struct {
             try merged.append(current);
         }
 
-        // Calculate how many additional random pages we can add
-        const existing_pages = merged.items.len;
-        const max_additional = @min(8, 8 - existing_pages);
-        const additional_pages = if (max_additional > 0)
-            self.seed_gen.randomIntRange(u8, 1, @intCast(max_additional))
-        else
-            0;
-
         // Allocate space for all configs
-        const total_pages = existing_pages + additional_pages;
+        const total_pages = merged.items.len;
         const configs = try self.allocator.alloc(PVM.PageMapConfig, total_pages);
         errdefer self.allocator.free(configs);
 
         // First, create configs for all merged ranges
-        for (merged.items, 0..existing_pages) |range, i| {
+        for (merged.items, 0..total_pages) |range, i| {
             configs[i] = .{
                 .address = range.start,
                 .length = range.end - range.start,
-                .is_writable = self.generateRandomPermissions(),
+                .is_writable = self.generatePagePermissions(),
             };
-        }
-
-        // Then add random configs
-        var used_ranges = std.ArrayList(Range).init(self.allocator);
-        defer used_ranges.deinit();
-        try used_ranges.appendSlice(merged.items);
-
-        for (existing_pages..total_pages) |i| {
-            configs[i] = try self.generateSingleConfig(&used_ranges);
-            try used_ranges.append(.{
-                .start = configs[i].address,
-                .end = configs[i].address + configs[i].length,
-            });
         }
 
         // Sort final configs by address
@@ -98,11 +77,6 @@ pub const MemoryConfigGenerator = struct {
 
     fn rangeStartLessThan(_: void, a: Range, b: Range) bool {
         return a.start < b.start;
-    }
-
-    fn generateRandomPermissions(self: *Self) bool {
-        // Example: Generate random RWX permissions
-        return self.seed_gen.randomBool();
     }
 
     fn generateSingleConfig(self: *Self, existing_ranges: *std.ArrayList(Range)) !PVM.PageMapConfig {
@@ -140,8 +114,7 @@ pub const MemoryConfigGenerator = struct {
     }
 
     fn generatePagePermissions(self: *Self) bool {
-        // 70% chance of writable pages
-        return self.seed_gen.randomIntRange(u8, 0, 99) < 70;
+        return self.seed_gen.randomIntRange(u8, 0, 99) < 80;
     }
 
     /// Generate initial memory contents for a page
