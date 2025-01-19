@@ -1114,7 +1114,7 @@ pub const PVM = struct {
                 const offset = address - page.address;
                 var i: u8 = 0;
                 while (i < size) : (i += 1) {
-                    const byte = @as(u8, @truncate(value >> @as(u5, @intCast(i * 8))));
+                    const byte = @as(u8, @truncate(value >> @as(u5, @truncate(i * 8))));
                     page.data[offset + i] = byte;
                     span.trace("Wrote byte {d}: 0x{X:0>2} at offset {d}", .{ i, byte, offset + i });
                 }

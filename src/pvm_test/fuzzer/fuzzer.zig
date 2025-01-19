@@ -52,6 +52,8 @@ pub const FuzzConfig = struct {
     initial_seed: u64 = 0,
     /// Number of test cases to run
     num_cases: u32 = 1000,
+    /// Start art
+    start_case: u32 = 0,
     /// Maximum gas for each test case
     max_gas: i64 = 100,
     /// Maximum number of basic blocks per program
@@ -239,18 +241,26 @@ pub const PVMFuzzer = struct {
 
         var results = FuzzResults.init();
 
-        var test_count: u32 = 0;
+        var test_count: u32 = self.config.start_case;
         while (test_count < self.config.num_cases) : (test_count += 1) {
             const test_case_seed = self.seed_gen
                 .buildSeedFromInitialSeedAndCounter(self.config.initial_seed, test_count);
             if (self.config.verbose) {
                 std.debug.print("Running test case {d}/{d} with seed {d}\r", .{ test_count + 1, self.config.num_cases, test_case_seed });
-                if ((test_count + 1) % 10_000 == 0) {
+                if ((test_count + 1) % 1_000 == 0) {
                     std.debug.print("\n", .{});
                 }
             }
 
-            const result = try self.runSingleTest(test_case_seed);
+            const result = self.runSingleTest(test_case_seed) catch |err| {
+                std.debug.print("\n\x1b[31mFatal error in test case {d}/{d}\x1b[0m\n", .{
+                    test_count + 1,
+                    self.config.num_cases,
+                });
+                std.debug.print("  Seed: {d}\n", .{test_case_seed});
+                std.debug.print("  Error: {s}\n", .{@errorName(err)});
+                return err;
+            };
             results.accumulate(result);
 
             // if (self.config.verbose) {

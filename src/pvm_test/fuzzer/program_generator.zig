@@ -189,7 +189,7 @@ pub const ProgramGenerator = struct {
         }
         mask_span.debug("Generated mask with {d} bytes", .{mask.len});
 
-        // On the second pass of our program we need to find the dynamic jumps
+        // On the second pass of our program we need to find the branches
         // and let them jump to any of the elements in our jump table to make
         // these jumps valid
         var prgdec = @import("../../pvm/decoder.zig").Decoder.init(code.items, mask);
@@ -197,8 +197,15 @@ pub const ProgramGenerator = struct {
         while (try iter.next()) |entry| {
             if (entry.inst.isBranch() or entry.inst.instruction == .jump) {
                 // Select a random jump target from our jump table
-                const target_idx = self.seed_gen.randomIntRange(usize, 0, basic_blocks.items.len - 1);
-                const target_pc = basic_blocks.items[target_idx];
+                var target_idx = self.seed_gen.randomIntRange(usize, 0, basic_blocks.items.len - 1);
+                var target_pc = basic_blocks.items[target_idx];
+
+                // If we're jumping to our own position and there's a next target available,
+                // use the next target instead
+                if (target_pc == entry.pc and basic_blocks.items.len > 1) {
+                    target_idx = (target_idx + 1) % basic_blocks.items.len;
+                    target_pc = basic_blocks.items[target_idx];
+                }
 
                 // Calculate the relative offset from current position
                 // Need to account for instruction size in offset calculation
@@ -213,6 +220,22 @@ pub const ProgramGenerator = struct {
 
                 // Update the code buffer with the modified instruction
                 @memcpy(code.items[entry.next_pc - 4 ..][0..4], &buffer);
+            }
+
+            // Handle the indirect jumps here
+            if (entry.inst.instruction == .jump_ind or
+                entry.inst.instruction == .load_imm_jump_ind)
+            {
+                // Select a random jump target index
+                const target_idx = self.seed_gen.randomIntRange(usize, 0, jump_table.items.len - 1);
+
+                // Update the instruction's immediate value with the jump table index
+                var buffer: [4]u8 = undefined;
+                std.mem.writeInt(u32, &buffer, @as(u32, @intCast((target_idx + 1) * 2)), .little);
+
+                // Update the code buffer at the immediate position
+                const imm_offset = entry.next_pc - 4; // Last 4 bytes contain the immediate
+                @memcpy(code.items[imm_offset..][0..4], &buffer);
             }
         }
 

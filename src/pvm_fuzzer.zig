@@ -27,12 +27,12 @@ pub fn main() !void {
         \\-v, --verbose             Enable verbose output
         \\-s, --seed <u64>          Initial random seed (default: timestamp)
         \\-c, --cases <u32>         Number of test cases to run (default: 50000)
+        \\-C, --start-case <u32>    First case to run
         \\-g, --max-gas <i64>       Maximum gas per test case (default: 1000000)
         \\-b, --max-blocks <u32>    Maximum number of basic blocks per program (default: 32)
         \\-S, --test-seed <u64>     Rerun a single testcase with this seed
-        \\-m, --mut-prob <u8>       Program mutation probability (0-100, default: 10)
-        \\-f, --flip-prob <u8>      Bit flip probability (0-100, default: 1)
-        \\
+        \\-m, --mut-prob <u8>       Program mutation probability (0-1M, default: 10)
+        \\-f, --flip-prob <u8>      Bit flip probability (0-1K, default: 1)
     );
 
     var diag = clap.Diagnostic{};
@@ -54,6 +54,7 @@ pub fn main() !void {
     const config = FuzzConfig{
         .initial_seed = if (res.args.seed) |seed| seed else @as(u64, @intCast(std.time.timestamp())),
         .num_cases = if (res.args.cases) |cases| cases else 50000,
+        .start_case = if (res.args.@"start-case") |start_case| start_case else 0,
         .max_gas = if (res.args.@"max-gas") |gas| gas else 1000000,
         .max_instruction_count = if (res.args.@"max-blocks") |blocks| blocks else 32,
         .verbose = res.args.verbose != 0,
@@ -78,11 +79,12 @@ pub fn main() !void {
     std.debug.print("PVM Fuzzer Configuration:\n", .{});
     std.debug.print("Initial Seed: {d}\n", .{config.initial_seed});
     std.debug.print("Number of Cases: {d}\n", .{config.num_cases});
+    std.debug.print("Start case: {d}\n", .{config.start_case});
     std.debug.print("Max Gas: {d}\n", .{config.max_gas});
     std.debug.print("Max Instructions: {d}\n", .{config.max_instruction_count});
     std.debug.print("Verbose: {}\n", .{config.verbose});
-    std.debug.print("Mutation Probability: {d}/1_000_000\n", .{config.mutation.program_mutation_probability});
-    std.debug.print("Bit Flip Probability: {d}/1_000\n\n", .{config.mutation.bit_flip_probability});
+    std.debug.print("Mutation Probability: {d}/1M\n", .{config.mutation.program_mutation_probability});
+    std.debug.print("Bit Flip Probability: {d}/1K\n\n", .{config.mutation.bit_flip_probability});
 
     var result = try fuzzer.run();
 

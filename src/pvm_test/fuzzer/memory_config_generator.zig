@@ -30,7 +30,7 @@ pub const MemoryConfigGenerator = struct {
             const page_aligned_addr = addr & ~@as(u32, 4095); // Align to 4K boundary
             try ranges.append(.{
                 .start = page_aligned_addr,
-                .end = page_aligned_addr + page_size,
+                .end = page_aligned_addr +| page_size,
             });
         }
 
@@ -118,8 +118,8 @@ pub const MemoryConfigGenerator = struct {
     }
 
     /// Generate initial memory contents for a page
-    pub fn generatePageContents(self: *Self, length: u32) ![]align(8) u8 {
-        var contents = try self.allocator.alignedAlloc(u8, 8, length);
+    pub fn generatePageContents(self: *Self, length: u32) ![]u8 {
+        var contents = try self.allocator.alloc(u8, length);
         errdefer self.allocator.free(contents);
 
         // Strategy for content generation:
