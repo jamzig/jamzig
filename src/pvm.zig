@@ -358,7 +358,7 @@ pub const PVM = struct {
             defer register_span.deinit();
             // Only construct register state string if trace is enabled
             for (self.registers, 0..) |reg, idx| {
-                register_span.trace("r{d}=0x{X:0>8}", .{ idx, reg });
+                register_span.trace("r{d}=0x{X:0>16}", .{ idx, reg });
             }
         }
     }
@@ -430,34 +430,31 @@ pub const PVM = struct {
             },
             .load_u8 => {
                 const args = i.args.OneRegOneImm;
-                self.registers[args.register_index] = try self.loadMemory(@truncate(args.immediate), 1);
+                self.registers[args.register_index] = try self.loadMemoryUnsignedIntoRegU64(u8, @truncate(args.immediate));
             },
             .load_i8 => {
                 const args = i.args.OneRegOneImm;
-                const value = try self.loadMemory(@truncate(args.immediate), 1);
-                self.registers[args.register_index] = @as(u64, @bitCast(@as(i64, @intCast(@as(i8, @bitCast(@as(u8, @truncate(value))))))));
+                self.registers[args.register_index] = try self.loadMemorySignedIntoRegU64(i8, @truncate(args.immediate));
             },
             .load_u16 => {
                 const args = i.args.OneRegOneImm;
-                self.registers[args.register_index] = try self.loadMemory(@truncate(args.immediate), 2);
+                self.registers[args.register_index] = try self.loadMemoryUnsignedIntoRegU64(u16, @truncate(args.immediate));
             },
             .load_i16 => {
                 const args = i.args.OneRegOneImm;
-                const value = try self.loadMemory(@truncate(args.immediate), 2);
-                self.registers[args.register_index] = @as(u64, @bitCast(@as(i64, @intCast(@as(i16, @bitCast(@as(u16, @truncate(value))))))));
+                self.registers[args.register_index] = try self.loadMemorySignedIntoRegU64(i16, @truncate(args.immediate));
             },
             .load_u32 => {
                 const args = i.args.OneRegOneImm;
-                self.registers[args.register_index] = try self.loadMemory(@truncate(args.immediate), 4);
+                self.registers[args.register_index] = try self.loadMemoryUnsignedIntoRegU64(u32, @truncate(args.immediate));
             },
             .load_i32 => {
                 const args = i.args.OneRegOneImm;
-                const value = try self.loadMemory(@truncate(args.immediate), 4);
-                self.registers[args.register_index] = @as(u64, @bitCast(@as(i64, @intCast(@as(i32, @bitCast(@as(u32, @truncate(value))))))));
+                self.registers[args.register_index] = try self.loadMemorySignedIntoRegU64(i32, @truncate(args.immediate));
             },
             .load_u64 => {
                 const args = i.args.OneRegOneImm;
-                self.registers[args.register_index] = try self.loadMemory(@truncate(args.immediate), 8);
+                self.registers[args.register_index] = try self.loadMemoryUnsignedIntoRegU64(u64, @truncate(args.immediate));
             },
             .store_u8, .store_u16, .store_u32, .store_u64 => {
                 const args = i.args.OneRegOneImm;
@@ -791,32 +788,21 @@ pub const PVM = struct {
 
             .load_ind_u8, .load_ind_u16, .load_ind_u32, .load_ind_u64 => {
                 const args = i.args.TwoRegOneImm;
-                const size: u8 = switch (i.instruction) {
-                    .load_ind_u8 => 1,
-                    .load_ind_u16 => 2,
-                    .load_ind_u32 => 4,
-                    .load_ind_u64 => 8,
+                self.registers[args.first_register_index] = switch (i.instruction) {
+                    .load_ind_u8 => try self.loadMemoryUnsignedIntoRegU64(u8, @truncate(self.registers[args.second_register_index] +% args.immediate)),
+                    .load_ind_u16 => try self.loadMemoryUnsignedIntoRegU64(u16, @truncate(self.registers[args.second_register_index] +% args.immediate)),
+                    .load_ind_u32 => try self.loadMemoryUnsignedIntoRegU64(u32, @truncate(self.registers[args.second_register_index] +% args.immediate)),
+                    .load_ind_u64 => try self.loadMemoryUnsignedIntoRegU64(u64, @truncate(self.registers[args.second_register_index] +% args.immediate)),
                     else => unreachable,
                 };
-                self.registers[args.first_register_index] = try self.loadMemory(
-                    @truncate(self.registers[args.second_register_index] +% args.immediate),
-                    size,
-                );
             },
 
             .load_ind_i8, .load_ind_i16, .load_ind_i32 => {
                 const args = i.args.TwoRegOneImm;
-                const size: u8 = switch (i.instruction) {
-                    .load_ind_i8 => 1,
-                    .load_ind_i16 => 2,
-                    .load_ind_i32 => 4,
-                    else => unreachable,
-                };
-                const value = try self.loadMemory(@truncate(self.registers[args.second_register_index] +% args.immediate), size);
-                self.registers[args.first_register_index] = switch (size) {
-                    1 => @as(u32, @bitCast(@as(i32, @intCast(@as(i8, @bitCast(@as(u8, @truncate(value)))))))),
-                    2 => @as(u32, @bitCast(@as(i32, @intCast(@as(i16, @bitCast(@as(u16, @truncate(value)))))))),
-                    4 => @as(u32, @bitCast(@as(i32, @bitCast(@as(u32, @truncate(value)))))),
+                self.registers[args.first_register_index] = switch (i.instruction) {
+                    .load_ind_i8 => try self.loadMemorySignedIntoRegU64(i8, @truncate(self.registers[args.second_register_index] +% args.immediate)),
+                    .load_ind_i16 => try self.loadMemorySignedIntoRegU64(i16, @truncate(self.registers[args.second_register_index] +% args.immediate)),
+                    .load_ind_i32 => try self.loadMemorySignedIntoRegU64(i32, @truncate(self.registers[args.second_register_index] +% args.immediate)),
                     else => unreachable,
                 };
             },
@@ -991,21 +977,33 @@ pub const PVM = struct {
         return is_start;
     }
 
-    fn loadMemory(self: *PVM, address: u32, size: u8) !u64 {
-        const span = trace.span(.load_memory);
+    /// reads memory and casts the value into an u64 value assuming its unsigned
+    fn loadMemoryUnsignedIntoRegU64(self: *PVM, comptime T: type, address: u32) !u64 {
+        const span = trace.span(.load_memory_unsigned);
         defer span.deinit();
 
-        span.debug("Loading {d} bytes from address 0x{X:0>8}", .{ size, address });
+        span.debug("Loading {d} bytes from address 0x{X:0>8}", .{ @sizeOf(T), address });
 
-        const data = try self.readMemory(address, size);
-        var result: u64 = 0;
-        var i: u8 = 0;
-        while (i < size) : (i += 1) {
-            result |= @as(u64, @intCast(data[i])) << @intCast(i * 8);
-        }
+        const data = try self.readMemory(address, @sizeOf(T));
+        span.trace("Loaded value: 0x{X}", .{data});
 
-        span.trace("Loaded value: 0x{X:0>8}", .{result});
-        return result;
+        // Read little indian into type, and convert to output type
+        return @intCast(std.mem.readInt(T, data[0..@sizeOf(T)], .little));
+    }
+
+    /// reads memory and casts the value into an u64 value assuming its signed
+    /// ensuring the value is first casted to an i64 before converting into a u64
+    fn loadMemorySignedIntoRegU64(self: *PVM, comptime T: type, address: u32) !u64 {
+        const span = trace.span(.load_memory_unsigned);
+        defer span.deinit();
+
+        span.debug("Loading {d} bytes from address 0x{X:0>8}", .{ @sizeOf(T), address });
+
+        const data = try self.readMemory(address, @sizeOf(T));
+        span.trace("Loaded value: 0x{X}", .{data});
+
+        // Read little indian into type, and convert to output type
+        return @bitCast(@as(i64, @intCast(std.mem.readInt(T, data[0..@sizeOf(T)], .little))));
     }
 
     pub fn readMemory(self: *PVM, address: u32, size: usize) ![]u8 {
