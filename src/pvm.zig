@@ -399,19 +399,19 @@ pub const PVM = struct {
             // A.5.4 Instructions with Arguments of Two Immediates
             .store_imm_u8 => {
                 const args = i.args.TwoImm;
-                try self.storeMemory(@truncate(args.first_immediate), @intCast(args.second_immediate), 1);
+                try self.storeMemory(u8, @truncate(args.first_immediate), @intCast(args.second_immediate));
             },
             .store_imm_u16 => {
                 const args = i.args.TwoImm;
-                try self.storeMemory(@truncate(args.first_immediate), @intCast(args.second_immediate), 2);
+                try self.storeMemory(u16, @truncate(args.first_immediate), @intCast(args.second_immediate));
             },
             .store_imm_u32 => {
                 const args = i.args.TwoImm;
-                try self.storeMemory(@truncate(args.first_immediate), args.second_immediate, 4);
+                try self.storeMemory(u32, @truncate(args.first_immediate), args.second_immediate);
             },
             .store_imm_u64 => {
                 const args = i.args.TwoImm;
-                try self.storeMemory(@truncate(args.first_immediate), args.second_immediate, 8);
+                try self.storeMemory(u64, @truncate(args.first_immediate), args.second_immediate);
             },
 
             // A.5.5 Instructions with Arguments of One Offset
@@ -456,29 +456,39 @@ pub const PVM = struct {
                 const args = i.args.OneRegOneImm;
                 self.registers[args.register_index] = try self.loadMemoryUnsignedIntoRegU64(u64, @truncate(args.immediate));
             },
-            .store_u8, .store_u16, .store_u32, .store_u64 => {
+            .store_u8 => {
                 const args = i.args.OneRegOneImm;
-                const size: u8 = switch (i.instruction) {
-                    .store_u8 => 1,
-                    .store_u16 => 2,
-                    .store_u32 => 4,
-                    .store_u64 => 8,
-                    else => unreachable,
-                };
-                try self.storeMemory(@truncate(args.immediate), self.registers[args.register_index], size);
+                try self.storeMemory(u8, @truncate(args.immediate), self.registers[args.register_index]);
+            },
+            .store_u16 => {
+                const args = i.args.OneRegOneImm;
+                try self.storeMemory(u16, @truncate(args.immediate), self.registers[args.register_index]);
+            },
+            .store_u32 => {
+                const args = i.args.OneRegOneImm;
+                try self.storeMemory(u32, @truncate(args.immediate), self.registers[args.register_index]);
+            },
+            .store_u64 => {
+                const args = i.args.OneRegOneImm;
+                try self.storeMemory(u64, @truncate(args.immediate), self.registers[args.register_index]);
             },
 
             // A.5.7 Instructions with Arguments of One Register & Two Immediates
-            .store_imm_ind_u8, .store_imm_ind_u16, .store_imm_ind_u32, .store_imm_ind_u64 => {
+            .store_imm_ind_u8 => {
                 const args = i.args.OneRegTwoImm;
-                const size: u8 = switch (i.instruction) {
-                    .store_imm_ind_u8 => 1,
-                    .store_imm_ind_u16 => 2,
-                    .store_imm_ind_u32 => 4,
-                    .store_imm_ind_u64 => 8,
-                    else => unreachable,
-                };
-                try self.storeMemory(@truncate(self.registers[args.register_index] +% args.first_immediate), args.second_immediate, size);
+                try self.storeMemory(u8, @truncate(self.registers[args.register_index] +% args.first_immediate), args.second_immediate);
+            },
+            .store_imm_ind_u16 => {
+                const args = i.args.OneRegTwoImm;
+                try self.storeMemory(u16, @truncate(self.registers[args.register_index] +% args.first_immediate), args.second_immediate);
+            },
+            .store_imm_ind_u32 => {
+                const args = i.args.OneRegTwoImm;
+                try self.storeMemory(u32, @truncate(self.registers[args.register_index] +% args.first_immediate), args.second_immediate);
+            },
+            .store_imm_ind_u64 => {
+                const args = i.args.OneRegTwoImm;
+                try self.storeMemory(u64, @truncate(self.registers[args.register_index] +% args.first_immediate), args.second_immediate);
             },
 
             // A.5.8 Instructions with Arguments of One Register, One Immediate and One Offset
@@ -770,20 +780,21 @@ pub const PVM = struct {
             },
 
             // A.5.10 Instructions with Arguments of Two Registers & One Immediate (continued)
-            .store_ind_u8, .store_ind_u16, .store_ind_u32, .store_ind_u64 => {
+            .store_ind_u8 => {
                 const args = i.args.TwoRegOneImm;
-                const size: u8 = switch (i.instruction) {
-                    .store_ind_u8 => 1,
-                    .store_ind_u16 => 2,
-                    .store_ind_u32 => 4,
-                    .store_ind_u64 => 8,
-                    else => unreachable,
-                };
-                try self.storeMemory(
-                    @truncate(self.registers[args.second_register_index] +% args.immediate),
-                    self.registers[args.first_register_index],
-                    size,
-                );
+                try self.storeMemory(u8, @truncate(self.registers[args.second_register_index] +% args.immediate), self.registers[args.first_register_index]);
+            },
+            .store_ind_u16 => {
+                const args = i.args.TwoRegOneImm;
+                try self.storeMemory(u16, @truncate(self.registers[args.second_register_index] +% args.immediate), self.registers[args.first_register_index]);
+            },
+            .store_ind_u32 => {
+                const args = i.args.TwoRegOneImm;
+                try self.storeMemory(u32, @truncate(self.registers[args.second_register_index] +% args.immediate), self.registers[args.first_register_index]);
+            },
+            .store_ind_u64 => {
+                const args = i.args.TwoRegOneImm;
+                try self.storeMemory(u64, @truncate(self.registers[args.second_register_index] +% args.immediate), self.registers[args.first_register_index]);
             },
 
             .load_ind_u8, .load_ind_u16, .load_ind_u32, .load_ind_u64 => {
@@ -1090,11 +1101,11 @@ pub const PVM = struct {
         return Error.MemoryPageFault;
     }
 
-    fn storeMemory(self: *PVM, address: u32, value: u64, size: u8) !void {
+    fn storeMemory(self: *PVM, T: type, address: u32, value: u64) !void {
         const span = trace.span(.store_memory);
         defer span.deinit();
 
-        span.debug("Storing value 0x{X:0>8} ({d} bytes) to address 0x{X:0>8}", .{ value, size, address });
+        span.debug("Storing value 0x{X:0>8} ({d} bytes) to address 0x{X:0>8}", .{ value, @sizeOf(T), address });
 
         for (self.page_map) |page| {
             if (address >= page.address and address < page.address + page.length) {
@@ -1103,19 +1114,15 @@ pub const PVM = struct {
                     self.error_data = .{ .page_fault = address };
                     return Error.MemoryWriteProtected;
                 }
-                if (address + size > page.address + page.length) {
-                    span.err("Memory access out of bounds: address=0x{X:0>8}, size={d}, page_end=0x{X:0>8}", .{ address, size, page.address + page.length });
+                if (address + @sizeOf(T) > page.address + page.length) {
+                    span.err("Memory access out of bounds: address=0x{X:0>8}, size={d}, page_end=0x{X:0>8}", .{ address, @sizeOf(T), page.address + page.length });
                     self.error_data = .{ .page_fault = page.address + page.length };
                     return Error.MemoryAccessOutOfBounds;
                 }
+                // FIXME: graypaper describes a wrapping operation on the memory and not an MemoryAccessOutOfBounds
 
                 const offset = address - page.address;
-                var i: u8 = 0;
-                while (i < size) : (i += 1) {
-                    const byte = @as(u8, @truncate(value >> @as(u5, @truncate(i * 8))));
-                    page.data[offset + i] = byte;
-                    span.trace("Wrote byte {d}: 0x{X:0>2} at offset {d}", .{ i, byte, offset + i });
-                }
+                std.mem.writeInt(T, page.data[offset..][0..@sizeOf(T)], @truncate(value), .little);
                 return;
             }
         }
