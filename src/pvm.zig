@@ -45,6 +45,7 @@ pub const PVM = struct {
     pub const Memory = @import("./pvm/memory.zig").Memory;
 
     pub const HostCallFn = @import("./pvm/host_calls.zig").HostCallFn;
+    pub const HostCallResult = @import("./pvm/host_calls.zig").HostCallResult;
 
     pub const ExecutionContext = @import("./pvm/execution_context.zig").ExecutionContext;
 
@@ -94,7 +95,7 @@ pub const PVM = struct {
 
         // Decode instruction
         const instruction = try context.decoder.decodeInstruction(context.pc);
-        span.debug("Executing instruction at PC: 0x{X:0>8}", .{context.pc});
+        span.debug("Executing instruction at PC: 0x{d:0>8}: {}", .{ context.pc, instruction });
         span.trace("Decoded instruction: {}", .{instruction.instruction});
 
         // Check gas
@@ -204,22 +205,23 @@ pub const PVM = struct {
             // A.5.5 Instructions with Arguments of One Offset
             .jump => {
                 // TODO: catch potential errors and return the correct ExecutionResult
-                const jump_dest = try context.program.validateJumpAddress(@truncate(try updatePc(context.pc, i.args.OneOffset.offset)));
-                if (jump_dest == 0xFFFF0000) {
-                    // Special halt PC reached
-                    return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
-                }
-                context.pc = jump_dest;
+                context.pc = updatePc(context.pc, i.args.OneOffset.offset) catch {
+                    return .{ .terminal = .panic };
+                };
                 return .cont;
             },
 
             // A.5.6 Instructions with Arguments of One Register & One Immediate
             .jump_ind => {
                 const args = i.args.OneRegOneImm;
-                const jump_dest = try context.program.validateJumpAddress(@truncate(context.registers[args.register_index] +| args.immediate));
-                if (jump_dest == 0xFFFF0000) {
-                    return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
-                }
+                const jump_dest = context.program.validateJumpAddress(
+                    @truncate(context.registers[args.register_index] +| args.immediate),
+                ) catch |err| {
+                    return if (err == error.JumpAddressHalt)
+                        .{ .terminal = .{ .halt = &[_]u8{} } }
+                    else
+                        .{ .terminal = .panic };
+                };
                 context.pc = jump_dest;
                 return .cont;
             },
@@ -320,11 +322,9 @@ pub const PVM = struct {
             .load_imm_jump => {
                 const args = i.args.OneRegOneImmOneOffset;
                 context.registers[args.register_index] = args.immediate;
-                const jump_dest = try context.program.validateJumpAddress(@truncate(try updatePc(context.pc, args.offset)));
-                if (jump_dest == 0xFFFF0000) {
-                    return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
-                }
-                context.pc = jump_dest;
+                context.pc = updatePc(context.pc, args.offset) catch {
+                    return .{ .terminal = .panic };
+                };
                 return .cont;
             },
 
@@ -348,11 +348,9 @@ pub const PVM = struct {
                 };
 
                 if (should_branch) {
-                    const jump_dest = try context.program.validateJumpAddress(@truncate(try updatePc(context.pc, args.offset)));
-                    if (jump_dest == 0xFFFF0000) {
-                        return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
-                    }
-                    context.pc = jump_dest;
+                    context.pc = updatePc(context.pc, args.offset) catch {
+                        return .{ .terminal = .panic };
+                    };
                     return .cont;
                 }
             },
@@ -365,7 +363,6 @@ pub const PVM = struct {
 
             .sbrk => {
                 // Memory allocation is handled by the Memory implementation
-                return .cont;
             },
 
             // A.5.10 Instructions with Arguments of Two Registers & One Immediate
@@ -400,11 +397,9 @@ pub const PVM = struct {
                     else => unreachable,
                 };
                 if (should_branch) {
-                    const jump_dest = try context.program.validateJumpAddress(@truncate(try updatePc(context.pc, args.offset)));
-                    if (jump_dest == 0xFFFF0000) {
-                        return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
-                    }
-                    context.pc = jump_dest;
+                    context.pc = updatePc(context.pc, args.offset) catch {
+                        return .{ .terminal = .panic };
+                    };
                     return .cont;
                 }
             },
@@ -413,10 +408,14 @@ pub const PVM = struct {
             .load_imm_jump_ind => {
                 const args = i.args.TwoRegTwoImm;
                 context.registers[args.first_register_index] = args.first_immediate;
-                const jump_dest = try context.program.validateJumpAddress(@truncate(context.registers[args.second_register_index] +% args.second_immediate));
-                if (jump_dest == 0xFFFF0000) {
-                    return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
-                }
+                const jump_dest = context.program.validateJumpAddress(
+                    @truncate(context.registers[args.second_register_index] +% args.second_immediate),
+                ) catch |err| {
+                    return if (err == error.JumpAddressHalt)
+                        .{ .terminal = .{ .halt = &[_]u8{} } }
+                    else
+                        .{ .terminal = .panic };
+                };
                 context.pc = jump_dest;
                 return .cont;
             },
@@ -830,7 +829,7 @@ pub const PVM = struct {
             },
         }
 
-        context.pc = i.skip_l() + 1;
+        context.pc += i.skip_l() + 1;
         return .cont;
     }
 };

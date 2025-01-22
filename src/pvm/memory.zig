@@ -11,8 +11,8 @@ pub const Memory = struct {
 
     // Memory section addresses
     pub const READ_ONLY_BASE_ADDRESS: u32 = Z_Z;
-    pub fn HEAP_BASE_ADDRESS(code_size: u32) u32 {
-        return 2 * Z_Z + code_size;
+    pub fn HEAP_BASE_ADDRESS(read_only_size: u32) !u32 {
+        return 2 * Z_Z + try std.math.divCeil(u32, read_only_size * Z_Z, Z_Z);
     }
     pub const INPUT_ADDRESS: u32 = 0xFFFFFFFF - Z_Z - Z_I;
     pub const STACK_ADDRESS: u32 = 0xFFFFFFFF - Z_Z;
@@ -73,7 +73,7 @@ pub const Memory = struct {
                     .ReadOnly,
                 ),
                 .heap = Section.init(
-                    HEAP_BASE_ADDRESS(@as(u32, @intCast(read_only.len))),
+                    try HEAP_BASE_ADDRESS(@as(u32, @intCast(read_only.len))),
                     heap_size_in_pages * Z_P,
                     read_write,
                     .ReadWrite,

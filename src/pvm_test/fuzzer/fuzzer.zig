@@ -299,6 +299,14 @@ pub const PVMFuzzer = struct {
         const mutation_span = span.child(.mutation);
         defer mutation_span.deinit();
 
+        // write the memory access in program, since we have no readonly data we can calculate the start
+        // of the heap and we set a HEAP_SIZE of 4 pages
+        try program.rewriteMemoryAccesses(
+            &seed_gen,
+            try PVM.Memory.HEAP_BASE_ADDRESS(0),
+            PVM.Memory.Z_P * 4,
+        );
+
         const program_bytes = try program.getRawBytes(self.allocator);
         const will_mutate = seed_gen.randomIntRange(u8, 0, 99) < self.config.mutation.program_mutation_probability;
 
@@ -333,6 +341,17 @@ pub const PVMFuzzer = struct {
         };
         defer exec_ctx.deinit(self.allocator);
 
+        // pub const HostCallFn = *const fn (gas: *i64, registers: *[13]u64, memory: *Memory) HostCallResult;
+        try exec_ctx.registerHostCall(0, struct {
+            pub fn func(gas: *i64, registers: *[13]u64, memory: *PVM.Memory) PVM.HostCallResult {
+                _ = gas;
+                _ = registers;
+                _ = memory;
+                // std.debug.print("Host call called!", .{});
+                return .play;
+            }
+        }.func);
+
         // Run program and collect results
         const execution_span = span.child(.execution);
         defer execution_span.deinit();
@@ -363,6 +382,8 @@ pub const PVMFuzzer = struct {
             if (exec_ctx.error_data) |error_data| {
                 execution_span.trace("Error data: {any}", .{error_data});
             }
+            // we should never leak any errors unless its a memory allocation error.
+            return error.PvmErroredInNormalOperation;
         }
 
         return FuzzResult{

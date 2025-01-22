@@ -109,7 +109,7 @@ pub const GeneratedProgram = struct {
 
                 // Encode the modified instruction
                 const encoded = try modified_inst.encodeOwned();
-                const encoded_bytes = encoded.as_slice();
+                const encoded_bytes = encoded.asSlice();
 
                 // Update the code buffer with the modified instruction
                 @memcpy(self.code[entry.pc..][0..encoded_bytes.len], encoded_bytes);
@@ -189,14 +189,20 @@ pub const ProgramGenerator = struct {
         for (instructions, 0..) |*inst, i| {
             const inst_span = encode_span.child(.encode_instruction);
             defer inst_span.deinit();
-            inst_span.debug("Encoding instruction {d}/{d} at pc: {d}", .{ i + 1, instructions.len, pc });
-            inst_span.trace("Instruction: {any}", .{inst});
 
             // Pre-encode jumps with 0xaaaaaaaa to ensure max immediate size, allowing safe rewrites later
             inst.setBranchOrJumpTargetTo(0xaaaaaaaa) catch {};
             // Pre-encode memory accesses with the 0xaaaaaaaa to ensure max immediate size, allowing safe rewrites later
             inst.setMemoryAddress(0xaaaaaaaa) catch {};
 
+            // if the instruction is a host call, set it to 0 so we can always provide a valid host
+            // call
+            if (inst.instruction == .ecalli) {
+                inst.args.OneImm.immediate = 0x00;
+            }
+
+            inst_span.debug("Encoding instruction {d}/{d} at pc: {d}", .{ i + 1, instructions.len, pc });
+            inst_span.trace("Instruction: {any}", .{inst});
             const bytes_written = try inst.encode(code_writer);
             pc += bytes_written;
 
@@ -266,7 +272,13 @@ pub const ProgramGenerator = struct {
                 entry.inst.instruction == .load_imm_jump_ind)
             {
                 // Select a random jump target index
-                const target_idx = self.seed_gen.randomIntRange(usize, 0, jump_table.items.len - 1);
+                var target_idx = self.seed_gen.randomIntRange(usize, 0, jump_table.items.len - 1);
+
+                // If the target is the same as our position and there's a next target available,
+                // use the next target instead
+                if (jump_table.items[target_idx] == entry.pc and jump_table.items.len > 1) {
+                    target_idx = (target_idx + 1) % jump_table.items.len;
+                }
 
                 // Update the instruction's immediate value with the jump table index
                 var buffer: [4]u8 = undefined;
