@@ -319,7 +319,7 @@ pub const PVMFuzzer = struct {
             program_bytes,
             self.config.max_gas,
         ) catch |err| {
-            init_span.err("PVM initialization failed: {s}", .{@errorName(err)});
+            init_span.err("ExecutionContext initialization failed: {s}", .{@errorName(err)});
 
             return FuzzResult{
                 .seed = seed,
@@ -341,10 +341,23 @@ pub const PVMFuzzer = struct {
         const status = PVM.execute(&exec_ctx);
         const gas_used = initial_gas - exec_ctx.gas;
 
-        if (status) |_| {
-            execution_span.debug("Program completed successfully. Gas used: {d}", .{gas_used});
+        if (status) |result| {
+            switch (result) {
+                .halt => |output| {
+                    execution_span.debug("Program halted normally PC {d}. Output size: {d} bytes. Gas used: {d}", .{ exec_ctx.pc, output.len, gas_used });
+                    if (output.len > 0) {
+                        execution_span.trace("Program output: {s}", .{output});
+                    }
+                },
+                .err => |error_type| switch (error_type) {
+                    .panic => execution_span.err("Program panicked at PC 0x{X:0>8}. Gas used: {d}", .{ exec_ctx.pc, gas_used }),
+                    .out_of_gas => execution_span.err("Program ran out of gas at PC 0x{X:0>8} after using {d} units", .{ exec_ctx.pc, gas_used }),
+                    .page_fault => |addr| execution_span.err("Program encountered page fault at PC 0x{X:0>8}, address 0x{X:0>8}. Gas used: {d}", .{ exec_ctx.pc, addr, gas_used }),
+                    .host_call => |idx| execution_span.err("Program attempted invalid host call {d} at PC 0x{X:0>8}. Gas used: {d}", .{ idx, exec_ctx.pc, gas_used }),
+                },
+            }
         } else |err| {
-            execution_span.debug("Program terminated with error: {s}. Gas used: {d}", .{ @errorName(err), gas_used });
+            execution_span.debug("Program execution failed with error: {s}. Gas used: {d}", .{ @errorName(err), gas_used });
             if (exec_ctx.error_data) |error_data| {
                 execution_span.trace("Error data: {any}", .{error_data});
             }
