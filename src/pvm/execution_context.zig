@@ -7,7 +7,7 @@ const Memory = @import("memory.zig").Memory;
 
 const HostCallFn = @import("host_calls.zig").HostCallFn;
 
-const trace = @import("tracing.zig").scoped(.pvm);
+const trace = @import("../tracing.zig").scoped(.pvm);
 
 pub const ExecutionContext = struct {
     program: Program,
@@ -26,13 +26,17 @@ pub const ExecutionContext = struct {
     };
 
     // simple initialization using only the program
-    pub fn initWithRawProgram(allocator: Allocator, raw_program: []const u8) !ExecutionContext {
+    pub fn initWithRawProgram(
+        allocator: Allocator,
+        raw_program: []const u8,
+        max_gas: u32,
+    ) !ExecutionContext {
         // Decode program
-        const program = try Program.decode(allocator, raw_program);
+        var program = try Program.decode(allocator, raw_program);
         errdefer program.deinit(allocator);
 
         // Configure memory layout using Memory's standard layout
-        const memory = try Memory.init(allocator, Memory.Layout.standard(
+        var memory = try Memory.init(allocator, Memory.Layout.standard(
             program.code.len,
             0,
         ));
@@ -42,18 +46,21 @@ pub const ExecutionContext = struct {
         try memory.initSectionByName(.code, program.code);
 
         return ExecutionContext{
-            .allocator = allocator,
             .memory = memory,
             .decoder = Decoder.init(program.code, program.mask),
             .host_calls = std.AutoHashMap(u32, HostCallFn).init(allocator),
             .program = program,
+            .registers = [_]u64{0} ** 13,
+            .pc = 0,
+            .error_data = null,
+            .gas = max_gas,
         };
     }
 
-    pub fn deinit(self: *ExecutionContext) void {
+    pub fn deinit(self: *ExecutionContext, allocator: Allocator) void {
         self.memory.deinit();
         self.host_calls.deinit();
-        self.program.deinit(self.allocator);
+        self.program.deinit(allocator);
     }
 
     pub fn registerHostCall(self: *ExecutionContext, idx: u32, handler: HostCallFn) !void {

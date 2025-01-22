@@ -1,16 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Instruction = @import("./pvm/instruction.zig").Instruction;
-const Program = @import("./pvm/program.zig").Program;
-const Decoder = @import("./pvm/decoder.zig").Decoder;
-const Memory = @import("./pvm/memory.zig").Memory;
-
-const HostCallFn = @import("./pvm/host_calls.zig").HostCallFn;
-
-const ExecutionContext = @import("./pvm/execution_context.zig").ExecutionContext;
-
-const InstructionWithArgs = @import("./pvm/decoder.zig").InstructionWithArgs;
-const updatePc = @import("./pvm/utils.zig").updatePc;
 
 const trace = @import("tracing.zig").scoped(.pvm);
 
@@ -47,6 +36,22 @@ pub const ExecutionStepResult = union(enum) {
 };
 
 pub const PVM = struct {
+    pub const Program = @import("./pvm/program.zig").Program;
+    pub const Decoder = @import("./pvm/decoder.zig").Decoder;
+
+    pub const Instruction = @import("./pvm/instruction.zig").Instruction;
+    pub const InstructionWithArgs = @import("./pvm/decoder.zig").InstructionWithArgs;
+
+    pub const Memory = @import("./pvm/memory.zig").Memory;
+
+    pub const HostCallFn = @import("./pvm/host_calls.zig").HostCallFn;
+
+    pub const ExecutionContext = @import("./pvm/execution_context.zig").ExecutionContext;
+
+    pub const Result = ExecutionResult;
+
+    const updatePc = @import("./pvm/utils.zig").updatePc;
+
     pub const Error = error{
         // PcRelated errors
         PcUnderflow,
@@ -66,14 +71,25 @@ pub const PVM = struct {
         // Host call related errors
         NonExistentHostCall,
 
+        UnimplementedInstruction,
+
         // Execution related errors
         OutOfGas,
         Trap,
-    } || Decoder.Error || Program.Error || error{ OutOfMemory, EmptyBuffer, InsufficientData };
+    } || Decoder.Error || Program.Error || error{
+        OutOfMemory,
+        EmptyBuffer,
+        InsufficientData,
+        SectionNotFound,
+        WriteProtected,
+        PageFault,
+        AccessViolation,
+        NonAllocatedMemoryAccess,
+    };
 
     pub fn executeStep(
-        context: *const ExecutionContext,
-    ) !ExecutionStepResult {
+        context: *ExecutionContext,
+    ) Error!ExecutionStepResult {
         // Decode instruction
         const instruction = try context.decoder.decodeInstruction(context.pc);
 
@@ -89,8 +105,8 @@ pub const PVM = struct {
     }
 
     pub fn execute(
-        context: *const ExecutionContext,
-    ) !ExecutionResult {
+        context: *ExecutionContext,
+    ) Error!ExecutionResult {
         while (true) {
             const step_result = try executeStep(context);
             switch (step_result) {
@@ -126,7 +142,7 @@ pub const PVM = struct {
     }
 
     const PcOffset = i32;
-    fn executeInstruction(context: *ExecutionContext, i: InstructionWithArgs) !ExecutionStepResult {
+    fn executeInstruction(context: *ExecutionContext, i: InstructionWithArgs) Error!ExecutionStepResult {
         switch (i.instruction) {
             // A.5.1 Instructions without Arguments
             .trap => return .{ .terminal = .panic },
@@ -179,7 +195,8 @@ pub const PVM = struct {
 
             // A.5.5 Instructions with Arguments of One Offset
             .jump => {
-                const jump_dest = try context.program.validateJumpAddress(@truncate(i.args.OneOffset.offset));
+                // TODO: catch potential errors and return the correct ExecutionResult
+                const jump_dest = try context.program.validateJumpAddress(@truncate(try updatePc(context.pc, i.args.OneOffset.offset)));
                 if (jump_dest == 0xFFFF0000) {
                     // Special halt PC reached
                     return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
@@ -222,11 +239,11 @@ pub const PVM = struct {
 
                 context.registers[args.register_index] = switch (i.instruction) {
                     .load_u8 => data[0],
-                    .load_i8 => @as(i64, @intCast(@as(i8, @bitCast(data[0])))),
+                    .load_i8 => @bitCast(@as(i64, @intCast(@as(i8, @bitCast(data[0]))))),
                     .load_u16 => std.mem.readInt(u16, data[0..2], .little),
-                    .load_i16 => @as(i64, @intCast(@as(i16, @bitCast(std.mem.readIntLittle(u16, data[0..2]))))),
+                    .load_i16 => @bitCast(@as(i64, @intCast(@as(i16, @bitCast(std.mem.readInt(u16, data[0..2], .little)))))),
                     .load_u32 => std.mem.readInt(u32, data[0..4], .little),
-                    .load_i32 => @as(i64, @intCast(@as(i32, @bitCast(std.mem.readIntLittle(u32, data[0..4]))))),
+                    .load_i32 => @bitCast(@as(i64, @intCast(@as(i32, @bitCast(std.mem.readInt(u32, data[0..4], .little)))))),
                     .load_u64 => std.mem.readInt(u64, data[0..8], .little),
                     else => unreachable,
                 };
@@ -295,7 +312,7 @@ pub const PVM = struct {
             .load_imm_jump => {
                 const args = i.args.OneRegOneImmOneOffset;
                 context.registers[args.register_index] = args.immediate;
-                const jump_dest = try context.program.validateJumpAddress(@truncate(args.offset));
+                const jump_dest = try context.program.validateJumpAddress(@truncate(try updatePc(context.pc, args.offset)));
                 if (jump_dest == 0xFFFF0000) {
                     return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
                 }
@@ -323,7 +340,7 @@ pub const PVM = struct {
                 };
 
                 if (should_branch) {
-                    const jump_dest = try context.program.validateJumpAddress(@truncate(args.offset));
+                    const jump_dest = try context.program.validateJumpAddress(@truncate(try updatePc(context.pc, args.offset)));
                     if (jump_dest == 0xFFFF0000) {
                         return .{ .terminal = .{ .halt = &[_]u8{} } }; // Empty halt output
                     }
@@ -354,10 +371,11 @@ pub const PVM = struct {
 
             else => {
                 std.debug.print("Unimplemented instruction: {s}\n", .{@tagName(i.instruction)});
-                return error.UnimplementedInstruction;
+                return Error.UnimplementedInstruction;
             },
         }
 
         context.pc = i.skip_l() + 1;
+        return .cont;
     }
 };

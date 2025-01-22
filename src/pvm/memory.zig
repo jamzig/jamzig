@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const trace = @import("tracing.zig").scoped(.pvm);
+const trace = @import("../tracing.zig").scoped(.pvm);
 
 pub const Memory = struct {
     // Memory layout constants moved into Memory struct
@@ -13,7 +13,7 @@ pub const Memory = struct {
         address: u32,
         length: u32,
         state: AccessState,
-        data: ?[]u8,
+        data: []u8,
     };
 
     // AccessSate
@@ -31,14 +31,12 @@ pub const Memory = struct {
         address: u32,
         size: usize,
         state: AccessState,
-        writable: bool,
 
-        pub fn init(address: u32, size: usize, state: AccessState, writable: bool) Section {
+        pub fn init(address: u32, size: usize, state: AccessState) Section {
             return .{
                 .address = address,
                 .size = size,
                 .state = state,
-                .writable = writable,
             };
         }
     };
@@ -59,10 +57,10 @@ pub const Memory = struct {
         ///   input: Optional input data slice that will be owned by the layout
         pub fn standard(code_len: usize, input_len: usize) Layout {
             return .{
-                .code = Section.init(Z_Z, code_len, .ReadOnly, null),
-                .heap = Section.init(2 * Z_Z + code_len, Z_Z, .ReadWrite, null),
-                .input = Section.init(0xFFFFFFFF - Z_Z - Z_I, input_len, .ReadOnly, null),
-                .stack = Section.init(0xFFFFFFFF - Z_Z, Z_Z, .ReadWrite, null),
+                .code = Section.init(Z_Z, code_len, .ReadOnly),
+                .heap = Section.init(2 * Z_Z + @as(u32, @intCast(code_len)), Z_Z, .ReadWrite),
+                .input = Section.init(0xFFFFFFFF - Z_Z - Z_I, input_len, .ReadOnly),
+                .stack = Section.init(0xFFFFFFFF - Z_Z, Z_Z, .ReadWrite),
             };
         }
     };
@@ -75,32 +73,24 @@ pub const Memory = struct {
         var page_maps = std.ArrayList(PageMap).init(allocator);
         errdefer {
             for (page_maps.items) |page| {
-                if (page.data) |data| {
-                    allocator.free(data);
-                }
+                allocator.free(page.data);
             }
             page_maps.deinit();
         }
 
         // Add sections in order, but only allocate for sections with data
         inline for (.{ layout.code, layout.heap, layout.input, layout.stack }) |section| {
-            if (section.size > 0) {
-                var data: ?[]u8 = null;
-                if (section.data) |src| {
-                    data = try allocator.alloc(u8, section.size);
-                    @memcpy(data.?, src);
-                }
-                try page_maps.append(.{
-                    .address = section.address,
-                    .length = @intCast(section.size),
-                    .state = section.state,
-                    .data = data,
-                });
-            }
+            try page_maps.append(.{
+                .address = section.address,
+                .length = @intCast(section.size),
+                .state = section.state,
+                .data = &[_]u8{},
+            });
         }
 
         return Memory{
             .page_maps = try page_maps.toOwnedSlice(),
+            .layout = layout,
             .allocator = allocator,
         };
     }
@@ -111,14 +101,10 @@ pub const Memory = struct {
                 if (page.state != .ReadWrite) return error.WriteProtected;
 
                 // Lazy allocation on first write
-                if (page.data == null) {
-                    page.data = try self.allocator.alloc(u8, page.length);
-                    @memset(page.data.?, 0);
-                }
+                // TODO: figure out how to actually do this
 
                 const offset = address - page.address;
                 if (offset + data.len > page.length) return error.OutOfBounds;
-                @memcpy(page.data.?[offset..][0..data.len], data);
                 return;
             }
         }
@@ -134,11 +120,11 @@ pub const Memory = struct {
                 if (offset + size > page.length) return error.OutOfBounds;
 
                 // For unallocated pages, return zeros
-                if (page.data == null) {
-                    return &[_]u8{0} ** size;
+                if (page.data.len < offset + size) {
+                    return error.NonAllocatedMemoryAccess; // TODO: handle this
                 }
 
-                return page.data.?[offset .. offset + size];
+                return page.data[offset .. offset + size];
             }
         }
         return error.PageFault;
@@ -146,9 +132,7 @@ pub const Memory = struct {
 
     pub fn deinit(self: *Memory) void {
         for (self.page_maps) |page| {
-            if (page.data) |data| {
-                self.allocator.free(data);
-            }
+            self.allocator.free(page.data);
         }
         self.allocator.free(self.page_maps);
         self.* = undefined;
@@ -158,7 +142,8 @@ pub const Memory = struct {
         for (self.page_maps) |*page| {
             if (page.address == address) {
                 if (data.len > page.length) return error.OutOfBounds;
-                @memcpy(page.data[0..data.len], data);
+                std.debug.assert(page.data.len == 0); // Assert section is empty
+                page.data = try self.allocator.dupe(u8, data);
                 return;
             }
         }
