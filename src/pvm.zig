@@ -87,18 +87,25 @@ pub const PVM = struct {
         NonAllocatedMemoryAccess,
     };
 
-    pub fn executeStep(
-        context: *ExecutionContext,
-    ) Error!ExecutionStepResult {
+    pub fn executeStep(context: *ExecutionContext) Error!ExecutionStepResult {
+        const span = trace.span(.execute_step);
+        defer span.deinit();
+
         // Decode instruction
         const instruction = try context.decoder.decodeInstruction(context.pc);
+        span.debug("Executing instruction at PC: 0x{X:0>8}", .{context.pc});
+        span.trace("Decoded instruction: {}", .{instruction.instruction});
 
         // Check gas
         const gas_cost = getInstructionGasCost(instruction);
+        span.trace("Instruction gas cost: {d}", .{gas_cost});
+
         if (context.gas < gas_cost) {
+            span.debug("Out of gas - remaining: {d}, required: {d}", .{ context.gas, gas_cost });
             return .{ .terminal = .out_of_gas };
         }
         context.gas -= gas_cost;
+        span.trace("Remaining gas: {d}", .{context.gas});
 
         // Execute instruction
         return executeInstruction(context, instruction);
