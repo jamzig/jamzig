@@ -21,10 +21,10 @@ test "pvm:simple" {
         51, 9, 1, //
         40, 3, //
         0, //
-        121, 119, 255, //
+        149, 119, 255, //
         81, 7, 12, //
         100, 138, //
-        170, 152, 8, //
+        200, 152, 8, //
         100, 169, //
         40, 243, //
         100, 135, //
@@ -43,23 +43,21 @@ test "pvm:simple" {
     execution_context.registers[0] = 4294901760;
     execution_context.registers[7] = 9;
 
-    // std.debug.print("Program: {any}\n", .{pvm.program});
+    const status = try pvmlib.PVM.execute(&execution_context);
 
-    // const status = try pvmlib.PVM.execute(&execution_context);
-    //
-    // if (status != .halt) {
-    //     std.debug.print("Expected .halt got {any}\n", .{status});
-    // }
-    //
-    // // Check final register values
-    // const expected_registers = [_]u32{ 4294901760, 0, 0, 0, 0, 0, 0, 55, 0, 0, 34, 0, 0 };
-    //
-    // for (expected_registers, 0..) |expected, i| {
-    //     if (execution_context.registers[i] != expected) {
-    //         std.debug.print("Register r{} mismatch. Expected: {}, Got: {}\n", .{ i, expected, execution_context.registers[i] });
-    //         return error.TestFailed;
-    //     }
-    // }
+    if (status != .halt) {
+        std.debug.print("Expected .halt got {any}\n", .{status});
+    }
+
+    // Check final register values
+    const expected_registers = [_]u32{ 4294901760, 0, 0, 0, 0, 0, 0, 55, 0, 0, 34, 0, 0 };
+
+    for (expected_registers, 0..) |expected, i| {
+        if (execution_context.registers[i] != expected) {
+            std.debug.print("Register r{} mismatch. Expected: {}, Got: {}\n", .{ i, expected, execution_context.registers[i] });
+            return error.TestFailed;
+        }
+    }
 }
 
 fn printProgramDecompilation(allocator: std.mem.Allocator, path: []const u8) !void {
