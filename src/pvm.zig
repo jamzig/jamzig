@@ -539,7 +539,7 @@ pub const PVM = struct {
             .add_imm_32 => {
                 const args = i.args.TwoRegOneImm;
                 const result = context.registers[args.second_register_index] +% args.immediate;
-                context.registers[args.first_register_index] = @as(u32, @truncate(result));
+                context.registers[args.first_register_index] = signExtendToU64(u32, @truncate(result));
             },
 
             .and_imm => {
@@ -907,7 +907,13 @@ pub const PVM = struct {
                 } else {
                     const rega = @as(i64, @bitCast(context.registers[args.first_register_index]));
                     const regb = @as(i64, @bitCast(context.registers[args.second_register_index]));
-                    context.registers[args.third_register_index] = @bitCast(@divTrunc(rega, regb));
+
+                    // Check for the special overflow case
+                    if (rega == -0x8000000000000000 and regb == -1) {
+                        context.registers[args.third_register_index] = context.registers[args.first_register_index];
+                    } else {
+                        context.registers[args.third_register_index] = @bitCast(@divTrunc(rega, regb));
+                    }
                 }
             },
             .rem_u_64 => {
