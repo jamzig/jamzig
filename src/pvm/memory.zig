@@ -77,10 +77,28 @@ pub const Memory = struct {
         Violation: ViolationInfo,
     };
 
-    pub const Error = error{ PageFault, DivisionByZero, OutOfMemory };
+    pub const Error = error{ PageFault, DivisionByZero, OutOfMemory, MemoryLimitExceeded };
 
     pub fn isMemoryError(err: anyerror) bool {
         return err == Error.PageFault;
+    }
+
+    fn checkMemoryLimits(ro_size: usize, heap_size: usize, stack_size: u32) !void {
+        // Calculate sizes in terms of major zones (Z_Z)
+        const ro_zones = try std.math.divCeil(usize, Z_Z * ro_size, Z_Z);
+        const heap_zones = try std.math.divCeil(usize, Z_Z * heap_size, Z_Z);
+        const stack_zones = try std.math.divCeil(u32, Z_Z * stack_size, Z_Z);
+
+        // Check the memory layout equation: 5Z_Z + ⌈|o|/Z_Z⌉ + ⌈|w|/Z_Z⌉ + ⌈s/Z_Z⌉ + Z_I ≤ 2^32
+        var total: u64 = 5 * Z_Z; // Fixed zones
+        total += ro_zones;
+        total += heap_zones;
+        total += stack_zones;
+        total += Z_I; // Input data section
+
+        if (total > 0xFFFFFFFF) {
+            return Error.MemoryLimitExceeded;
+        }
     }
 
     pub fn init(
@@ -101,6 +119,9 @@ pub const Memory = struct {
         const heap_size = heap_size_in_pages * Z_P + try std.math.divCeil(usize, read_write.len * Z_P, Z_P);
         const input_size = try std.math.divCeil(usize, input.len * Z_P, Z_P);
         const stack_size = try std.math.divCeil(u32, Z_P * @as(u32, stack_size_in_bytes), Z_P);
+
+        // Verify memory limits
+        try checkMemoryLimits(ro_size, heap_size, stack_size);
 
         // Allocate memory pages for each section
         errdefer {
@@ -382,11 +403,16 @@ pub const Memory = struct {
         // Calculate allocation size rounded to page boundary
         const allocation_size = try std.math.divCeil(u32, @intCast(size), Z_P) * Z_P;
 
+        // Check if new allocation exceeds memory limits
+        const new_heap_size = self.heap.len + allocation_size;
+        try checkMemoryLimits(self.read_only.len, new_heap_size, @intCast(self.stack.len));
+
         // Increase the heap size, could move the memory location and initialize the
         // added buffer with 0s
         const old_heap_len = self.heap.len;
 
         self.heap = try self.allocator.realloc(self.heap, self.heap.len + allocation_size);
+
         @memset(self.heap[old_heap_len..], 0);
 
         // Allocation successful - return current address and advance
