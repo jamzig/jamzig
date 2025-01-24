@@ -2,7 +2,7 @@ const std = @import("std");
 
 const MAX_SIZE_IN_BYTES: usize = 8;
 
-fn buildBufferSignExtend(bytes: []const u8) [MAX_SIZE_IN_BYTES]u8 {
+fn signExtendBuffer(bytes: []const u8) [MAX_SIZE_IN_BYTES]u8 {
     var buffer: [MAX_SIZE_IN_BYTES]u8 = undefined;
     const n = @min(bytes.len, MAX_SIZE_IN_BYTES);
 
@@ -18,17 +18,17 @@ fn buildBufferSignExtend(bytes: []const u8) [MAX_SIZE_IN_BYTES]u8 {
 }
 
 pub fn decodeUnsigned(bytes: []const u8) u64 {
-    const buffer = buildBufferSignExtend(bytes);
+    const buffer = signExtendBuffer(bytes);
     return std.mem.readInt(u64, &buffer, .little);
 }
 
 pub fn decodeSigned(bytes: []const u8) i64 {
-    const buffer = buildBufferSignExtend(bytes);
+    const buffer = signExtendBuffer(bytes);
     return std.mem.readInt(i64, &buffer, .little);
 }
 
 pub fn decodeOffset(bytes: []const u8) i32 {
-    const buffer = buildBufferSignExtend(bytes);
+    const buffer = signExtendBuffer(bytes);
     return std.mem.readInt(i32, buffer[0..4], .little);
 }
 
