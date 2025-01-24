@@ -70,6 +70,44 @@ pub const ExecutionContext = struct {
         try self.host_calls.put(idx, handler);
     }
 
+    pub fn debugProgram(self: *const ExecutionContext, writer: anytype) !void {
+        try writer.writeAll("\x1b[1mPROGRAM DECOMPILATION\x1b[0m\n\n");
+
+        // Print register state
+        try writer.writeAll("Registers:\n");
+        for (self.registers, 0..) |reg, i| {
+            try writer.print("  r{d:<2} = {d:<16} (0x{x:0>16})\n", .{ i, reg, reg });
+        }
+        try writer.print("\nPC = {d} (0x{x:0>8})\n", .{ self.pc, self.pc });
+        try writer.print("Gas remaining: {d}\n\n", .{self.gas});
+
+        try writer.writeAll("Instructions:\n");
+        var iter = self.decoder.iterator();
+        while (try iter.next()) |entry| {
+            const is_current = entry.pc == self.pc;
+            try writer.print("{s}{d:0>4}: ", .{
+                if (is_current) "==> " else "    ",
+                entry.pc,
+            });
+
+            // Print raw bytes (up to 16)
+            const raw_bytes = entry.raw;
+            const max_bytes = @min(raw_bytes.len, 16);
+            for (raw_bytes[0..max_bytes]) |byte| {
+                try writer.print("{x:0>2} ", .{byte});
+            }
+
+            // Pad remaining space for alignment
+            var i: usize = max_bytes;
+            while (i < 16) : (i += 1) {
+                try writer.writeAll("   ");
+            }
+
+            try writer.print(" {}\n", .{entry.inst});
+        }
+        try writer.writeAll("\n");
+    }
+
     pub fn debugState(self: *const ExecutionContext, context_size_in_instructions: u32, writer: anytype) !void {
         const context_size = context_size_in_instructions * 8; // TODO: MaxInstructionSize=16
         const start_pc = if (self.pc >= context_size) self.pc - context_size else 0;

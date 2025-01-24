@@ -31,7 +31,7 @@ pub const PVMFixture = struct {
     };
 
     pub const Status = enum {
-        trap, // the execution ended with a trap (the `trap` instruction was
+        panic, // the execution ended with a trap (the `trap` instruction was
         // executed, the execution went "out of bounds", an invalid jump was made, or
         // an invalid instruction was executed)
         halt, // The program terminated normally.
@@ -94,48 +94,33 @@ pub const PVMFixture = struct {
     }
 };
 
-pub fn initPVMFromTestVector(allocator: Allocator, test_vector: *const PVMFixture) !PVM {
-    var pvm = try PVM.init(allocator, test_vector.program, test_vector.initial_gas);
-    errdefer pvm.deinit();
+pub fn initExecContextFromTestVector(allocator: Allocator, test_vector: *const PVMFixture) !PVM.ExecutionContext {
+    var exec_ctx = try PVM.ExecutionContext.initSimple(allocator, test_vector.program, 1024, 2, @intCast(test_vector.initial_gas));
+    errdefer exec_ctx.deinit(allocator);
 
     // Set initial registers
-    @memcpy(&pvm.registers, &test_vector.initial_regs);
-
-    // Set initial page map
-    try pvm.setPageMap(@as([]PVM.PageMapConfig, @ptrCast(test_vector.initial_page_map)));
+    @memcpy(&exec_ctx.registers, &test_vector.initial_regs);
 
     // Set initial memory
     for (test_vector.initial_memory) |chunk| {
-        try pvm.writeMemory(chunk.address, chunk.contents);
+        try exec_ctx.memory.write(chunk.address, chunk.contents);
     }
 
     // Set initial PC
-    pvm.pc = test_vector.initial_pc;
+    exec_ctx.pc = test_vector.initial_pc;
 
-    return pvm;
+    return exec_ctx;
 }
 
 pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path: []const u8) !bool {
-    var pvm = try initPVMFromTestVector(allocator, test_vector);
-    defer pvm.deinit();
+    var exec_ctx = try initExecContextFromTestVector(allocator, test_vector);
+    defer exec_ctx.deinit(allocator);
 
-    // Create buffers for debug output
-    var debug_registers_buffer = std.ArrayList(u8).init(allocator);
-    defer debug_registers_buffer.deinit();
-
-    // Write debug info to buffers
-    try pvm.debugWriteRegisters(debug_registers_buffer.writer());
-
-    const result: PVMFixture.Status = if (pvm.run())
-        .halt
-    else |_|
-        .trap;
-
+    const result = try PVM.execute(&exec_ctx);
     // Check if the execution status matches the expected status
     const status_matches: bool = switch (result) {
         .halt => test_vector.expected_status == .halt,
-        .trap => test_vector.expected_status == .trap,
-        else => false,
+        .err => test_vector.expected_status == .panic,
     };
 
     var test_passed = true;
@@ -145,10 +130,10 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path
     }
 
     // Check if registers match (General Purpose Registers R0-R12)
-    if (!std.mem.eql(u64, &pvm.registers, &test_vector.expected_regs)) {
+    if (!std.mem.eql(u64, &exec_ctx.registers, &test_vector.expected_regs)) {
         std.debug.print("Register mismatch (General Purpose Registers R0-R12):\n", .{});
         std.debug.print("        Input   |    Actual  |   Expected | Diff?\n", .{});
-        for (test_vector.initial_regs, pvm.registers, test_vector.expected_regs, 0..) |input, actual, expected, i| {
+        for (test_vector.initial_regs, exec_ctx.registers, test_vector.expected_regs, 0..) |input, actual, expected, i| {
             const mismatch = if (actual != expected) "*" else " ";
             std.debug.print("R{d:2}: {d:10} | {d:10} | {d:10} | {s}\n", .{ i, input, actual, expected, mismatch });
         }
@@ -156,14 +141,14 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path
     }
 
     // Check if PC matches
-    if (pvm.pc != test_vector.expected_pc) {
-        std.debug.print("PC mismatch: expected {}, got {}\n", .{ test_vector.expected_pc, pvm.pc });
+    if (exec_ctx.pc != test_vector.expected_pc) {
+        std.debug.print("PC mismatch: expected {}, got {}\n", .{ test_vector.expected_pc, exec_ctx.pc });
         test_passed = false;
     }
 
     // Check if memory matches
     for (test_vector.expected_memory) |expected_chunk| {
-        const actual_chunk = try pvm.readMemory(expected_chunk.address, expected_chunk.contents.len);
+        const actual_chunk = try exec_ctx.memory.read(expected_chunk.address, expected_chunk.contents.len);
         if (!std.mem.eql(u8, actual_chunk, expected_chunk.contents)) {
             std.debug.print("Memory mismatch at address 0x{X:0>8}:\n", .{expected_chunk.address});
             std.debug.print("Expected: ", .{});
@@ -180,8 +165,8 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path
     }
 
     // Check if gas matches
-    if (pvm.gas != test_vector.expected_gas) {
-        std.debug.print("Gas mismatch: expected {}, got {}\n", .{ test_vector.expected_gas, pvm.gas });
+    if (exec_ctx.gas != test_vector.expected_gas) {
+        std.debug.print("Gas mismatch: expected {}, got {}\n", .{ test_vector.expected_gas, exec_ctx.gas });
         test_passed = false;
     }
 
@@ -201,9 +186,8 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path
 
         std.debug.print("\nTest vector file '{s}' contents:\n{s}\n", .{ path, content });
 
-        std.debug.print("\nInitial register values:\n{s}", .{debug_registers_buffer.items});
         std.debug.print("\nDecompilation of the program:\n\n", .{});
-        pvm.decompilePrint();
+        try exec_ctx.debugProgram(std.io.getStdErr().writer());
     }
 
     return test_passed;

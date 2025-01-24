@@ -9,7 +9,7 @@ const BASE_PATH = fixtures.BASE_PATH;
 test "pvm:test_vectors" {
     const allocator = std.testing.allocator;
 
-    var ordered_files = try @import("tests/ordered_files.zig").getOrderedFiles(allocator, BASE_PATH);
+    var ordered_files = try @import("../tests/ordered_files.zig").getOrderedFiles(allocator, BASE_PATH);
     defer ordered_files.deinit();
 
     // Run tests for each file
