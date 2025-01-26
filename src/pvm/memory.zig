@@ -101,7 +101,57 @@ pub const Memory = struct {
         }
     }
 
-    pub fn init(
+    pub fn initWithCapacity(
+        allocator: Allocator,
+        read_only_size_in_pages: u32,
+        heap_size_in_pages: u32,
+        input_size_in_pages: u32,
+        stack_size_in_bytes: u24,
+    ) !Memory {
+        const span = trace.span(.memory_init);
+        defer span.deinit();
+
+        span.debug("Initializing memory system", .{});
+
+        // Calculate section sizes rounded to page boundaries
+        const ro_size = read_only_size_in_pages * Z_P;
+        const heap_size = heap_size_in_pages * Z_P;
+        const input_size = input_size_in_pages;
+        const stack_size = try std.math.divCeil(u32, Z_P * @as(u32, stack_size_in_bytes), Z_P);
+
+        // Verify memory limits
+        try checkMemoryLimits(ro_size, heap_size, stack_size);
+
+        // Allocate memory pages for each section
+        errdefer {
+            span.debug("Cleaning up after initialization error", .{});
+        }
+
+        // Allocate all sections with proper cleanup on failure
+        const read_only = try allocator.alloc(u8, ro_size);
+        errdefer allocator.free(read_only);
+
+        const heap = try allocator.alloc(u8, heap_size);
+        errdefer allocator.free(heap);
+
+        const input = try allocator.alloc(u8, input_size);
+        errdefer allocator.free(input);
+
+        const stack = try allocator.alloc(u8, stack_size);
+        errdefer allocator.free(stack);
+
+        return Memory{
+            .read_only = read_only,
+            .heap = heap,
+            .input = input,
+            .stack = stack,
+            .heap_base_address = try HEAP_BASE_ADDRESS(@intCast(read_only.len)),
+            .last_violation = null,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn initWithData(
         allocator: Allocator,
         read_only: []const u8,
         read_write: []const u8,
@@ -120,23 +170,7 @@ pub const Memory = struct {
         const input_size = try std.math.divCeil(usize, input.len * Z_P, Z_P);
         const stack_size = try std.math.divCeil(u32, Z_P * @as(u32, stack_size_in_bytes), Z_P);
 
-        // Verify memory limits
-        try checkMemoryLimits(ro_size, heap_size, stack_size);
-
-        // Allocate memory pages for each section
-        errdefer {
-            span.debug("Cleaning up after initialization error", .{});
-        }
-
-        var memory = Memory{
-            .read_only = try allocator.alloc(u8, ro_size),
-            .heap = try allocator.alloc(u8, heap_size),
-            .input = try allocator.alloc(u8, input_size),
-            .stack = try allocator.alloc(u8, stack_size),
-            .heap_base_address = try HEAP_BASE_ADDRESS(@intCast(read_only.len)),
-            .last_violation = null,
-            .allocator = allocator,
-        };
+        var memory = Memory.initWithCapacity(allocator, ro_size, heap_size, input_size, stack_size);
 
         // Initialize sections with provided data and zero remaining space
         @memcpy(memory.read_only[0..read_only.len], read_only);
@@ -434,6 +468,27 @@ pub const Memory = struct {
 
     pub fn getLastViolation(self: *const Memory) ?ViolationInfo {
         return self.last_violation;
+    }
+
+    // allocates the read_only segment
+    pub fn allocReadOnly(self: *Memory, size: usize) ![]u8 {
+        // Round up the size to the nearest page boundary
+        const aligned_size = try std.math.divCeil(usize, size * Z_P, Z_P);
+
+        // Allocate the memory
+        const memory = try self.allocator.alloc(u8, aligned_size);
+
+        // Initialize to zero
+        @memset(memory, 0);
+
+        // free previous
+        self.allocator.free(self.read_only);
+        self.read_only = memory;
+
+        // Update HEAP BASE ADDRESS
+        self.heap_base_address = HEAP_BASE_ADDRESS(self.read_only.len);
+
+        return memory;
     }
 
     pub fn deinit(self: *Memory) void {

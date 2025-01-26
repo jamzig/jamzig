@@ -81,6 +81,62 @@ pub const PVMFixture = struct {
         return fixture;
     }
 
+    pub fn initMemory(self: *const PVMFixture, allocator: Allocator) !PVM.Memory {
+        // Initialize a new memory instance
+
+        // Configure memory pages based on page map
+        var heap_pages: u32 = 0;
+        var read_only_pages: u32 = 0;
+        for (self.initial_page_map) |page| {
+            // Memory layout constants from PVM spec
+            const read_only_start = 0x10000;
+            const heap_start = 0x20000;
+
+            switch (page.address) {
+                read_only_start => {
+                    // Input memory space - already configured by default
+                    if (page.length % PVM.Memory.Z_P != 0) {
+                        return error.InvalidPageSize;
+                    }
+                    if (page.is_writable) {
+                        return error.MustBeReadOnly;
+                    }
+                    read_only_pages = page.length / PVM.Memory.Z_P;
+                },
+                heap_start => {
+                    // Input memory space - already configured by default
+                    if (page.length % PVM.Memory.Z_P != 0) {
+                        return error.InvalidPageSize;
+                    }
+                    if (!page.is_writable) {
+                        return error.MustBeWritable;
+                    }
+                    heap_pages = page.length / PVM.Memory.Z_P;
+                },
+                else => {
+                    // Unknown memory region requested
+                    return error.UnsupportedMemoryRegion;
+                },
+            }
+        }
+
+        var memory = try PVM.Memory.initWithCapacity(
+            allocator,
+            read_only_pages,
+            heap_pages,
+            0,
+            1024,
+        );
+        errdefer memory.deinit();
+
+        // Write initial memory contents
+        for (self.initial_memory) |chunk| {
+            try memory.write(chunk.address, chunk.contents);
+        }
+
+        return memory;
+    }
+
     pub fn deinit(self: *PVMFixture, allocator: Allocator) void {
         allocator.free(self.name);
         allocator.free(self.initial_page_map);
@@ -98,25 +154,16 @@ pub const PVMFixture = struct {
 };
 
 pub fn initExecContextFromTestVector(allocator: Allocator, test_vector: *const PVMFixture) !PVM.ExecutionContext {
-    var exec_ctx = try PVM.ExecutionContext.initSimple(allocator, test_vector.program, 0, 0, @intCast(test_vector.initial_gas));
+    var exec_ctx = try PVM.ExecutionContext.initWithMemory(
+        allocator,
+        test_vector.program,
+        try test_vector.initMemory(allocator),
+        @intCast(test_vector.initial_gas),
+    );
     errdefer exec_ctx.deinit(allocator);
 
     // Set initial registers
     @memcpy(&exec_ctx.registers, &test_vector.initial_regs);
-
-    // Set initial pages
-    for (test_vector.initial_page_map) |page| {
-        switch (page.address) {
-            0x20000 => {
-                const result = try exec_ctx.memory.sbrk(PVM.Memory.Z_P);
-                // Simple solution to allocate
-                std.debug.assert(result.address == page.address);
-            },
-            else => {
-                return error.UnknownInitialPageMapEntry;
-            },
-        }
-    }
 
     // Set initial memory
     for (test_vector.initial_memory) |chunk| {

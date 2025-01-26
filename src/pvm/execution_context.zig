@@ -25,10 +25,32 @@ pub const ExecutionContext = struct {
         host_call: u32,
     };
 
-    // simple initialization using only the program
     pub fn initSimple(
         allocator: Allocator,
         raw_program: []const u8,
+        stack_size_in_bytes: u24,
+        heap_size_in_pages: u16,
+        max_gas: u32,
+    ) !ExecutionContext {
+        return try initWithMemorySegments(
+            allocator,
+            raw_program,
+            &[_]u8{},
+            &[_]u8{},
+            &[_]u8{},
+            stack_size_in_bytes,
+            heap_size_in_pages,
+            max_gas,
+        );
+    }
+
+    // simple initialization using only the program
+    pub fn initWithMemorySegments(
+        allocator: Allocator,
+        raw_program: []const u8,
+        read_only: []const u8,
+        read_write: []const u8,
+        input: []const u8,
         stack_size_in_bytes: u24,
         heap_size_in_pages: u16,
         max_gas: u32,
@@ -37,16 +59,29 @@ pub const ExecutionContext = struct {
         var program = try Program.decode(allocator, raw_program);
         errdefer program.deinit(allocator);
 
-        // Configure memory layout using Memory's standard layout
+        // Configure memory layout with provided segments
         var memory = try Memory.init(
             allocator,
-            &[_]u8{},
-            &[_]u8{},
-            &[_]u8{},
+            read_only,
+            read_write,
+            input,
             stack_size_in_bytes,
             heap_size_in_pages,
         );
         errdefer memory.deinit();
+
+        return try initWithMemory(allocator, raw_program, memory, max_gas);
+    }
+
+    pub fn initWithMemory(
+        allocator: Allocator,
+        raw_program: []const u8,
+        memory: Memory,
+        max_gas: u32,
+    ) !ExecutionContext {
+        // Decode program
+        var program = try Program.decode(allocator, raw_program);
+        errdefer program.deinit(allocator);
 
         return ExecutionContext{
             .memory = memory,
