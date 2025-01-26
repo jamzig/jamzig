@@ -851,7 +851,7 @@ pub const PVM = struct {
                 } else if (rega == std.math.minInt(i32) and regb == -1) {
                     context.registers[args.third_register_index] = 0;
                 } else {
-                    context.registers[args.third_register_index] = signExtendToU64(i32, @mod(rega, regb));
+                    context.registers[args.third_register_index] = signExtendToU64(i32, @rem(rega, regb));
                 }
             },
 
@@ -933,14 +933,14 @@ pub const PVM = struct {
             },
             .rem_s_64 => {
                 const args = i.args.ThreeReg;
-                const rega: i32 = @bitCast(@as(u32, @truncate(context.registers[args.first_register_index])));
-                const regb: i32 = @bitCast(@as(u32, @truncate(context.registers[args.second_register_index])));
+                const rega: i64 = @bitCast(context.registers[args.first_register_index]);
+                const regb: i64 = @bitCast(context.registers[args.second_register_index]);
                 if (regb == 0) {
                     context.registers[args.third_register_index] = context.registers[args.first_register_index];
                 } else if (rega == std.math.minInt(i64) and regb == -1) {
                     context.registers[args.third_register_index] = 0;
                 } else {
-                    context.registers[args.third_register_index] = signExtendToU64(i32, @mod(rega, regb));
+                    context.registers[args.third_register_index] = @bitCast(@rem(rega, regb));
                 }
             },
             .shlo_l_64 => {
