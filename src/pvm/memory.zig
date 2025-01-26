@@ -108,26 +108,52 @@ pub const Memory = struct {
         input_size_in_pages: u32,
         stack_size_in_bytes: u24,
     ) !Memory {
+        // Create a top-level span for the entire initialization process
         const span = trace.span(.memory_init);
         defer span.deinit();
+        span.debug("Starting memory initialization", .{});
+        span.trace("Parameters: ro={d} pages, heap={d} pages, input={d} pages, stack={d} bytes", .{
+            read_only_size_in_pages,
+            heap_size_in_pages,
+            input_size_in_pages,
+            stack_size_in_bytes,
+        });
 
-        span.debug("Initializing memory system", .{});
+        // Calculate section sizes with detailed tracing
+        const size_span = span.child(.size_calculation);
+        defer size_span.deinit();
+        size_span.debug("Calculating memory section sizes", .{});
 
-        // Calculate section sizes rounded to page boundaries
         const ro_size = read_only_size_in_pages * Z_P;
         const heap_size = heap_size_in_pages * Z_P;
         const input_size = input_size_in_pages;
         const stack_size = try std.math.divCeil(u32, Z_P * @as(u32, stack_size_in_bytes), Z_P);
 
-        // Verify memory limits
+        size_span.trace("Calculated sizes - RO: 0x{X}, Heap: 0x{X}, Input: 0x{X}, Stack: 0x{X}", .{
+            ro_size,
+            heap_size,
+            input_size,
+            stack_size,
+        });
+
+        // Memory limit verification
         try checkMemoryLimits(ro_size, heap_size, stack_size);
 
-        // Allocate memory pages for each section
+        // Memory allocation with detailed error tracking
+        const alloc_span = span.child(.allocation);
+        defer alloc_span.deinit();
+        alloc_span.debug("Allocating memory sections", .{});
+
+        // Set up error cleanup
         errdefer {
-            span.debug("Cleaning up after initialization error", .{});
+            alloc_span.err("Memory allocation failed, cleaning up", .{});
         }
 
-        // Allocate all sections with proper cleanup on failure
+        // Allocate read-only section
+        const ro_span = alloc_span.child(.read_only);
+        defer ro_span.deinit();
+        ro_span.debug("Allocating read-only section", .{});
+
         const read_only = try allocator.alloc(u8, ro_size);
         errdefer allocator.free(read_only);
 
@@ -140,12 +166,57 @@ pub const Memory = struct {
         const stack = try allocator.alloc(u8, stack_size);
         errdefer allocator.free(stack);
 
+        // Calculate heap base address
+        const addr_span = span.child(.heap_base);
+        defer addr_span.deinit();
+        addr_span.debug("Calculating heap base address", .{});
+
+        const heap_base = try HEAP_BASE_ADDRESS(@intCast(read_only.len));
+        addr_span.trace("Heap base address: 0x{X}", .{heap_base});
+
+        // Create and return final Memory struct
+        span.debug("Memory initialization complete", .{});
+        span.trace(
+            \\Memory Layout:
+            \\
+            \\0xFFFFFFFF 
+            \\           +-----------------+
+            \\           |      ...        |
+            \\           +-----------------+
+            \\           |     Input       | 0x{X} - 0x{X} ({d} pages)
+            \\           +-----------------+
+            \\           |     Stack       | 0x{X} - 0x{X} ({d} pages)
+            \\           +-----------------+
+            \\           |      ...        |
+            \\           +-----------------+
+            \\           |     Heap        | 0x{X} - 0x{X} ({d} pages)
+            \\           +-----------------+
+            \\           |      ...        |
+            \\           +-----------------+
+            \\           |   Read Only     | 0x{X} - 0x{X} ({d} pages)
+            \\           +-----------------+
+            \\0x00000000
+        , .{
+            INPUT_ADDRESS,
+            INPUT_ADDRESS + input_size,
+            input_size / Z_P,
+            STACK_ADDRESS,
+            STACK_ADDRESS + stack_size,
+            stack_size / Z_P,
+            heap_base,
+            heap_base + heap_size,
+            heap_size / Z_P,
+            READ_ONLY_BASE_ADDRESS,
+            READ_ONLY_BASE_ADDRESS + ro_size,
+            ro_size / Z_P,
+        });
+
         return Memory{
             .read_only = read_only,
             .heap = heap,
             .input = input,
             .stack = stack,
-            .heap_base_address = try HEAP_BASE_ADDRESS(@intCast(read_only.len)),
+            .heap_base_address = heap_base,
             .last_violation = null,
             .allocator = allocator,
         };
