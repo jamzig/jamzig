@@ -140,7 +140,7 @@ pub const PVM = struct {
                     .out_of_gas => return .{ .err = .out_of_gas },
                     .page_fault => |addr| {
                         // FIXME: to make gas accounting work against test vectors
-                        context.pc -= 1;
+                        context.gas -= 1;
                         return .{ .err = .{ .page_fault = addr } };
                     },
                 },
