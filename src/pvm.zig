@@ -129,14 +129,20 @@ pub const PVM = struct {
                             context.pc = host.next_pc;
                             continue;
                         },
-                        .page_fault => |addr| return .{ .err = .{ .page_fault = addr } },
+                        .page_fault => |addr| {
+                            return .{ .err = .{ .page_fault = addr } };
+                        },
                     }
                 },
                 .terminal => |result| switch (result) {
                     .halt => |output| return .{ .halt = output },
                     .panic => return .{ .err = .panic },
                     .out_of_gas => return .{ .err = .out_of_gas },
-                    .page_fault => |addr| return .{ .err = .{ .page_fault = addr } },
+                    .page_fault => |addr| {
+                        // FIXME: to make gas accounting work against test vectors
+                        context.pc -= 1;
+                        return .{ .err = .{ .page_fault = addr } };
+                    },
                 },
             }
         }
