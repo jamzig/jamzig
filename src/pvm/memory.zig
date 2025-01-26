@@ -79,15 +79,25 @@ pub const Memory = struct {
 
     pub const Error = error{ PageFault, DivisionByZero, OutOfMemory, MemoryLimitExceeded };
 
+    /// Aligns size to the next page boundary (Z_P = 4096)
+    fn alignToPageSize(size: anytype) !@TypeOf(size) {
+        return try std.math.divCeil(@TypeOf(size), size, Z_P) * Z_P;
+    }
+
+    /// Aligns size to the next section boundary (Z_Z = 65536)
+    fn alignToSectionSize(size: anytype) !@TypeOf(size) {
+        return try std.math.divCeil(@TypeOf(size), size, Z_Z) * Z_Z;
+    }
+
     pub fn isMemoryError(err: anyerror) bool {
         return err == Error.PageFault;
     }
 
     fn checkMemoryLimits(ro_size: usize, heap_size: usize, stack_size: u32) !void {
         // Calculate sizes in terms of major zones (Z_Z)
-        const ro_zones = try std.math.divCeil(usize, Z_Z * ro_size, Z_Z);
-        const heap_zones = try std.math.divCeil(usize, Z_Z * heap_size, Z_Z);
-        const stack_zones = try std.math.divCeil(u32, Z_Z * stack_size, Z_Z);
+        const ro_zones = try alignToSectionSize(ro_size);
+        const heap_zones = try alignToSectionSize(heap_size);
+        const stack_zones = try alignToSectionSize(stack_size);
 
         // Check the memory layout equation: 5Z_Z + ⌈|o|/Z_Z⌉ + ⌈|w|/Z_Z⌉ + ⌈s/Z_Z⌉ + Z_I ≤ 2^32
         var total: u64 = 5 * Z_Z; // Fixed zones
@@ -126,8 +136,8 @@ pub const Memory = struct {
 
         const ro_size = read_only_size_in_pages * Z_P;
         const heap_size = heap_size_in_pages * Z_P;
-        const input_size = input_size_in_pages;
-        const stack_size = try std.math.divCeil(u32, Z_P * @as(u32, stack_size_in_bytes), Z_P);
+        const input_size = input_size_in_pages * Z_P;
+        const stack_size = try alignToPageSize(@as(u32, stack_size_in_bytes));
 
         size_span.trace("Calculated sizes - RO: 0x{X}, Heap: 0x{X}, Input: 0x{X}, Stack: 0x{X}", .{
             ro_size,
@@ -236,12 +246,17 @@ pub const Memory = struct {
         span.debug("Initializing memory system", .{});
 
         // Calculate section sizes rounded to page boundaries
-        const ro_size = try std.math.divCeil(usize, read_only.len * Z_P, Z_P);
-        const heap_size = heap_size_in_pages * Z_P + try std.math.divCeil(usize, read_write.len * Z_P, Z_P);
-        const input_size = try std.math.divCeil(usize, input.len * Z_P, Z_P);
-        const stack_size = try std.math.divCeil(u32, Z_P * @as(u32, stack_size_in_bytes), Z_P);
+        const ro_pages = try alignToPageSize(read_only.len) / Z_P;
+        const heap_pages = (heap_size_in_pages * Z_P + try alignToPageSize(read_write.len)) / Z_P;
+        const input_pages = try alignToPageSize(input.len) / Z_P;
 
-        var memory = Memory.initWithCapacity(allocator, ro_size, heap_size, input_size, stack_size);
+        var memory = Memory.initWithCapacity(
+            allocator,
+            ro_pages,
+            heap_pages,
+            input_pages,
+            stack_size_in_bytes,
+        );
 
         // Initialize sections with provided data and zero remaining space
         @memcpy(memory.read_only[0..read_only.len], read_only);
