@@ -82,56 +82,24 @@ pub const PVMFixture = struct {
     }
 
     pub fn initMemory(self: *const PVMFixture, allocator: Allocator) !PVM.Memory {
-        // Initialize a new memory instance
-
-        // Configure memory pages based on page map
-        var heap_pages: u32 = 0;
-        var read_only_pages: u32 = 0;
-        for (self.initial_page_map) |page| {
-            // Memory layout constants from PVM spec
-            const read_only_start = 0x10000;
-            const heap_start = 0x20000;
-
-            switch (page.address) {
-                read_only_start => {
-                    // Input memory space - already configured by default
-                    if (page.length % PVM.Memory.Z_P != 0) {
-                        return error.InvalidPageSize;
-                    }
-                    if (page.is_writable) {
-                        return error.MustBeReadOnly;
-                    }
-                    read_only_pages = page.length / PVM.Memory.Z_P;
-                },
-                heap_start => {
-                    // Input memory space - already configured by default
-                    if (page.length % PVM.Memory.Z_P != 0) {
-                        return error.InvalidPageSize;
-                    }
-                    if (!page.is_writable) {
-                        return error.MustBeWritable;
-                    }
-                    heap_pages = page.length / PVM.Memory.Z_P;
-                },
-                else => {
-                    // Unknown memory region requested
-                    return error.UnsupportedMemoryRegion;
-                },
-            }
-        }
-
-        var memory = try PVM.Memory.initWithCapacity(
-            allocator,
-            read_only_pages,
-            heap_pages,
-            0,
-            1024,
-        );
+        // Initialize a new memory instance with the required page maps
+        var memory = try PVM.Memory.initEmpty(allocator);
         errdefer memory.deinit();
+
+        // Map all pages according to the initial page map configuration
+        for (self.initial_page_map) |page| {
+            if (page.length != PVM.Memory.Z_P) {
+                return error.IncorrectPageLength;
+            }
+            try memory.allocatePageAt(
+                page.address,
+                if (page.is_writable) .ReadWrite else .ReadOnly,
+            );
+        }
 
         // Write initial memory contents
         for (self.initial_memory) |chunk| {
-            try memory.write(chunk.address, chunk.contents);
+            try memory.writeSlice(chunk.address, chunk.contents);
         }
 
         return memory;
@@ -167,7 +135,7 @@ pub fn initExecContextFromTestVector(allocator: Allocator, test_vector: *const P
 
     // Set initial memory
     for (test_vector.initial_memory) |chunk| {
-        try exec_ctx.memory.write(chunk.address, chunk.contents);
+        try exec_ctx.memory.writeSlice(chunk.address, chunk.contents);
     }
 
     // Set initial PC
@@ -229,7 +197,7 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path
 
     // Check if memory matches
     for (test_vector.expected_memory) |expected_chunk| {
-        const actual_chunk = try exec_ctx.memory.read(expected_chunk.address, expected_chunk.contents.len);
+        const actual_chunk = try exec_ctx.memory.readSlice(expected_chunk.address, expected_chunk.contents.len);
         if (!std.mem.eql(u8, actual_chunk, expected_chunk.contents)) {
             std.debug.print("Memory mismatch at address 0x{X:0>8}:\n", .{expected_chunk.address});
             std.debug.print("Expected: ", .{});

@@ -70,7 +70,10 @@ pub const ExecutionContext = struct {
         );
         errdefer memory.deinit();
 
-        return try initWithMemory(allocator, raw_program, memory, max_gas);
+        var exec_ctx = try initWithMemory(allocator, raw_program, memory, max_gas);
+        exec_ctx.initRegisters(input.len);
+
+        return exec_ctx;
     }
 
     pub const HALT_PC_VALUE: u32 = 0xFFFF0000;
@@ -85,22 +88,24 @@ pub const ExecutionContext = struct {
         errdefer program.deinit(allocator);
 
         // Initialize registers according to specification
-        var registers = [_]u64{0} ** 13;
-        registers[0] = HALT_PC_VALUE; // 0xFFFF0000 Halt PC value
-        registers[1] = Memory.STACK_BASE_ADDRESS; // Stack pointer
-        registers[7] = Memory.INPUT_ADDRESS;
-        registers[8] = memory.input.len;
-
         return ExecutionContext{
             .memory = memory,
             .decoder = Decoder.init(program.code, program.mask),
             .host_calls = std.AutoHashMap(u32, HostCallFn).init(allocator),
             .program = program,
-            .registers = registers,
+            .registers = [_]u64{0} ** 13,
             .pc = 0,
             .error_data = null,
             .gas = max_gas,
         };
+    }
+
+    /// Initialize the registers
+    pub fn initRegisters(self: *@This(), input_len: u32) void {
+        self.registers[0] = HALT_PC_VALUE; // 0xFFFF0000 Halt PC value
+        self.registers[1] = Memory.STACK_BASE_ADDRESS; // Stack pointer
+        self.registers[7] = Memory.INPUT_ADDRESS;
+        self.registers[8] = input_len;
     }
 
     pub fn deinit(self: *ExecutionContext, allocator: Allocator) void {

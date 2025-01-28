@@ -61,6 +61,8 @@ pub const PVM = struct {
         MemoryPageFault,
         MemoryAccessOutOfBounds,
         MemoryWriteProtected,
+        UnalignedAddress,
+        PageOverlap,
 
         // Jump/Branch related errors
         JumpAddressHalt,
@@ -181,25 +183,14 @@ pub const PVM = struct {
             // A.5.4 Instructions with Arguments of Two Immediates
             .store_imm_u8, .store_imm_u16, .store_imm_u32, .store_imm_u64 => {
                 const args = i.args.TwoImm;
-                var bytes: [8]u8 = undefined;
 
-                switch (i.instruction) {
-                    .store_imm_u8 => bytes[0] = @truncate(args.second_immediate),
-                    .store_imm_u16 => std.mem.writeInt(u16, bytes[0..2], @truncate(args.second_immediate), .little),
-                    .store_imm_u32 => std.mem.writeInt(u32, bytes[0..4], @truncate(args.second_immediate), .little),
-                    .store_imm_u64 => std.mem.writeInt(u64, bytes[0..8], args.second_immediate, .little),
+                (switch (i.instruction) {
+                    .store_imm_u8 => context.memory.writeInt(u8, @truncate(args.first_immediate), @truncate(args.second_immediate)),
+                    .store_imm_u16 => context.memory.writeInt(u16, @truncate(args.first_immediate), @truncate(args.second_immediate)),
+                    .store_imm_u32 => context.memory.writeInt(u32, @truncate(args.first_immediate), @truncate(args.second_immediate)),
+                    .store_imm_u64 => context.memory.writeInt(u64, @truncate(args.first_immediate), args.second_immediate),
                     else => unreachable,
-                }
-
-                const size: usize = switch (i.instruction) {
-                    .store_imm_u8 => 1,
-                    .store_imm_u16 => 2,
-                    .store_imm_u32 => 4,
-                    .store_imm_u64 => 8,
-                    else => unreachable,
-                };
-
-                context.memory.write(@truncate(args.first_immediate), bytes[0..size]) catch |err| {
+                }) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
@@ -237,53 +228,38 @@ pub const PVM = struct {
 
             .load_u8, .load_i8, .load_u16, .load_i16, .load_u32, .load_i32, .load_u64 => {
                 const args = i.args.OneRegOneImm;
-                const data = context.memory.read(@truncate(args.immediate), switch (i.instruction) {
-                    .load_u8, .load_i8 => 1,
-                    .load_u16, .load_i16 => 2,
-                    .load_u32, .load_i32 => 4,
-                    .load_u64 => 8,
-                    else => unreachable,
-                }) catch |err| {
-                    if (err == error.PageFault) {
-                        return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
-                    }
-                    return err;
-                };
+                const addr: u32 = @truncate(args.immediate);
+                const memory = &context.memory;
 
                 context.registers[args.register_index] = switch (i.instruction) {
-                    .load_u8 => data[0],
-                    .load_i8 => @bitCast(@as(i64, @intCast(@as(i8, @bitCast(data[0]))))),
-                    .load_u16 => std.mem.readInt(u16, data[0..2], .little),
-                    .load_i16 => @bitCast(@as(i64, @intCast(@as(i16, @bitCast(std.mem.readInt(u16, data[0..2], .little)))))),
-                    .load_u32 => std.mem.readInt(u32, data[0..4], .little),
-                    .load_i32 => @bitCast(@as(i64, @intCast(@as(i32, @bitCast(std.mem.readInt(u32, data[0..4], .little)))))),
-                    .load_u64 => std.mem.readInt(u64, data[0..8], .little),
+                    .load_u8 => memory.readIntAndSignExtend(u8, addr),
+                    .load_i8 => memory.readIntAndSignExtend(i8, addr),
+                    .load_u16 => memory.readIntAndSignExtend(u16, addr),
+                    .load_i16 => memory.readIntAndSignExtend(i16, addr),
+                    .load_u32 => memory.readIntAndSignExtend(u32, addr),
+                    .load_i32 => memory.readIntAndSignExtend(i32, addr),
+                    .load_u64 => memory.readInt(u64, addr),
                     else => unreachable,
+                } catch |err| {
+                    if (err == error.PageFault) {
+                        return .{ .terminal = .{ .page_fault = memory.last_violation.?.address } };
+                    }
+                    return err;
                 };
             },
 
             .store_u8, .store_u16, .store_u32, .store_u64 => {
                 const args = i.args.OneRegOneImm;
-                var bytes: [8]u8 = undefined;
+
                 const value = context.registers[args.register_index];
 
-                switch (i.instruction) {
-                    .store_u8 => bytes[0] = @truncate(value),
-                    .store_u16 => std.mem.writeInt(u16, bytes[0..2], @truncate(value), .little),
-                    .store_u32 => std.mem.writeInt(u32, bytes[0..4], @truncate(value), .little),
-                    .store_u64 => std.mem.writeInt(u64, bytes[0..8], value, .little),
+                (switch (i.instruction) {
+                    .store_u8 => context.memory.writeInt(u8, @truncate(args.immediate), @truncate(value)),
+                    .store_u16 => context.memory.writeInt(u16, @truncate(args.immediate), @truncate(value)),
+                    .store_u32 => context.memory.writeInt(u32, @truncate(args.immediate), @truncate(value)),
+                    .store_u64 => context.memory.writeInt(u64, @truncate(args.immediate), value),
                     else => unreachable,
-                }
-
-                const size: usize = switch (i.instruction) {
-                    .store_u8 => 1,
-                    .store_u16 => 2,
-                    .store_u32 => 4,
-                    .store_u64 => 8,
-                    else => unreachable,
-                };
-
-                context.memory.write(@truncate(args.immediate), bytes[0..size]) catch |err| {
+                }) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
@@ -294,26 +270,16 @@ pub const PVM = struct {
             // A.5.7 Instructions with Arguments of One Register & Two Immediates
             .store_imm_ind_u8, .store_imm_ind_u16, .store_imm_ind_u32, .store_imm_ind_u64 => {
                 const args = i.args.OneRegTwoImm;
-                var bytes: [8]u8 = undefined;
-
-                switch (i.instruction) {
-                    .store_imm_ind_u8 => bytes[0] = @truncate(args.second_immediate),
-                    .store_imm_ind_u16 => std.mem.writeInt(u16, bytes[0..2], @truncate(args.second_immediate), .little),
-                    .store_imm_ind_u32 => std.mem.writeInt(u32, bytes[0..4], @truncate(args.second_immediate), .little),
-                    .store_imm_ind_u64 => std.mem.writeInt(u64, bytes[0..8], args.second_immediate, .little),
-                    else => unreachable,
-                }
-
-                const size: usize = switch (i.instruction) {
-                    .store_imm_ind_u8 => 1,
-                    .store_imm_ind_u16 => 2,
-                    .store_imm_ind_u32 => 4,
-                    .store_imm_ind_u64 => 8,
-                    else => unreachable,
-                };
 
                 const addr = context.registers[args.register_index] +% args.first_immediate;
-                context.memory.write(@truncate(addr), bytes[0..size]) catch |err| {
+
+                (switch (i.instruction) {
+                    .store_imm_ind_u8 => context.memory.writeInt(u8, @truncate(addr), @truncate(args.second_immediate)),
+                    .store_imm_ind_u16 => context.memory.writeInt(u16, @truncate(addr), @truncate(args.second_immediate)),
+                    .store_imm_ind_u32 => context.memory.writeInt(u32, @truncate(addr), @truncate(args.second_immediate)),
+                    .store_imm_ind_u64 => context.memory.writeInt(u64, @truncate(addr), args.second_immediate),
+                    else => unreachable,
+                }) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
@@ -368,14 +334,9 @@ pub const PVM = struct {
                 const args = i.args.TwoReg;
                 const size = context.registers[args.second_register_index];
 
-                const result = context.memory.sbrk(size) catch |err| {
-                    return if (err == error.PageFault)
-                        .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } }
-                    else
-                        return err;
-                };
+                const result = try context.memory.allocate(@truncate(size));
 
-                context.registers[args.first_register_index] = result.address;
+                context.registers[args.first_register_index] = result;
             },
 
             // Bit counting and manipulation instructions
@@ -450,8 +411,8 @@ pub const PVM = struct {
             .store_ind_u8 => {
                 const args = i.args.TwoRegOneImm;
                 const addr = context.registers[args.second_register_index] +% args.immediate;
-                var bytes = [_]u8{@truncate(context.registers[args.first_register_index])};
-                context.memory.write(@truncate(addr), &bytes) catch |err| {
+                const value: u8 = @truncate(context.registers[args.first_register_index]);
+                context.memory.writeInt(u8, @truncate(addr), value) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
@@ -461,9 +422,7 @@ pub const PVM = struct {
             .store_ind_u16 => {
                 const args = i.args.TwoRegOneImm;
                 const addr = context.registers[args.second_register_index] +% args.immediate;
-                var bytes: [2]u8 = undefined;
-                std.mem.writeInt(u16, &bytes, @truncate(context.registers[args.first_register_index]), .little);
-                context.memory.write(@truncate(addr), &bytes) catch |err| {
+                context.memory.writeInt(u16, @truncate(addr), @truncate(context.registers[args.first_register_index])) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
@@ -473,9 +432,7 @@ pub const PVM = struct {
             .store_ind_u32 => {
                 const args = i.args.TwoRegOneImm;
                 const addr = context.registers[args.second_register_index] +% args.immediate;
-                var bytes: [4]u8 = undefined;
-                std.mem.writeInt(u32, &bytes, @truncate(context.registers[args.first_register_index]), .little);
-                context.memory.write(@truncate(addr), &bytes) catch |err| {
+                context.memory.writeInt(u32, @truncate(addr), @truncate(context.registers[args.first_register_index])) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
@@ -485,9 +442,7 @@ pub const PVM = struct {
             .store_ind_u64 => {
                 const args = i.args.TwoRegOneImm;
                 const addr = context.registers[args.second_register_index] +% args.immediate;
-                var bytes: [8]u8 = undefined;
-                std.mem.writeInt(u64, &bytes, context.registers[args.first_register_index], .little);
-                context.memory.write(@truncate(addr), &bytes) catch |err| {
+                context.memory.writeInt(u64, @truncate(addr), context.registers[args.first_register_index]) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
@@ -498,48 +453,35 @@ pub const PVM = struct {
             .load_ind_u8, .load_ind_u16, .load_ind_u32, .load_ind_u64 => {
                 const args = i.args.TwoRegOneImm;
                 const addr = context.registers[args.second_register_index] +% args.immediate;
-                const data = context.memory.read(@truncate(addr), switch (i.instruction) {
-                    .load_ind_u8 => 1,
-                    .load_ind_u16 => 2,
-                    .load_ind_u32 => 4,
-                    .load_ind_u64 => 8,
+
+                context.registers[args.first_register_index] = (switch (i.instruction) {
+                    .load_ind_u8 => context.memory.readIntAndSignExtend(u8, @truncate(addr)),
+                    .load_ind_u16 => context.memory.readIntAndSignExtend(u16, @truncate(addr)),
+                    .load_ind_u32 => context.memory.readIntAndSignExtend(u32, @truncate(addr)),
+                    .load_ind_u64 => context.memory.readInt(u64, @truncate(addr)),
                     else => unreachable,
                 }) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
                     return err;
-                };
-
-                context.registers[args.first_register_index] = switch (i.instruction) {
-                    .load_ind_u8 => data[0],
-                    .load_ind_u16 => std.mem.readInt(u16, data[0..2], .little),
-                    .load_ind_u32 => std.mem.readInt(u32, data[0..4], .little),
-                    .load_ind_u64 => std.mem.readInt(u64, data[0..8], .little),
-                    else => unreachable,
                 };
             },
 
             .load_ind_i8, .load_ind_i16, .load_ind_i32 => {
                 const args = i.args.TwoRegOneImm;
                 const addr = context.registers[args.second_register_index] +% args.immediate;
-                const data = context.memory.read(@truncate(addr), switch (i.instruction) {
-                    .load_ind_i8 => 1,
-                    .load_ind_i16 => 2,
-                    .load_ind_i32 => 4,
+
+                context.registers[args.first_register_index] = (switch (i.instruction) {
+                    .load_ind_i8 => context.memory.readIntAndSignExtend(i8, @truncate(addr)),
+                    .load_ind_i16 => context.memory.readIntAndSignExtend(i16, @truncate(addr)),
+                    .load_ind_i32 => context.memory.readIntAndSignExtend(i32, @truncate(addr)),
                     else => unreachable,
                 }) catch |err| {
                     if (err == error.PageFault) {
                         return .{ .terminal = .{ .page_fault = context.memory.last_violation.?.address } };
                     }
                     return err;
-                };
-
-                context.registers[args.first_register_index] = switch (i.instruction) {
-                    .load_ind_i8 => @bitCast(@as(i64, @intCast(@as(i8, @bitCast(data[0]))))),
-                    .load_ind_i16 => @bitCast(@as(i64, @intCast(std.mem.readInt(i16, data[0..2], .little)))),
-                    .load_ind_i32 => @bitCast(@as(i64, @intCast(@as(i32, @bitCast(std.mem.readInt(u32, data[0..4], .little)))))),
-                    else => unreachable,
                 };
             },
 
