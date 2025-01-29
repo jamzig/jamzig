@@ -528,22 +528,31 @@ pub const PVM = struct {
             .shlo_l_imm_32 => {
                 const args = i.args.TwoRegOneImm;
                 const shift = args.immediate & 0x1F;
-                const result = context.registers[args.second_register_index] << @intCast(shift);
-                context.registers[args.first_register_index] = @as(u32, @truncate(result));
+                // First truncate input to 32 bits then perform shift on 32-bit value
+
+                //The sequence of operations matters because slliw is specifically
+                //designed to maintain 32-bit behavior even on 64-bit machines. Any
+                //intermediate overflow should happen at the 32-bit level before
+                //sign extension.
+                const input = @as(u32, @truncate(context.registers[args.second_register_index]));
+                const shifted = input << @intCast(shift);
+                context.registers[args.first_register_index] = signExtendToU64(u32, shifted);
             },
 
             .shlo_r_imm_32 => {
                 const args = i.args.TwoRegOneImm;
                 const shift = args.immediate & 0x1F;
-                const result = context.registers[args.second_register_index] >> @intCast(shift);
-                context.registers[args.first_register_index] = @as(u32, @truncate(result));
+                const input = @as(u32, @truncate(context.registers[args.second_register_index]));
+                const shifted = input >> @intCast(shift);
+                context.registers[args.first_register_index] = signExtendToU64(u32, shifted);
             },
 
             .shar_r_imm_32 => {
                 const args = i.args.TwoRegOneImm;
                 const shift = args.immediate & 0x1F;
-                const value = @as(i32, @bitCast(@as(u32, @truncate(context.registers[args.second_register_index]))));
-                context.registers[args.first_register_index] = signExtendToU64(i32, value >> @intCast(shift));
+                const input = @as(i32, @bitCast(@as(u32, @truncate(context.registers[args.second_register_index]))));
+                const shifted = input >> @intCast(shift);
+                context.registers[args.first_register_index] = signExtendToU64(i32, shifted);
             },
 
             .neg_add_imm_32 => {
@@ -577,14 +586,19 @@ pub const PVM = struct {
             .shlo_r_imm_alt_32 => {
                 const args = i.args.TwoRegOneImm;
                 const shift = context.registers[args.second_register_index] & 0x1F;
-                const result = @as(u32, @truncate(args.immediate)) >> @intCast(shift);
-                context.registers[args.first_register_index] = result;
+                const input = @as(u32, @truncate(args.immediate));
+                const shifted = input >> @intCast(shift);
+                context.registers[args.first_register_index] = signExtendToU64(u32, shifted);
             },
             .shar_r_imm_alt_32 => {
                 const args = i.args.TwoRegOneImm;
                 const shift = context.registers[args.second_register_index] & 0x1F;
-                const value = @as(i32, @bitCast(@as(u32, @truncate(args.immediate))));
-                context.registers[args.first_register_index] = signExtendToU64(i32, value >> @intCast(shift));
+                // First truncate and convert to signed 32-bit
+                const input = @as(i32, @bitCast(@as(u32, @truncate(args.immediate))));
+                // Perform arithmetic shift at 32-bit level
+                const shifted = input >> @intCast(shift);
+                // Sign extend result back to 64 bits
+                context.registers[args.first_register_index] = signExtendToU64(i32, shifted);
             },
             .cmov_iz_imm => {
                 const args = i.args.TwoRegOneImm;
@@ -756,10 +770,10 @@ pub const PVM = struct {
                 if (context.registers[args.second_register_index] == 0) {
                     context.registers[args.third_register_index] = 0xFFFFFFFFFFFFFFFF;
                 } else {
-                    context.registers[args.third_register_index] = @divTrunc(
+                    context.registers[args.third_register_index] = signExtendToU64(u32, @divTrunc(
                         @as(u32, @truncate(context.registers[args.first_register_index])),
                         @as(u32, @truncate(context.registers[args.second_register_index])),
-                    );
+                    ));
                 }
             },
 
@@ -815,16 +829,18 @@ pub const PVM = struct {
                 const args = i.args.ThreeReg;
                 const mask: u64 = 0x1F;
                 const shift = context.registers[args.second_register_index] & mask;
-                const result = context.registers[args.first_register_index] >> @intCast(shift);
-                context.registers[args.third_register_index] = signExtendToU64(u32, @truncate(result));
+                const input = @as(u32, @truncate(context.registers[args.first_register_index]));
+                const shifted = input >> @intCast(shift);
+                context.registers[args.third_register_index] = signExtendToU64(u32, shifted);
             },
 
             .shar_r_32 => {
                 const args = i.args.ThreeReg;
                 const mask: u64 = 0x1F;
                 const shift = context.registers[args.second_register_index] & mask;
-                const value = @as(i32, @bitCast(@as(u32, @truncate(context.registers[args.first_register_index]))));
-                context.registers[args.third_register_index] = signExtendToU64(u32, @bitCast(value >> @intCast(shift)));
+                const input = @as(i32, @bitCast(@as(u32, @truncate(context.registers[args.first_register_index]))));
+                const shifted = input >> @intCast(shift);
+                context.registers[args.third_register_index] = signExtendToU64(i32, shifted);
             },
 
             // 64 bit variants
