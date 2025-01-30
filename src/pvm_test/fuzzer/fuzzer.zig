@@ -376,6 +376,9 @@ pub const PVMFuzzer = struct {
             }
         }.func);
 
+        // Limit the total amount of PVM (sbrk) allocations to 8 pages
+        exec_ctx.memory.heap_allocation_limit = 8;
+
         // Run program and collect results
         const execution_span = span.child(.execution);
         defer execution_span.deinit();
@@ -406,7 +409,7 @@ pub const PVMFuzzer = struct {
             // some random bitflips this can happen and it is expected.
 
             // Memory errors expected due to uncontrolled register additions
-            if (!will_mutate and !PVM.Memory.isMemoryError(err)) {
+            if (!will_mutate and !PVM.Memory.isMemoryError(err) and !(err == error.MemoryLimitExceeded)) {
                 std.debug.print("\n\nProgram execution failed (non-mutated) with error: {s}. Gas used: {d}\n\n", .{ @errorName(err), gas_used });
 
                 try exec_ctx.debugState(4, std.io.getStdErr().writer());
