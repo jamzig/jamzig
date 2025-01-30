@@ -87,7 +87,7 @@ pub const Memory = struct {
         }
 
         /// Returns the index of the page containing the given address using binary search
-        pub fn findPageIndex(self: *const PageTable, address: u32) ?usize {
+        pub fn findPageIndexOfAddress(self: *const PageTable, address: u32) ?usize {
             const page_addr = address & ~(@as(u32, Memory.Z_P) - 1);
 
             var left: usize = 0;
@@ -133,8 +133,8 @@ pub const Memory = struct {
             }
         };
 
-        pub fn findPage(self: *PageTable, address: u32) ?PageResult {
-            if (self.findPageIndex(address)) |index| {
+        pub fn findPageOfAddresss(self: *PageTable, address: u32) ?PageResult {
+            if (self.findPageIndexOfAddress(address)) |index| {
                 return PageResult{
                     .page = &self.pages.items[index],
                     .index = index,
@@ -143,11 +143,61 @@ pub const Memory = struct {
             }
             return null;
         }
+
+        const OrdPages = struct {
+            fn order(ctx: *const Page, item: *const Page) std.math.Order {
+                return std.math.order(ctx.address, item.address);
+            }
+        }.order;
+
+        // NOTE: untested
+        pub fn findPageByStartAddressOfPage(self: *const PageTable, address: u32) ?PageResult {
+            // do a binary search
+            const idx = std.sort.binarySearch(
+                *const Page,
+                self.pages,
+                address,
+                OrdPages,
+            ) orelse {
+                return null;
+            };
+
+            return PageResult{
+                .page = self.pages[idx],
+                .index = idx,
+                .page_table = self,
+            };
+        }
+
+        // NOTE: untestested
+        fn calculateSectionSizeInPages(self: *PageTable, section_start_address: u32) !u32 {
+            const span = trace.span(.calculate_heap_size);
+            defer span.deinit();
+
+            var current_page = self.findPageByStartAddressOfPage(section_start_address) orelse {
+                return error.CouldNotFindStartAddressOfSectionInPages;
+            };
+
+            var page_count = 1;
+            while (current_page.nextContiguous()) |next_page| : (page_count += 1) {
+                current_page = next_page;
+            }
+
+            return page_count;
+        }
     };
 
     page_table: PageTable,
     last_violation: ?ViolationInfo,
     allocator: Allocator,
+    input_size_in_bytes: u32,
+    read_only_size_in_pages: u16,
+    stack_size_in_pages: u16,
+    heap_size_in_pages: u16,
+
+    // Artificial limit on how many allocations we allow
+    // mainly for the fuzzer, this is not in the spec
+    heap_allocation_limit: ?u16 = null,
 
     // Memory layout constants
     pub const Z_Z: u32 = 0x10000; // 2^16 = 65,536 - Major zone size
@@ -156,13 +206,13 @@ pub const Memory = struct {
 
     // Fixed section base addresses
     pub const READ_ONLY_BASE_ADDRESS: u32 = Z_Z;
-    pub fn HEAP_BASE_ADDRESS(read_only_size: u32) !u32 {
-        return 2 * Z_Z + try alignToSectionSize(read_only_size);
+    pub fn HEAP_BASE_ADDRESS(read_only_size_in_bytes: usize) !u32 {
+        return 2 * Z_Z + @as(u32, @intCast(try alignToSectionSize(read_only_size_in_bytes)));
     }
     pub const INPUT_ADDRESS: u32 = 0xFFFFFFFF - Z_Z - Z_I;
     pub const STACK_BASE_ADDRESS: u32 = 0xFFFFFFFF - (2 * Z_Z) - Z_I;
-    pub fn STACK_BOTTOM_ADDRESS(stack_size: anytype) u32 {
-        return STACK_BASE_ADDRESS - @as(u32, @intCast(alignToPageSize(stack_size) catch 0));
+    pub fn STACK_BOTTOM_ADDRESS(stack_size_in_pages: u16) !u32 {
+        return STACK_BASE_ADDRESS - @as(u32, @intCast(try alignToPageSize(stack_size_in_pages)));
     }
 
     pub const ViolationType = enum {
@@ -188,24 +238,34 @@ pub const Memory = struct {
     };
 
     /// Aligns size to the next page boundary (Z_P = 4096)
-    fn alignToPageSize(size: anytype) !@TypeOf(size) {
-        return try std.math.divCeil(@TypeOf(size), size, Z_P) * Z_P;
+    fn alignToPageSize(size_in_bytes: usize) !u32 {
+        return try sizeInBytesToPages(size_in_bytes) * Z_P;
+    }
+
+    /// Does a bytes to pages
+    fn sizeInBytesToPages(size: usize) !u16 {
+        return @intCast(try std.math.divCeil(@TypeOf(size), size, Z_P));
+    }
+
+    /// does a pages to bytes
+    fn pagesToSizeInBytes(pages: u16) usize {
+        return pages * Z_P;
     }
 
     /// Aligns size to the next section boundary (Z_Z = 65536)
-    fn alignToSectionSize(size: anytype) !@TypeOf(size) {
-        return try std.math.divCeil(@TypeOf(size), size, Z_Z) * Z_Z;
+    fn alignToSectionSize(size_in_bytes: usize) !u32 {
+        return @as(u32, @intCast(try std.math.divCeil(@TypeOf(size_in_bytes), size_in_bytes, Z_Z))) * Z_Z;
     }
 
     pub fn isMemoryError(err: anyerror) bool {
         return err == Error.PageFault;
     }
 
-    fn checkMemoryLimits(ro_size: usize, heap_size: usize, stack_size: u32) !void {
+    fn checkMemoryLimits(ro_size_in_bytes: usize, heap_size_in_bytes: usize, stack_size_in_bytes: usize) !void {
         // Calculate sizes in terms of major zones (Z_Z)
-        const ro_zones = try alignToSectionSize(ro_size);
-        const heap_zones = try alignToSectionSize(heap_size);
-        const stack_zones = try alignToSectionSize(stack_size);
+        const ro_zones = try alignToSectionSize(ro_size_in_bytes);
+        const heap_zones = try alignToSectionSize(heap_size_in_bytes);
+        const stack_zones = try alignToSectionSize(stack_size_in_bytes);
 
         // Check the memory layout equation: 5Z_Z + ⌈|o|/Z_Z⌉ + ⌈|w|/Z_Z⌉ + ⌈s/Z_Z⌉ + Z_I ≤ 2^32
         var total: u64 = 5 * Z_Z; // Fixed zones
@@ -228,15 +288,19 @@ pub const Memory = struct {
             .page_table = page_table,
             .last_violation = null,
             .allocator = allocator,
+            .input_size_in_bytes = 0,
+            .read_only_size_in_pages = 0,
+            .stack_size_in_pages = 0,
+            .heap_size_in_pages = 0,
         };
     }
 
     pub fn initWithCapacity(
         allocator: Allocator,
-        read_only_size_in_pages: u32,
-        heap_size_in_pages: u32,
-        input_size_in_pages: u32,
-        stack_size_in_bytes: u24,
+        read_only_size_in_bytes: usize,
+        heap_size_in_pages: u16,
+        input_size_in_bytes: usize,
+        stack_size_in_bytes: usize,
     ) !Memory {
         const span = trace.span(.memory_init);
         defer span.deinit();
@@ -247,29 +311,43 @@ pub const Memory = struct {
         errdefer page_table.deinit();
 
         // Calculate section sizes
-        const ro_size = read_only_size_in_pages * Z_P;
-        const heap_size = heap_size_in_pages * Z_P;
-        // const input_size = input_size_in_pages * Z_P;
-        const stack_size = try alignToPageSize(@as(u32, stack_size_in_bytes));
+        const read_only_aligned_size_in_bytes = try alignToPageSize(read_only_size_in_bytes);
+        const heap_aligned_size_in_bytes = @as(usize, heap_size_in_pages * Z_P);
+        const stack_aligned_size_in_bytes = try alignToPageSize(stack_size_in_bytes);
 
         // Verify memory limits
-        try checkMemoryLimits(ro_size, heap_size, stack_size);
+        try checkMemoryLimits(
+            read_only_aligned_size_in_bytes,
+            heap_aligned_size_in_bytes,
+            stack_aligned_size_in_bytes,
+        );
 
-        // Allocate pages for each section
-        try page_table.allocatePages(READ_ONLY_BASE_ADDRESS, read_only_size_in_pages, .ReadOnly);
+        // Allocate the ReadOnly section
+        try page_table.allocatePages(
+            READ_ONLY_BASE_ADDRESS,
+            try sizeInBytesToPages(read_only_size_in_bytes),
+            .ReadOnly,
+        );
 
-        const heap_base = try HEAP_BASE_ADDRESS(@intCast(ro_size));
+        // Allocate the Heap section
+        const heap_base = try HEAP_BASE_ADDRESS(read_only_aligned_size_in_bytes);
         try page_table.allocatePages(heap_base, heap_size_in_pages, .ReadWrite);
 
-        try page_table.allocatePages(INPUT_ADDRESS, input_size_in_pages, .ReadOnly);
+        // Allocate the Input section
+        try page_table.allocatePages(INPUT_ADDRESS, try sizeInBytesToPages(input_size_in_bytes), .ReadOnly);
 
-        const stack_pages = try std.math.divCeil(u32, stack_size, Z_P);
-        try page_table.allocatePages(STACK_BOTTOM_ADDRESS(stack_size), stack_pages, .ReadWrite);
+        // Allocate the Stack section
+        const stack_size_in_pages = try sizeInBytesToPages(stack_aligned_size_in_bytes);
+        try page_table.allocatePages(try STACK_BOTTOM_ADDRESS(stack_size_in_pages), stack_size_in_pages, .ReadWrite);
 
         return Memory{
             .page_table = page_table,
             .last_violation = null,
             .allocator = allocator,
+            .input_size_in_bytes = @as(u32, @intCast(input_size_in_bytes)),
+            .read_only_size_in_pages = try sizeInBytesToPages(read_only_size_in_bytes),
+            .stack_size_in_pages = stack_size_in_pages,
+            .heap_size_in_pages = heap_size_in_pages,
         };
     }
 
@@ -287,16 +365,15 @@ pub const Memory = struct {
         span.debug("Initializing memory system with data", .{});
 
         // Calculate section sizes rounded to page boundaries
-        const ro_pages = try alignToPageSize(@as(u32, @intCast(read_only.len))) / Z_P;
-        const heap_pages = @as(u32, @intCast(heap_size_in_pages * Z_P + try alignToPageSize(read_write.len))) / Z_P;
-        const input_pages = @as(u32, @intCast(try alignToPageSize(input.len) / Z_P));
+        const ro_pages: u16 = @intCast(try sizeInBytesToPages(read_only.len));
+        const heap_pages: u16 = @intCast(heap_size_in_pages + try sizeInBytesToPages(read_write.len));
 
         // Initialize the memory system with the calculated capacities
         var memory = try Memory.initWithCapacity(
             allocator,
             ro_pages,
             heap_pages,
-            input_pages,
+            input.len,
             stack_size_in_bytes,
         );
         errdefer memory.deinit();
@@ -343,15 +420,27 @@ pub const Memory = struct {
         try self.page_table.allocatePages(address, num_pages, flags);
     }
 
-    pub fn allocate(self: *Memory, size: u32) !u32 {
+    pub fn allocate(self: *Memory, memory_requested: u32) !u32 {
         const span = trace.span(.memory_allocate);
         defer span.deinit();
 
-        // TODO: > HEAP_BASE_ADDRESS
+        if (self.heap_allocation_limit) |limit| {
+            if (self.heap_size_in_pages + try sizeInBytesToPages(memory_requested) > limit)
+                return error.MemoryLimitExceeded;
+        }
 
         // Calculate required pages, rounding up to nearest page size
-        const aligned_size = try alignToPageSize(size);
+        const aligned_size = try alignToPageSize(memory_requested);
         const pages_needed = aligned_size / Z_P;
+
+        // Check if the size is within bounds
+        try checkMemoryLimits(
+            pagesToSizeInBytes(self.read_only_size_in_pages),
+            pagesToSizeInBytes(self.heap_size_in_pages),
+            pagesToSizeInBytes(self.stack_size_in_pages),
+        );
+
+        // TODO: > HEAP_BASE_ADDRESS should start at start of heap page section
 
         // Find the last ReadWrite page (heap section)
         var last_rw_page: ?PageTable.PageResult = null;
@@ -372,8 +461,18 @@ pub const Memory = struct {
         // Calculate new allocation address (immediately after last ReadWrite page)
         const new_address = last_page.page.address + Z_P;
 
+        // Special case when size is 0, we are nog going to allocate
+        // anything, we will return the address of the next page
+        if (memory_requested == 0) {
+            return new_address;
+        }
+
         // Allocate the new pages
         try self.page_table.allocatePages(new_address, pages_needed, .ReadWrite);
+
+        // Do some bookkeeping
+        self.heap_size_in_pages += 1;
+
         return new_address;
     }
 
@@ -399,7 +498,7 @@ pub const Memory = struct {
         comptime std.debug.assert(size <= 8); // Only handle up to u64
 
         // Get first page and offset
-        const first_page = self.page_table.findPage(address) orelse {
+        const first_page = self.page_table.findPageOfAddresss(address) orelse {
             self.last_violation = ViolationInfo{
                 .violation_type = .NonAllocated,
                 .address = address,
@@ -444,7 +543,7 @@ pub const Memory = struct {
         defer span.deinit();
 
         // Find the page containing the address
-        const page = self.page_table.findPage(address) orelse {
+        const page = self.page_table.findPageOfAddresss(address) orelse {
             self.last_violation = ViolationInfo{
                 .violation_type = .NonAllocated,
                 .address = address,
@@ -478,7 +577,7 @@ pub const Memory = struct {
 
         while (remaining.len > 0) {
             // Find the page containing the current address
-            const page_result = self.page_table.findPage(current_addr) orelse {
+            const page_result = self.page_table.findPageOfAddresss(current_addr) orelse {
                 return Error.PageFault;
             };
 
@@ -513,7 +612,7 @@ pub const Memory = struct {
         comptime std.debug.assert(@typeInfo(T) == .int);
 
         // First verify all required pages exist
-        const page = self.page_table.findPage(address) orelse {
+        const page = self.page_table.findPageOfAddresss(address) orelse {
             self.last_violation = ViolationInfo{
                 .violation_type = .NonAllocated,
                 .address = address,
