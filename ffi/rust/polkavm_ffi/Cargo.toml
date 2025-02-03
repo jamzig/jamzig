@@ -3,6 +3,9 @@ name = "polkavm-ffi"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["staticlib"]
+
 [dependencies]
 polkavm = { git = "https://github.com/paritytech/polkavm", package = "polkavm" }
 polkavm-common = { git = "https://github.com/paritytech/polkavm", package = "polkavm-common" }

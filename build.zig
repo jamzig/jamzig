@@ -198,6 +198,7 @@ pub fn buildRustDependencies(b: *std.Build, target: std.Build.ResolvedTarget) !R
     // Build the rust libraries
     try buildRustDep(b, &deps, "crypto", target);
     try buildRustDep(b, &deps, "reed_solomon", target);
+    try buildRustDep(b, &deps, "polkavm_ffi", target);
 
     return deps;
 }
