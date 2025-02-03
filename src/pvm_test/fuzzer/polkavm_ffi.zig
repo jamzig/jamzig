@@ -1,5 +1,10 @@
 const std = @import("std");
 
+const GeneratedProgram = @import("program_generator.zig").GeneratedProgram;
+const ProgramGenerator = @import("program_generator.zig").ProgramGenerator;
+const ProgramBuilder = @import("polkavm_ffi/program_builder.zig").ProgramBuilder;
+const SeedGenerator = @import("seed.zig").SeedGenerator;
+
 pub const MemoryPage = extern struct {
     address: u32,
     data: [*]u8,
@@ -65,6 +70,85 @@ pub fn executePvm(
             gas_limit,
         ),
     };
+}
+
+pub fn buildProgramBytes(
+    allocator: std.mem.Allocator,
+    program: GeneratedProgram,
+) ![]u8 {
+    var builder = ProgramBuilder.init(
+        allocator,
+        program.code,
+        program.mask,
+        std.mem.sliceAsBytes(program.jump_table),
+        &.{}, // ro_data
+        &.{}, // rw_data
+        .{}, // default config
+    );
+
+    return builder.build();
+}
+
+/// Wrapper takes a GeneratedProgram converts it and executes it
+pub fn executePvmWithGeneratedProgram(
+    allocator: std.mem.Allocator,
+    program: GeneratedProgram,
+    pages: []const MemoryPage,
+    gas_limit: u64,
+) !ExecutionResult {
+    const program_bytes = try buildProgramBytes(allocator, program);
+    defer allocator.free(program_bytes);
+
+    return executePvm(program_bytes, pages, gas_limit);
+}
+
+test "generate and execute multiple programs" {
+    const allocator = std.testing.allocator;
+
+    // Setup memory page for program execution
+    const memory = try allocator.alloc(u8, 0x1000);
+    defer allocator.free(memory);
+
+    const page = MemoryPage{
+        .address = 0x20000,
+        .data = memory.ptr,
+        .size = 0x1000,
+        .is_writable = true,
+    };
+
+    // Initialize program generator
+    var seed_gen = SeedGenerator.init(42);
+    var generator = try ProgramGenerator.init(allocator, &seed_gen);
+    defer generator.deinit();
+
+    // Test different program sizes
+    const sizes = [_]u32{ 16, 32, 64, 128 };
+
+    for (sizes) |size| {
+        // Generate program
+        var program = try generator.generate(size);
+        defer program.deinit(allocator);
+
+        // Execute program
+        const result = try executePvmWithGeneratedProgram(
+            allocator,
+            program,
+            &[_]MemoryPage{page},
+            10000, // gas limit
+        );
+        defer result.deinit();
+
+        std.debug.print("{}\n", result);
+
+        // Verify execution completed
+        try std.testing.expect(result.raw.status != .UnknownError);
+        // try std.testing.expect(result.raw.page_count > 0);
+
+        // Verify memory pages are accessible
+        // const pages = result.getPages();
+        // try std.testing.expect(pages.len > 0);
+        // try std.testing.expectEqual(pages[0].size, 0x1000);
+    }
 }
 
 test "basic execution" {
