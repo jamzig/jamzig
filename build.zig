@@ -193,7 +193,7 @@ fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Bu
     };
 
     // Update target path to include the specific architecture
-    const target_path = try std.fmt.allocPrint(b.allocator, "ffi/rust/{s}/target/{s}/release", .{ name, target_triple });
+    const target_path = try std.fmt.allocPrint(b.allocator, "ffi/rust/{s}/target/{s}/{s}", .{ name, target_triple, if (optimize_mode == .Debug) "debug" else "release" });
     defer b.allocator.free(target_path);
 
     const lib_name = if (std.mem.eql(u8, name, "crypto"))

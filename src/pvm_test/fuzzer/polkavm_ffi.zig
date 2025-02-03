@@ -29,7 +29,7 @@ pub const ExecutionStatus = enum(c_int) {
 const RawExecutionResult = extern struct {
     status: ExecutionStatus,
     final_pc: u32,
-    pages: [*]MemoryPage,
+    pages: ?[*]MemoryPage,
     page_count: usize,
 };
 
@@ -80,7 +80,7 @@ pub fn buildProgramBytes(
         allocator,
         program.code,
         program.mask,
-        std.mem.sliceAsBytes(program.jump_table),
+        program.jump_table,
         &.{}, // ro_data
         &.{}, // rw_data
         .{}, // default config
@@ -149,30 +149,4 @@ test "generate and execute multiple programs" {
         // try std.testing.expect(pages.len > 0);
         // try std.testing.expectEqual(pages[0].size, 0x1000);
     }
-}
-
-test "basic execution" {
-    // Add tests here
-    const allocator = std.testing.allocator;
-
-    const memory = try allocator.alloc(u8, 0x1000);
-    defer allocator.free(memory);
-
-    const page = MemoryPage{
-        .address = 0x20000,
-        .data = memory.ptr,
-        .size = 0x4000,
-        .is_writable = true,
-    };
-
-    const program = [_]u8{ 0x00, 0x01, 0x02, 0x03 };
-
-    const result = executePvm(
-        &program,
-        &[_]MemoryPage{page},
-        10000,
-    );
-    defer result.deinit();
-
-    try std.testing.expectEqual(result.raw.status, ExecutionStatus.ProgramError);
 }

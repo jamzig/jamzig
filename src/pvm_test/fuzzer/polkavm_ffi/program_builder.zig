@@ -5,7 +5,7 @@ pub const ProgramBuilder = struct {
     ro_data: []const u8,
     rw_data: []const u8,
     code: []const u8,
-    jump_table: []const u8,
+    jump_table: []const u32,
     bitmask: []const u8,
     exports: []const u8,
     import_offsets: []const u8,
@@ -17,15 +17,44 @@ pub const ProgramBuilder = struct {
     stack_size: u32,
 
     pub const Config = struct {
-        is_64_bit: bool = false,
+        is_64_bit: bool = true,
         stack_size: u32 = 4096,
+    };
+
+    // A helper struct to write sections of data with proper length prefixing
+    pub const SectionWriter = struct {
+        buffer: std.ArrayList(u8),
+
+        /// Initialize a new section with the given section index
+        pub fn init(allocator: std.mem.Allocator) !SectionWriter {
+            return .{
+                .buffer = std.ArrayList(u8).init(allocator),
+            };
+        }
+
+        /// Get the writer interface for writing section data
+        pub fn writer(self: *SectionWriter) std.ArrayList(u8).Writer {
+            return self.buffer.writer();
+        }
+
+        /// Finish writing the section by calculating and writing the actual length
+        pub fn finish(self: *SectionWriter, section_idx: u8, wrtr: anytype) !void {
+            try wrtr.writeByte(section_idx);
+            try writeVarInt(wrtr, @intCast(self.buffer.items.len));
+            _ = try wrtr.write(self.buffer.items);
+        }
+
+        pub fn deinit(self: *SectionWriter) void {
+            self.buffer.deinit();
+            self.* = undefined;
+        }
     };
 
     pub fn init(
         allocator: std.mem.Allocator,
         code: []const u8,
         bitmask: []const u8,
-        jump_table: []const u8,
+        jump_table: []const u32,
         ro_data: []const u8,
         rw_data: []const u8,
         config: Config,
@@ -62,15 +91,16 @@ pub const ProgramBuilder = struct {
         const len_pos = blob.items.len;
         try blob.appendSlice(&[_]u8{0} ** 8);
 
-        // Memory config section
-        try blob.append(1); // SECTION_MEMORY_CONFIG
-        const config_start = blob.items.len;
-        try writeVarInt(blob.writer(), 0); // Section length placeholder
-        try writeVarInt(blob.writer(), @intCast(self.ro_data.len));
-        try writeVarInt(blob.writer(), @intCast(self.rw_data.len));
-        try writeVarInt(blob.writer(), self.stack_size);
-        const config_len = blob.items.len - config_start - 1;
-        blob.items[config_start] = @intCast(config_len);
+        { // Memory Config
+            var memory_config = try SectionWriter.init(self.allocator);
+            defer memory_config.deinit();
+
+            try writeVarInt(memory_config.writer(), @intCast(self.ro_data.len));
+            try writeVarInt(memory_config.writer(), @intCast(self.rw_data.len));
+            try writeVarInt(memory_config.writer(), self.stack_size);
+
+            try memory_config.finish(1, blob.writer());
+        }
 
         // RO data section
         try blob.append(2); // SECTION_RO_DATA
@@ -83,70 +113,44 @@ pub const ProgramBuilder = struct {
         try blob.appendSlice(self.rw_data);
 
         // Import section (if any imports exist)
-        if (self.import_offsets.len > 0 or self.import_symbols.len > 0) {
-            try blob.append(4); // SECTION_IMPORTS
-            const import_count = @divExact(self.import_offsets.len, 4);
-            const section_size = 1 + // varint size for import count
-                self.import_offsets.len +
-                self.import_symbols.len;
-            try writeVarInt(blob.writer(), @intCast(section_size));
-            try writeVarInt(blob.writer(), @intCast(import_count));
-            try blob.appendSlice(self.import_offsets);
-            try blob.appendSlice(self.import_symbols);
-        }
+        // We ignore these nothing written here
 
         // Export section (if any)
-        if (self.exports.len > 0) {
-            try blob.append(5); // SECTION_EXPORTS
-            try writeVarInt(blob.writer(), @intCast(self.exports.len));
-            try blob.appendSlice(self.exports);
-        }
+        // We ignore these
 
         // Code and jump table section
-        try blob.append(6); // SECTION_CODE_AND_JUMP_TABLE
-        const jump_entries = @divExact(self.jump_table.len, 4);
-        const code_section_size = 1 + // jump table entry count
-            1 + // jump table entry size
-            std.math.log2_int_ceil(u32, 65536) + // code length
-            self.jump_table.len +
-            self.code.len +
-            self.bitmask.len;
+        {
+            // Code and jump table section
+            var code_section = try SectionWriter.init(self.allocator);
+            defer code_section.deinit();
 
-        try writeVarInt(blob.writer(), @intCast(code_section_size));
-        try writeVarInt(blob.writer(), @intCast(jump_entries));
-        try blob.append(4); // jump table entry size
-        try writeVarInt(blob.writer(), @intCast(self.code.len));
-        try blob.appendSlice(self.jump_table);
-        try blob.appendSlice(self.code);
-        try blob.appendSlice(self.bitmask);
+            try writeVarInt(code_section.writer(), @intCast(self.jump_table.len)); // jump table entries
+            try code_section.writer().writeByte(4); // jump table entry size
+            try writeVarInt(code_section.writer(), @intCast(self.code.len));
+
+            for (self.jump_table) |entry| {
+                try code_section.writer().writeInt(u32, entry, .little);
+            }
+            try code_section.writer().writeAll(self.code);
+            try code_section.writer().writeAll(self.bitmask);
+
+            try code_section.finish(6, blob.writer()); // SECTION_CODE_AND_JUMP_TABLE
+        }
 
         // Debug sections if present
-        if (self.debug_strings.len > 0) {
-            try blob.append(0x81); // SECTION_OPT_DEBUG_STRINGS
-            try writeVarInt(blob.writer(), @intCast(self.debug_strings.len));
-            try blob.appendSlice(self.debug_strings);
-        }
-
-        if (self.debug_line_programs.len > 0) {
-            try blob.append(0x82); // SECTION_OPT_DEBUG_LINE_PROGRAMS
-            try writeVarInt(blob.writer(), @intCast(self.debug_line_programs.len));
-            try blob.appendSlice(self.debug_line_programs);
-        }
-
-        if (self.debug_line_ranges.len > 0) {
-            try blob.append(0x83); // SECTION_OPT_DEBUG_LINE_PROGRAM_RANGES
-            try writeVarInt(blob.writer(), @intCast(self.debug_line_ranges.len));
-            try blob.appendSlice(self.debug_line_ranges);
-        }
+        // Ignore
 
         // End of file
         try blob.append(0); // SECTION_END_OF_FILE
 
         // Fill in total length
         const total_len = blob.items.len;
-        var len_bytes: [8]u8 = undefined;
-        std.mem.writeInt(u64, &len_bytes, @intCast(total_len), .little);
-        std.mem.copyForwards(u8, blob.items[len_pos .. len_pos + 8], &len_bytes);
+        std.mem.writeInt(
+            u64,
+            blob.items[len_pos..][0..8],
+            @intCast(total_len),
+            .little,
+        );
 
         return blob.toOwnedSlice();
     }

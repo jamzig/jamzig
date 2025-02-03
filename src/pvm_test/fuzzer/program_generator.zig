@@ -214,7 +214,12 @@ pub const ProgramGenerator = struct {
                 try jump_table.append(pc);
                 inst_span.debug("Added termination block at pc {d}", .{pc});
             }
-            mask_bitset.set(pc);
+
+            // do not set a bit on last instruction, this could save
+            // a byte, and the graypaper defined k + [1,1,1,1]
+            if (i < instructions.len - 1) {
+                mask_bitset.set(pc);
+            }
             inst_span.trace("Wrote {d} bytes, new pc: {d}", .{ bytes_written, pc });
         }
 
@@ -222,7 +227,7 @@ pub const ProgramGenerator = struct {
         const mask_span = span.child(.generate_mask);
         defer mask_span.deinit();
 
-        const mask_size = try std.math.divCeil(usize, pc, 8) + 1;
+        const mask_size = try std.math.divCeil(usize, pc, 8);
         mask_span.debug("Allocating mask of size {d} bytes", .{mask_size});
 
         const mask = try self.allocator.alloc(u8, mask_size);
@@ -235,6 +240,21 @@ pub const ProgramGenerator = struct {
             mask[bidx / 8] |= @as(u8, 1) << @intCast(bidx % 8);
         }
         span.debug("Generated mask with {d} bytes", .{mask.len});
+
+        var expected_bitmask_length = code.items.len / 8;
+        const is_bitmask_padded = code.items.len % 8 != 0;
+        expected_bitmask_length += if (is_bitmask_padded) 1 else 0;
+
+        if (is_bitmask_padded) {
+            const last_byte = mask[mask.len - 1];
+            const padding_bits: u3 = @intCast(mask.len * 8 - code.items.len);
+            const padding_mask = @as(i8, @bitCast(@as(u8, 0b10000000))) >> (padding_bits - 1);
+            std.debug.print("Last byte of mask:  0b{b:0>8}\n", .{last_byte});
+            std.debug.print("Padding mask:      0b{b:0>8}\n", .{@as(u8, @bitCast(padding_mask))});
+            if (last_byte & @as(u8, @bitCast(padding_mask)) != 0) {
+                @panic("BitmaskPaddedWithNonZeroes");
+            }
+        }
 
         // On the second pass of our program we need to find the branches
         // and let them jump to any of the elements in our jump table to make
