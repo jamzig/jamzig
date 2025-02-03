@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) !void {
     const tmpfile_module = b.dependency("tmpfile", .{}).module("tmpfile");
 
     // Rest of the existing build.zig implementation...
-    var rust_deps = try buildRustDependencies(b, target);
+    var rust_deps = try buildRustDependencies(b, target, optimize);
     defer rust_deps.deinit();
 
     const exe = b.addExecutable(.{
@@ -133,7 +133,7 @@ const RustDep = struct {
     fullpath: []const u8,
 };
 
-fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Build.ResolvedTarget) !void {
+fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Build.ResolvedTarget, optimize_mode: std.builtin.OptimizeMode) !void {
     const manifest_path = try std.fmt.allocPrint(b.allocator, "ffi/rust/{s}/Cargo.toml", .{name});
     defer b.allocator.free(manifest_path);
 
@@ -169,15 +169,28 @@ fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Bu
         else => return error.UnsupportedTarget,
     };
 
-    var cmd = b.addSystemCommand(&[_][]const u8{
-        "cargo",
-        "build",
-        "--release",
-        "--target",
-        target_triple,
-        "--manifest-path",
-        manifest_path,
-    });
+    var cmd = switch (optimize_mode) {
+        .Debug => b.addSystemCommand(&[_][]const u8{
+            "cargo",
+            "build",
+            "--target",
+            target_triple,
+            "--manifest-path",
+            manifest_path,
+        }),
+        // ReleaseSafe,
+        // ReleaseFast,
+        // ReleaseSmall,
+        .ReleaseSafe, .ReleaseSmall, .ReleaseFast => b.addSystemCommand(&[_][]const u8{
+            "cargo",
+            "build",
+            "--release",
+            "--target",
+            target_triple,
+            "--manifest-path",
+            manifest_path,
+        }),
+    };
 
     // Update target path to include the specific architecture
     const target_path = try std.fmt.allocPrint(b.allocator, "ffi/rust/{s}/target/{s}/release", .{ name, target_triple });
@@ -191,14 +204,14 @@ fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Bu
     try deps.register(target_path, lib_name, &cmd.step);
 }
 
-pub fn buildRustDependencies(b: *std.Build, target: std.Build.ResolvedTarget) !RustDeps {
+pub fn buildRustDependencies(b: *std.Build, target: std.Build.ResolvedTarget, optimize_mode: std.builtin.OptimizeMode) !RustDeps {
     var deps = RustDeps.init(b);
     errdefer deps.deinit();
 
     // Build the rust libraries
-    try buildRustDep(b, &deps, "crypto", target);
-    try buildRustDep(b, &deps, "reed_solomon", target);
-    try buildRustDep(b, &deps, "polkavm_ffi", target);
+    try buildRustDep(b, &deps, "crypto", target, optimize_mode);
+    try buildRustDep(b, &deps, "reed_solomon", target, optimize_mode);
+    try buildRustDep(b, &deps, "polkavm_ffi", target, optimize_mode);
 
     return deps;
 }
