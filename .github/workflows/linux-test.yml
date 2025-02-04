@@ -13,9 +13,18 @@ jobs:
           submodules: 'recursive'
       
       - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/flakehub-cache-action@main
       - uses: DeterminateSystems/flake-checker-action@main
       
-      - name: Build and test
+      - name: Debug - Build and test
         run: |
-          nix run .#test -- --target x86_64-unknown-linux-gnu --progress
+          nix run .#test -- --progress
+      - name: Debug - Build and test ffi
+        run: |
+          nix run .#test-ffi -- --progress
+      - name: ReleaseFast - Build and test
+        run: |
+          nix run .#test-release-fast -- --progress
+      - name: ReleaseFast - Build and test ffi
+        run: |
+          nix run .#test-ffi-release-fast -- --progress

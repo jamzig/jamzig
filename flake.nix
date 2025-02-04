@@ -79,8 +79,12 @@
       # nix run .#test
       apps.test = env.app [] "zig build test -- \"$@\"";
 
+      # nix run .#test
+      apps.test-release-fast = env.app [] "zig build test -Doptimize=ReleaseFast -- \"$@\"";
+
       # nix run .#test-ffi
       apps.test-ffi = env.app [] "zig build test-ffi -- \"$@\"";
+      apps.test-ffi-release-fast = env.app [] "zig build test-ffi -Doptimize=ReleaseFast -- \"$@\"";
 
       # nix run .#docs
       apps.docs = env.app [] "zig build docs -- \"$@\"";
