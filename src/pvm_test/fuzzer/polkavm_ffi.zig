@@ -31,6 +31,7 @@ const RawExecutionResult = extern struct {
     final_pc: u32,
     pages: ?[*]MemoryPage,
     page_count: usize,
+    registers: [13]u64, // 12 GP registers + PC
 };
 
 pub const ExecutionResult = struct {
@@ -43,6 +44,10 @@ pub const ExecutionResult = struct {
     pub fn getPages(self: *const ExecutionResult) []const MemoryPage {
         return self.raw.pages[0..self.raw.page_count];
     }
+
+    pub fn getRegisters(self: *const ExecutionResult) []const u64 {
+        return &self.raw.registers;
+    }
 };
 
 extern "c" fn execute_pvm(
@@ -50,6 +55,7 @@ extern "c" fn execute_pvm(
     bytecode_len: usize,
     initial_pages: [*]const MemoryPage,
     page_count: usize,
+    initial_registers: [*]const u64,
     gas_limit: u64,
 ) RawExecutionResult;
 
@@ -59,6 +65,7 @@ extern "c" fn free_execution_result(result: RawExecutionResult) void;
 pub fn executePvm(
     bytecode: []const u8,
     pages: []const MemoryPage,
+    registers: []const u64,
     gas_limit: u64,
 ) ExecutionResult {
     return .{
@@ -67,6 +74,7 @@ pub fn executePvm(
             bytecode.len,
             pages.ptr,
             pages.len,
+            registers.ptr,
             gas_limit,
         ),
     };
@@ -94,12 +102,13 @@ pub fn executePvmWithGeneratedProgram(
     allocator: std.mem.Allocator,
     program: GeneratedProgram,
     pages: []const MemoryPage,
+    registers: []const u64,
     gas_limit: u64,
 ) !ExecutionResult {
     const program_bytes = try buildProgramBytes(allocator, program);
     defer allocator.free(program_bytes);
 
-    return executePvm(program_bytes, pages, gas_limit);
+    return executePvm(program_bytes, pages, registers, gas_limit);
 }
 
 test "generate and execute multiple programs" {
@@ -130,11 +139,16 @@ test "generate and execute multiple programs" {
             var program = try generator.generate(size);
             defer program.deinit(allocator);
 
+            // Initial registers
+            var registers: [13]u64 = undefined;
+            seed_gen.randomBytes(std.mem.asBytes(&registers));
+
             // Execute program
             const result = try executePvmWithGeneratedProgram(
                 allocator,
                 program,
                 &[_]MemoryPage{page},
+                &registers,
                 10000, // gas limit
             );
             defer result.deinit();

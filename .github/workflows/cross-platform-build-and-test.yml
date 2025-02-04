@@ -60,6 +60,12 @@ jobs:
           # Build and test
           nix run .#test -- --target ${{ matrix.target }} --progress
 
+      - name: Build and test-ffi for ${{ matrix.target }}
+        if: ${{ matrix.can_test }}
+        run: |
+          # Build and test
+          nix run .#test -- --target ${{ matrix.target }} --progress
+
       - name: Build only for ${{ matrix.target }}
         if: ${{ !matrix.can_test }}
         run: |

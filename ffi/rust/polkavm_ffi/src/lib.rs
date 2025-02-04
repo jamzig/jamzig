@@ -1,6 +1,6 @@
 use polkavm::{
   BackendKind, Engine, InterruptKind, Module, ModuleConfig, ProgramBlob,
-  ProgramCounter,
+  ProgramCounter, Reg,
 };
 
 #[repr(C)]
@@ -33,6 +33,7 @@ pub struct ExecutionResult {
   final_pc: u32,
   pages: *mut MemoryPage,
   page_count: usize,
+  registers: [u64; 13], // 12 GP registers + PC
 }
 
 #[unsafe(no_mangle)]
@@ -41,6 +42,7 @@ pub extern "C" fn execute_pvm(
   bytecode_len: usize,
   initial_pages: *const MemoryPage,
   page_count: usize,
+  initial_registers: *const u64,
   gas_limit: u64,
 ) -> ExecutionResult {
   let raw_bytes = unsafe { std::slice::from_raw_parts(bytecode, bytecode_len) };
@@ -59,6 +61,7 @@ pub extern "C" fn execute_pvm(
         final_pc: 0,
         pages: std::ptr::null_mut(),
         page_count: 0,
+        registers: [0; 13],
       };
     }
   };
@@ -72,6 +75,7 @@ pub extern "C" fn execute_pvm(
         final_pc: 0,
         pages: std::ptr::null_mut(),
         page_count: 0,
+        registers: [0; 13],
       };
     }
   };
@@ -90,6 +94,7 @@ pub extern "C" fn execute_pvm(
         final_pc: 0,
         pages: std::ptr::null_mut(),
         page_count: 0,
+        registers: [0; 13],
       };
     }
   };
@@ -102,6 +107,7 @@ pub extern "C" fn execute_pvm(
         final_pc: 0,
         pages: std::ptr::null_mut(),
         page_count: 0,
+        registers: [0; 13],
       };
     }
   };
@@ -115,6 +121,7 @@ pub extern "C" fn execute_pvm(
         final_pc: 0,
         pages: std::ptr::null_mut(),
         page_count: 0,
+        registers: [0; 13],
       };
     }
 
@@ -125,14 +132,23 @@ pub extern "C" fn execute_pvm(
           final_pc: 0,
           pages: std::ptr::null_mut(),
           page_count: 0,
+          registers: [0; 13],
         };
       }
     }
   }
 
-  // Execute
   instance.set_gas(gas_limit as i64);
   instance.set_next_program_counter(ProgramCounter(0));
+
+  // Set initial registers
+  let registers = unsafe { std::slice::from_raw_parts(initial_registers, 13) };
+  for (i, &value) in registers.iter().enumerate() {
+    instance.set_reg(Reg::from_raw(i as u32).unwrap(), value);
+  }
+
+  // Execute
+  instance.set_gas(gas_limit as i64);
 
   let mut final_pc = ProgramCounter(0);
   let status = loop {
@@ -148,12 +164,14 @@ pub extern "C" fn execute_pvm(
         }
         _ => break ExecutionStatus::UnknownError,
       },
-      Err(_) => {
+      Err(error) => {
+        eprintln!("PolkaVM execution error: {}", error);
         return ExecutionResult {
           status: ExecutionStatus::InstanceRunError,
           final_pc: final_pc.0,
           pages: std::ptr::null_mut(),
           page_count: 0,
+          registers: [0; 13],
         };
       }
     }
@@ -180,22 +198,33 @@ pub extern "C" fn execute_pvm(
   let page_count = result_pages.len();
   std::mem::forget(result_pages); // Prevent deallocation
 
+  // Collect final register values
+  let mut registers = [0u64; 13];
+  for i in 0..13 {
+    registers[i] = instance.reg(Reg::from_raw(i as u32).unwrap());
+  }
+
   ExecutionResult {
     status,
     final_pc: final_pc.0,
     pages: pages_ptr,
     page_count,
+    registers,
   }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn free_execution_result(result: ExecutionResult) {
-  unsafe {
-    let pages = std::slice::from_raw_parts_mut(result.pages, result.page_count);
-    for page in pages {
-      Vec::from_raw_parts(page.data, page.size, page.size);
+  // Only attempt to free if pages pointer is not null
+  if !result.pages.is_null() {
+    unsafe {
+      let pages =
+        std::slice::from_raw_parts_mut(result.pages, result.page_count);
+      for page in pages {
+        Vec::from_raw_parts(page.data, page.size, page.size);
+      }
+      Vec::from_raw_parts(result.pages, result.page_count, result.page_count);
     }
-    Vec::from_raw_parts(result.pages, result.page_count, result.page_count);
   }
 }
 
@@ -212,6 +241,7 @@ mod tests {
     builder.set_code(
       &[
         asm::store_imm_u32(0x20000, 0x12345678), // Store value at memory address
+        asm::load_imm(Reg::T0, 0xdeadbeef),
         asm::ret(),
       ],
       &[],
@@ -232,7 +262,16 @@ mod tests {
       is_writable: true,
     };
 
-    let result = execute_pvm(program.as_ptr(), program.len(), &page, 1, 10000);
+    let registers: [u64; 13] = [0; 13];
+
+    let result = execute_pvm(
+      program.as_ptr(),
+      program.len(),
+      &page,
+      1,
+      registers.as_ptr(),
+      10000,
+    );
 
     assert_eq!(
       result.status,
@@ -247,6 +286,12 @@ mod tests {
       let data = std::slice::from_raw_parts(first_page.data, 4);
       assert_eq!(u32::from_le_bytes(data.try_into().unwrap()), 0x12345678);
     }
+
+    // Check deadbeef in the A0 register in the result
+    assert_eq!(
+      result.registers[2], 0xdeadbeef,
+      "Register A0 should contain 0xdeadbeef"
+    );
 
     free_execution_result(result);
 
@@ -264,11 +309,14 @@ mod tests {
       is_writable: true,
     };
 
+    let registers: [u64; 13] = [0; 13];
+
     let result = execute_pvm(
       invalid_program.as_ptr(),
       invalid_program.len(),
       &page,
       1,
+      registers.as_ptr(),
       10000,
     );
 

@@ -94,6 +94,18 @@ pub fn build(b: *std.Build) !void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    // Add FFI test step
+    const test_ffi_step = b.step("test-ffi", "Run FFI unit tests");
+
+    // Add all rust crate tests
+    const crypto_tests = try buildRustDepTests(b, "crypto", target, optimize);
+    const reed_solomon_tests = try buildRustDepTests(b, "reed_solomon", target, optimize);
+    const polkavm_tests = try buildRustDepTests(b, "polkavm_ffi", target, optimize);
+
+    test_ffi_step.dependOn(crypto_tests);
+    test_ffi_step.dependOn(reed_solomon_tests);
+    test_ffi_step.dependOn(polkavm_tests);
 }
 
 const RustDeps = struct {
@@ -133,13 +145,8 @@ const RustDep = struct {
     fullpath: []const u8,
 };
 
-fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Build.ResolvedTarget, optimize_mode: std.builtin.OptimizeMode) !void {
-    const manifest_path = try std.fmt.allocPrint(b.allocator, "ffi/rust/{s}/Cargo.toml", .{name});
-    defer b.allocator.free(manifest_path);
-
-    // Get target triple for Rust
-    // Get target triple for Rust
-    const target_triple = switch (target.result.cpu.arch) {
+fn getRustTargetTriple(target: std.Build.ResolvedTarget) ![]const u8 {
+    return switch (target.result.cpu.arch) {
         .x86_64 => switch (target.result.os.tag) {
             .macos => "x86_64-apple-darwin",
             .linux => switch (target.result.abi) {
@@ -158,7 +165,6 @@ fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Bu
             },
             else => return error.UnsupportedTarget,
         },
-        // big-endian target
         .powerpc64 => switch (target.result.os.tag) {
             .linux => switch (target.result.abi) {
                 .gnu => "powerpc64-unknown-linux-gnu",
@@ -168,6 +174,13 @@ fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Bu
         },
         else => return error.UnsupportedTarget,
     };
+}
+
+fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Build.ResolvedTarget, optimize_mode: std.builtin.OptimizeMode) !void {
+    const manifest_path = try std.fmt.allocPrint(b.allocator, "ffi/rust/{s}/Cargo.toml", .{name});
+    defer b.allocator.free(manifest_path);
+
+    const target_triple = try getRustTargetTriple(target);
 
     var cmd = switch (optimize_mode) {
         .Debug => b.addSystemCommand(&[_][]const u8{
@@ -178,9 +191,6 @@ fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Bu
             "--manifest-path",
             manifest_path,
         }),
-        // ReleaseSafe,
-        // ReleaseFast,
-        // ReleaseSmall,
         .ReleaseSafe, .ReleaseSmall, .ReleaseFast => b.addSystemCommand(&[_][]const u8{
             "cargo",
             "build",
@@ -202,6 +212,36 @@ fn buildRustDep(b: *std.Build, deps: *RustDeps, name: []const u8, target: std.Bu
         name;
 
     try deps.register(target_path, lib_name, &cmd.step);
+}
+
+fn buildRustDepTests(b: *std.Build, name: []const u8, target: std.Build.ResolvedTarget, optimize_mode: std.builtin.OptimizeMode) !*std.Build.Step {
+    const manifest_path = try std.fmt.allocPrint(b.allocator, "ffi/rust/{s}/Cargo.toml", .{name});
+    defer b.allocator.free(manifest_path);
+
+    const target_triple = try getRustTargetTriple(target);
+
+    // Create cargo test command
+    var cmd = switch (optimize_mode) {
+        .Debug => b.addSystemCommand(&[_][]const u8{
+            "cargo",
+            "test",
+            "--target",
+            target_triple,
+            "--manifest-path",
+            manifest_path,
+        }),
+        .ReleaseSafe, .ReleaseSmall, .ReleaseFast => b.addSystemCommand(&[_][]const u8{
+            "cargo",
+            "test",
+            "--release",
+            "--target",
+            target_triple,
+            "--manifest-path",
+            manifest_path,
+        }),
+    };
+
+    return &cmd.step;
 }
 
 pub fn buildRustDependencies(b: *std.Build, target: std.Build.ResolvedTarget, optimize_mode: std.builtin.OptimizeMode) !RustDeps {

@@ -79,6 +79,9 @@
       # nix run .#test
       apps.test = env.app [] "zig build test -- \"$@\"";
 
+      # nix run .#test-ffi
+      apps.test-ffi = env.app [] "zig build test-ffi -- \"$@\"";
+
       # nix run .#docs
       apps.docs = env.app [] "zig build docs -- \"$@\"";
 
