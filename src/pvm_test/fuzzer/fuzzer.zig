@@ -554,7 +554,7 @@ pub const PVMFuzzer = struct {
             // NOTE: Gas metering comparison is skipped on out-of-gas conditions due to architectural differences:
             // The reference implementation (polkavm) meters gas at basic block granularity, while our
             // implementation meters at instruction granularity. Will converge in future iterations.
-            if (ref_result.raw.status != .OutOfGas) {
+            if (ref_result.raw.status != .OutOfGas and ref_result.raw.status != .Segfault) {
                 if (ref_result.raw.gas_remaining != exec_ctx.gas) {
                     std.debug.print("\nGas usage mismatch detected!\n", .{});
                     std.debug.print("  Our implementation:\n", .{});

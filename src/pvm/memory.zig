@@ -185,7 +185,7 @@ pub const Memory = struct {
 
     pub const ViolationInfo = struct {
         violation_type: ViolationType,
-        address: u32,
+        address: u32, // aligned to page
         attempted_size: usize,
         page: ?*Page = null,
     };
@@ -463,7 +463,7 @@ pub const Memory = struct {
         const first_page = self.page_table.findPageOfAddresss(address) orelse {
             self.last_violation = ViolationInfo{
                 .violation_type = .NonAllocated,
-                .address = address,
+                .address = @divTrunc(address, Z_P) * Z_P,
                 .attempted_size = @sizeOf(T),
                 .page = null,
             };
@@ -577,7 +577,7 @@ pub const Memory = struct {
         const page = self.page_table.findPageOfAddresss(address) orelse {
             self.last_violation = ViolationInfo{
                 .violation_type = .NonAllocated,
-                .address = address,
+                .address = @divTrunc(address, Z_P) * Z_P, // since this falls outsize any page, we just round ti
                 .attempted_size = size,
                 .page = null,
             };
