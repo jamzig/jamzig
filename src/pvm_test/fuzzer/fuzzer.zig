@@ -395,11 +395,10 @@ pub const PVMFuzzer = struct {
         const initial_registers = exec_ctx.registers;
 
         // Dump initial register state
-        // const stderr = std.io.getStdErr().writer();
-        // try stderr.writeAll("\nInitial registers:\n");
-        // for (initial_registers, 0..) |reg, i| {
-        //     try stderr.print("  r{d:<2} = 0x{X:0>16}\n", .{ i, reg });
-        // }
+        execution_span.debug("Initial register state:", .{});
+        for (initial_registers, 0..) |reg, i| {
+            execution_span.debug("  r{d:<2} = 0x{X:0>16}", .{ i, reg });
+        }
 
         const status = PVM.execute(&exec_ctx);
         const gas_used = initial_gas - exec_ctx.gas;

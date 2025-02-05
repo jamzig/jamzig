@@ -72,6 +72,7 @@ pub fn main() !void {
 
     // Print configuration
     if (res.args.@"test-seed") |test_case_seed| {
+        @import("./pvm_test/fuzzer/polkavm_ffi.zig").initLogging();
         std.debug.print("\nRunning single test case with seed: {d}\n", .{test_case_seed});
         _ = try fuzzer.runSingleTest(test_case_seed);
         return;
