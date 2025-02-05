@@ -36,6 +36,7 @@ const RawExecutionResult = extern struct {
     pages: ?[*]MemoryPage,
     page_count: usize,
     registers: [13]u64,
+    gas_remaining: i64,
 };
 
 pub const ExecutionResult = struct {
@@ -46,7 +47,7 @@ pub const ExecutionResult = struct {
     }
 
     pub fn getPages(self: *const ExecutionResult) []const MemoryPage {
-        return self.raw.pages[0..self.raw.page_count];
+        return self.raw.pages.?[0..self.raw.page_count];
     }
 
     pub fn getRegisters(self: *const ExecutionResult) []const u64 {

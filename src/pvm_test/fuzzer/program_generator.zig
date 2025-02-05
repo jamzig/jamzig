@@ -267,7 +267,7 @@ pub const ProgramGenerator = struct {
             const rewrite_span = span.child(.rewrite_jumps);
             rewrite_span.debug("Rewriting jumps", .{});
             while (try iter.next()) |entry| {
-                if (entry.inst.isBranch() or entry.inst.instruction == .jump) {
+                if (entry.inst.isBranch() or entry.inst.isBranchWithImm() or entry.inst.instruction == .jump) {
                     const branch_span = rewrite_span.child(.rewrite_branch);
                     defer branch_span.deinit();
                     branch_span.debug("Rewriting branch/jump at pc {d}: {}", .{ entry.pc, entry.inst });

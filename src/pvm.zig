@@ -152,6 +152,7 @@ pub const PVM = struct {
 
     fn getInstructionGasCost(inst: InstructionWithArgs) u32 {
         return switch (inst.instruction) {
+            // .jump => 3,
             else => 1,
         };
     }

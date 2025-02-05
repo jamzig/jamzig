@@ -446,6 +446,43 @@ pub const PVMFuzzer = struct {
             );
             defer ref_result.deinit();
 
+            // Compare execution status
+            const ref_status = switch (ref_result.raw.status) {
+                .Success => PVM.Result{ .halt = &[_]u8{} }, // Empty halt output on success
+                .OutOfGas => PVM.Result{ .err = .out_of_gas },
+                .Segfault => PVM.Result{ .err = .{ .page_fault = 0 } }, // TODO: push page_fault from ffi
+                .EngineError,
+                .ProgramError,
+                .ModuleError,
+                .InstantiationError,
+                .InstanceRunError,
+                .UnknownError,
+                .MemoryError,
+                => {
+                    @panic("FFI InstantionError");
+                },
+                .Trap,
+                => PVM.Result{ .err = .panic },
+            };
+
+            if (status) |our_status| {
+                if (!std.meta.eql(our_status, ref_status)) {
+                    std.debug.print("\nStatus mismatch detected!\n", .{});
+                    std.debug.print("  Our implementation: {any}\n", .{our_status});
+                    std.debug.print("  Reference impl: {any}\n", .{ref_status});
+                    return error.CrossCheckStatusMismatch;
+                }
+            } else |our_err| {
+                // If we got an error and reference succeeded, that's a mismatch
+                if (ref_result.raw.status == .Success) {
+                    std.debug.print("\nStatus mismatch - our impl errored but reference succeeded!\n", .{});
+                    std.debug.print("  Our implementation error: {s}\n", .{@errorName(our_err)});
+                    return error.CrossCheckStatusMismatch;
+                }
+            }
+
+            // Compare final register states
+
             // Compare final register states
             // Skip PC register (last one) since it might differ between implementations
             const registers = ref_result.getRegisters()[0..13];
@@ -458,6 +495,57 @@ pub const PVMFuzzer = struct {
                     std.debug.print("  Our implementation: 0x{X:0>16}\n", .{our_registers[i]});
                     std.debug.print("  Reference impl:     0x{X:0>16}\n", .{ref_reg});
                     return error.CrossCheckMismatch;
+                }
+            }
+
+            // Compare memory state
+            const ref_pages = ref_result.getPages();
+            for (ref_pages) |ref_page| {
+                // Get our corresponding page
+                if (exec_ctx.memory.page_table.findPageOfAddresss(ref_page.address)) |our_page| {
+                    // Compare page contents
+                    const ref_data = ref_page.data[0..ref_page.size];
+                    const our_data = our_page.page.data[0..ref_page.size];
+
+                    if (!std.mem.eql(u8, ref_data, our_data)) {
+                        std.debug.print("\nMemory state mismatch detected!\n", .{});
+                        std.debug.print("Page address: 0x{X:0>8}\n", .{ref_page.address});
+                        std.debug.print("First differing byte at offset: {d}\n", .{
+                            std.mem.indexOfDiff(u8, ref_data, our_data).?,
+                        });
+                        return error.CrossCheckMemoryMismatch;
+                    }
+                } else {
+                    std.debug.print("\nMissing memory page in our implementation!\n", .{});
+                    std.debug.print("Page address: 0x{X:0>8}\n", .{ref_page.address});
+                    return error.CrossCheckMemoryMismatch;
+                }
+            }
+
+            // Debug print if we have a Gas mismatch between reference and our implementation
+            // NOTE: Gas metering comparison is skipped on out-of-gas conditions due to architectural differences:
+            // The reference implementation (polkavm) meters gas at basic block granularity, while our
+            // implementation meters at instruction granularity. Will converge in future iterations.
+            if (ref_result.raw.status != .OutOfGas) {
+                if (ref_result.raw.gas_remaining != exec_ctx.gas) {
+                    std.debug.print("\nGas usage mismatch detected!\n", .{});
+                    std.debug.print("  Our implementation:\n", .{});
+                    std.debug.print("    Initial gas:  {d}\n", .{initial_gas});
+                    std.debug.print("    Remaining:    {d}\n", .{exec_ctx.gas});
+                    std.debug.print("    Used:         {d}\n", .{initial_gas - exec_ctx.gas});
+                    std.debug.print("  Reference impl:\n", .{});
+                    std.debug.print("    Initial gas:  {d}\n", .{self.config.max_gas});
+                    std.debug.print("    Remaining:    {d}\n", .{ref_result.raw.gas_remaining});
+                    std.debug.print("    Used:         {d}\n", .{@as(i64, @intCast(self.config.max_gas)) - ref_result.raw.gas_remaining});
+                    return error.CrossCheckGasMismatch;
+                }
+
+                // Compare final PC values
+                if (ref_result.raw.final_pc != exec_ctx.pc) {
+                    std.debug.print("\nPC mismatch detected!\n", .{});
+                    std.debug.print("  Our implementation: 0x{X:0>8}\n", .{exec_ctx.pc});
+                    std.debug.print("  Reference impl:     0x{X:0>8}\n", .{ref_result.raw.final_pc});
+                    return error.CrossCheckPCMismatch;
                 }
             }
         }

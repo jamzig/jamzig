@@ -20,6 +20,7 @@ pub const Decoder = struct {
     pub const Error = error{
         InvalidInstruction,
         OutOfBounds,
+        TrapOutOfBounds,
         InvalidImmediateLength,
         MaxInstructionSizeInBytesExceeded,
         InvalidRegisterIndex,

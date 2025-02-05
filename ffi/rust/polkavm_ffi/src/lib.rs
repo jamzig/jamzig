@@ -36,6 +36,7 @@ pub struct ExecutionResult {
   pages: *mut MemoryPage,
   page_count: usize,
   registers: [u64; 13], // 12 GP registers + PC
+  gas_remaining: i64,
 }
 
 static INIT: Once = Once::new();
@@ -72,6 +73,7 @@ pub extern "C" fn execute_pvm(
         pages: std::ptr::null_mut(),
         page_count: 0,
         registers: [0; 13],
+        gas_remaining: gas_limit as i64,
       };
     }
   };
@@ -86,6 +88,7 @@ pub extern "C" fn execute_pvm(
         pages: std::ptr::null_mut(),
         page_count: 0,
         registers: [0; 13],
+        gas_remaining: gas_limit as i64,
       };
     }
   };
@@ -95,6 +98,7 @@ pub extern "C" fn execute_pvm(
   module_config.set_strict(true);
   module_config.set_gas_metering(Some(polkavm::GasMeteringKind::Sync));
   module_config.set_dynamic_paging(true);
+  module_config.set_step_tracing(true);
 
   let module = match Module::from_blob(&engine, &module_config, blob) {
     Ok(m) => m,
@@ -105,6 +109,7 @@ pub extern "C" fn execute_pvm(
         pages: std::ptr::null_mut(),
         page_count: 0,
         registers: [0; 13],
+        gas_remaining: gas_limit as i64,
       };
     }
   };
@@ -118,6 +123,7 @@ pub extern "C" fn execute_pvm(
         pages: std::ptr::null_mut(),
         page_count: 0,
         registers: [0; 13],
+        gas_remaining: gas_limit as i64,
       };
     }
   };
@@ -132,6 +138,7 @@ pub extern "C" fn execute_pvm(
         pages: std::ptr::null_mut(),
         page_count: 0,
         registers: [0; 13],
+        gas_remaining: gas_limit as i64,
       };
     }
 
@@ -143,6 +150,7 @@ pub extern "C" fn execute_pvm(
           pages: std::ptr::null_mut(),
           page_count: 0,
           registers: [0; 13],
+          gas_remaining: gas_limit as i64,
         };
       }
     }
@@ -165,10 +173,14 @@ pub extern "C" fn execute_pvm(
       Ok(interrupt) => match interrupt {
         InterruptKind::Finished => break ExecutionStatus::Success,
         InterruptKind::Trap => break ExecutionStatus::Trap,
-        InterruptKind::NotEnoughGas => break ExecutionStatus::OutOfGas,
+        InterruptKind::NotEnoughGas => {
+          eprintln!("OutOfGas");
+          break ExecutionStatus::OutOfGas;
+        }
         InterruptKind::Segfault(_) => break ExecutionStatus::Segfault,
         InterruptKind::Step => {
           current_pc = instance.program_counter().unwrap_or(ProgramCounter(0));
+          eprintln!("Current PC {}", current_pc);
           continue;
         }
         InterruptKind::Ecalli(_) => {
@@ -183,10 +195,13 @@ pub extern "C" fn execute_pvm(
           pages: std::ptr::null_mut(),
           page_count: 0,
           registers: [0; 13],
+          gas_remaining: gas_limit as i64,
         };
       }
     }
   };
+
+  eprintln!("Status {:?}", status);
 
   // Collect final memory state
   let mut result_pages = Vec::with_capacity(page_count);
@@ -217,10 +232,11 @@ pub extern "C" fn execute_pvm(
 
   ExecutionResult {
     status,
-    final_pc: current_pc.0,
+    final_pc: instance.program_counter().unwrap().0,
     pages: pages_ptr,
     page_count,
     registers,
+    gas_remaining: instance.gas(),
   }
 }
 
