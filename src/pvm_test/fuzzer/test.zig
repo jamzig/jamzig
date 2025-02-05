@@ -32,7 +32,7 @@ test "pvm:fuzzer:crosscheck" {
     };
 
     // RUST_LOG=polkavm=trace zig build test -Doptimize=Debug -Dtest-filter=pvm:fuzzer:crosscheck -Dtracing-scope=pvm -- --nocapture
-    @import("polkavm_ffi.zig").initLogging();
+    // @import("polkavm_ffi.zig").initLogging();
 
     var fuzzer = try PVMFuzzer.init(testing.allocator, config);
     defer fuzzer.deinit();

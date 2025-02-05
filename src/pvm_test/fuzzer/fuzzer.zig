@@ -388,6 +388,9 @@ pub const PVMFuzzer = struct {
         const initial_gas = exec_ctx.gas;
         execution_span.debug("Starting program execution with {d} gas", .{initial_gas});
 
+        // Randomize the registers
+        seed_gen.randomBytes(std.mem.asBytes(&exec_ctx.registers));
+
         // Store initial registers to crosscheck
         const initial_registers = exec_ctx.registers;
 
@@ -434,7 +437,17 @@ pub const PVMFuzzer = struct {
         }
 
         // Cross-check against reference implementation if enabled
-        if (self.config.enable_cross_check) {
+        if (self.config.enable_cross_check) crosscheck: {
+            // if the program contains a sbrk we skip it for now
+            // as its not implemented in the pvm with dynamic memory
+            var inst_iter = exec_ctx.decoder.iterator();
+            while (try inst_iter.next()) |e| {
+                if (e.inst.instruction == .sbrk) {
+                    std.debug.print("skipping code with unimplemented sbrk", .{});
+                    break :crosscheck;
+                }
+            }
+
             const polkavm_ffi = @import("polkavm_ffi.zig");
             // copy over the register values from the exec_ctx
             //

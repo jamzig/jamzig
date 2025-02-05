@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    rust_deps.statically_link_to(exe);
+    rust_deps.staticallyLinkTo(exe);
     b.installArtifact(exe);
 
     const pvm_fuzzer = b.addExecutable(.{
@@ -41,7 +41,8 @@ pub fn build(b: *std.Build) !void {
 
     pvm_fuzzer.root_module.addOptions("build_options", build_options);
     pvm_fuzzer.root_module.addImport("clap", clap_module);
-    // pvm_fuzzer.linkLibCpp();
+    pvm_fuzzer.linkLibCpp();
+    try rust_deps.staticallyLinkDepTo("polkavm_ffi", pvm_fuzzer);
     b.installArtifact(pvm_fuzzer);
 
     // Run Steps
@@ -79,7 +80,7 @@ pub fn build(b: *std.Build) !void {
     unit_tests.linkLibCpp();
 
     // Statically link our rust_deps to the unit tests
-    rust_deps.statically_link_to(unit_tests);
+    rust_deps.staticallyLinkTo(unit_tests);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
@@ -123,11 +124,22 @@ const RustDeps = struct {
         try self.deps.append(RustDep{ .name = name, .step = step, .path = path, .fullpath = fullpath });
     }
 
-    pub fn statically_link_to(self: *RustDeps, comp_step: *std.Build.Step.Compile) void {
+    pub fn staticallyLinkTo(self: *RustDeps, comp_step: *std.Build.Step.Compile) void {
         for (self.deps.items) |dep| {
             comp_step.step.dependOn(dep.step);
             comp_step.addObjectFile(self.b.path(dep.fullpath));
         }
+    }
+
+    pub fn staticallyLinkDepTo(self: *RustDeps, name: []const u8, comp_step: *std.Build.Step.Compile) !void {
+        for (self.deps.items) |dep| {
+            if (std.mem.eql(u8, dep.name, name)) {
+                comp_step.step.dependOn(dep.step);
+                comp_step.addObjectFile(self.b.path(dep.fullpath));
+                return;
+            }
+        }
+        return error.DependencyNotFound;
     }
 
     fn deinit(self: *RustDeps) void {

@@ -182,7 +182,6 @@ pub extern "C" fn execute_pvm(
         InterruptKind::Finished => break ExecutionStatus::Success,
         InterruptKind::Trap => break ExecutionStatus::Trap,
         InterruptKind::NotEnoughGas => {
-          eprintln!("OutOfGas");
           break ExecutionStatus::OutOfGas;
         }
         InterruptKind::Segfault(sfault) => {
@@ -191,7 +190,6 @@ pub extern "C" fn execute_pvm(
         }
         InterruptKind::Step => {
           current_pc = instance.program_counter().unwrap_or(ProgramCounter(0));
-          eprintln!("Current PC {}", current_pc);
           continue;
         }
         InterruptKind::Ecalli(_) => {
@@ -212,8 +210,6 @@ pub extern "C" fn execute_pvm(
       }
     }
   };
-
-  eprintln!("Status {:?}", status);
 
   // Collect final memory state
   let mut result_pages = Vec::with_capacity(page_count);

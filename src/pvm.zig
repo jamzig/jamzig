@@ -510,7 +510,7 @@ pub const PVM = struct {
             .mul_imm_32 => {
                 const args = i.args.TwoRegOneImm;
                 const result = context.registers[args.second_register_index] *% args.immediate;
-                context.registers[args.first_register_index] = @as(u32, @truncate(result));
+                context.registers[args.first_register_index] = signExtendToU64(u32, @truncate(result));
             },
 
             .set_lt_u_imm => {
