@@ -1,3 +1,5 @@
+use std::sync::Once;
+
 use polkavm::{
   BackendKind, Engine, InterruptKind, Module, ModuleConfig, ProgramBlob,
   ProgramCounter, Reg,
@@ -34,6 +36,14 @@ pub struct ExecutionResult {
   pages: *mut MemoryPage,
   page_count: usize,
   registers: [u64; 13], // 12 GP registers + PC
+}
+
+static INIT: Once = Once::new();
+#[no_mangle]
+pub extern "C" fn init_logging() {
+  INIT.call_once(|| {
+    env_logger::init();
+  });
 }
 
 #[unsafe(no_mangle)]
@@ -138,19 +148,18 @@ pub extern "C" fn execute_pvm(
     }
   }
 
-  instance.set_gas(gas_limit as i64);
-  instance.set_next_program_counter(ProgramCounter(0));
-
   // Set initial registers
   let registers = unsafe { std::slice::from_raw_parts(initial_registers, 13) };
   for (i, &value) in registers.iter().enumerate() {
-    instance.set_reg(Reg::from_raw(i as u32).unwrap(), value);
+    let reg = Reg::from_raw(i as u32).unwrap();
+    instance.set_reg(reg, value);
   }
 
   // Execute
+  instance.set_next_program_counter(ProgramCounter(0));
   instance.set_gas(gas_limit as i64);
 
-  let mut final_pc = ProgramCounter(0);
+  let mut current_pc = ProgramCounter(0);
   let status = loop {
     match instance.run() {
       Ok(interrupt) => match interrupt {
@@ -159,16 +168,18 @@ pub extern "C" fn execute_pvm(
         InterruptKind::NotEnoughGas => break ExecutionStatus::OutOfGas,
         InterruptKind::Segfault(_) => break ExecutionStatus::Segfault,
         InterruptKind::Step => {
-          final_pc = instance.program_counter().unwrap_or(ProgramCounter(0));
+          current_pc = instance.program_counter().unwrap_or(ProgramCounter(0));
           continue;
         }
-        _ => break ExecutionStatus::UnknownError,
+        InterruptKind::Ecalli(_) => {
+          // we just ignore this
+        } // _ => break ExecutionStatus::UnknownError,
       },
       Err(error) => {
         eprintln!("PolkaVM execution error: {}", error);
         return ExecutionResult {
           status: ExecutionStatus::InstanceRunError,
-          final_pc: final_pc.0,
+          final_pc: current_pc.0,
           pages: std::ptr::null_mut(),
           page_count: 0,
           registers: [0; 13],
@@ -206,7 +217,7 @@ pub extern "C" fn execute_pvm(
 
   ExecutionResult {
     status,
-    final_pc: final_pc.0,
+    final_pc: current_pc.0,
     pages: pages_ptr,
     page_count,
     registers,

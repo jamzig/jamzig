@@ -55,6 +55,8 @@ pub const FuzzConfig = struct {
     verbose: bool = false,
     /// Configuration for program mutations
     mutation: MutationConfig = .{},
+    /// Enable cross-checking against reference implementation
+    enable_cross_check: bool = false,
 };
 
 pub const FuzzResult = struct {
@@ -386,6 +388,16 @@ pub const PVMFuzzer = struct {
         const initial_gas = exec_ctx.gas;
         execution_span.debug("Starting program execution with {d} gas", .{initial_gas});
 
+        // Store initial registers to crosscheck
+        const initial_registers = exec_ctx.registers;
+
+        // Dump initial register state
+        // const stderr = std.io.getStdErr().writer();
+        // try stderr.writeAll("\nInitial registers:\n");
+        // for (initial_registers, 0..) |reg, i| {
+        //     try stderr.print("  r{d:<2} = 0x{X:0>16}\n", .{ i, reg });
+        // }
+
         const status = PVM.execute(&exec_ctx);
         const gas_used = initial_gas - exec_ctx.gas;
 
@@ -418,6 +430,35 @@ pub const PVMFuzzer = struct {
                     std.debug.print("Error data: {any}", .{error_data});
                 }
                 return error.PvmErroredInNormalOperation;
+            }
+        }
+
+        // Cross-check against reference implementation if enabled
+        if (self.config.enable_cross_check) {
+            const polkavm_ffi = @import("polkavm_ffi.zig");
+            // copy over the register values from the exec_ctx
+            const ref_result = try polkavm_ffi.executePvmWithGeneratedProgram(
+                self.allocator,
+                program,
+                try polkavm_ffi.MemoryPage.empty(self.allocator),
+                &initial_registers,
+                @intCast(self.config.max_gas),
+            );
+            defer ref_result.deinit();
+
+            // Compare final register states
+            // Skip PC register (last one) since it might differ between implementations
+            const registers = ref_result.getRegisters()[0..13];
+            const our_registers = exec_ctx.registers[0..13];
+
+            for (registers, 0..) |ref_reg, i| {
+                if (ref_reg != our_registers[i]) {
+                    std.debug.print("\nRegister state mismatch detected!\n", .{});
+                    std.debug.print("Register {d}:\n", .{i});
+                    std.debug.print("  Our implementation: 0x{X:0>16}\n", .{our_registers[i]});
+                    std.debug.print("  Reference impl:     0x{X:0>16}\n", .{ref_reg});
+                    return error.CrossCheckMismatch;
+                }
             }
         }
 

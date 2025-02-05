@@ -10,6 +10,10 @@ pub const MemoryPage = extern struct {
     data: [*]u8,
     size: usize,
     is_writable: bool,
+
+    pub fn empty(allocator: std.mem.Allocator) ![]MemoryPage {
+        return try allocator.alloc(MemoryPage, 0);
+    }
 };
 
 pub const ExecutionStatus = enum(c_int) {
@@ -31,7 +35,7 @@ const RawExecutionResult = extern struct {
     final_pc: u32,
     pages: ?[*]MemoryPage,
     page_count: usize,
-    registers: [13]u64, // 12 GP registers + PC
+    registers: [13]u64,
 };
 
 pub const ExecutionResult = struct {
@@ -49,6 +53,12 @@ pub const ExecutionResult = struct {
         return &self.raw.registers;
     }
 };
+
+extern "c" fn init_logging() void;
+
+pub fn initLogging() void {
+    init_logging();
+}
 
 extern "c" fn execute_pvm(
     bytecode: [*]const u8,

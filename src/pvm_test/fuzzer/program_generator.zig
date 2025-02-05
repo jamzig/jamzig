@@ -187,6 +187,7 @@ pub const ProgramGenerator = struct {
 
         // We have the instructions and sizes. We can find the indexes to the
         // instructions of the basic blocks by looping.
+        mask_bitset.set(0); // We always start with an instruction so first bit is always set
         for (instructions, 0..) |*inst, i| {
             const inst_span = encode_span.child(.encode_instruction);
             defer inst_span.deinit();
