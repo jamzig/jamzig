@@ -37,6 +37,7 @@ pub struct ExecutionResult {
   page_count: usize,
   registers: [u64; 13], // 12 GP registers + PC
   gas_remaining: i64,
+  segfault_address: u32,
 }
 
 static INIT: Once = Once::new();
@@ -74,6 +75,7 @@ pub extern "C" fn execute_pvm(
         page_count: 0,
         registers: [0; 13],
         gas_remaining: gas_limit as i64,
+        segfault_address: 0,
       };
     }
   };
@@ -89,6 +91,7 @@ pub extern "C" fn execute_pvm(
         page_count: 0,
         registers: [0; 13],
         gas_remaining: gas_limit as i64,
+        segfault_address: 0,
       };
     }
   };
@@ -110,6 +113,7 @@ pub extern "C" fn execute_pvm(
         page_count: 0,
         registers: [0; 13],
         gas_remaining: gas_limit as i64,
+        segfault_address: 0,
       };
     }
   };
@@ -124,6 +128,7 @@ pub extern "C" fn execute_pvm(
         page_count: 0,
         registers: [0; 13],
         gas_remaining: gas_limit as i64,
+        segfault_address: 0,
       };
     }
   };
@@ -139,6 +144,7 @@ pub extern "C" fn execute_pvm(
         page_count: 0,
         registers: [0; 13],
         gas_remaining: gas_limit as i64,
+        segfault_address: 0,
       };
     }
 
@@ -151,6 +157,7 @@ pub extern "C" fn execute_pvm(
           page_count: 0,
           registers: [0; 13],
           gas_remaining: gas_limit as i64,
+          segfault_address: 0,
         };
       }
     }
@@ -168,6 +175,7 @@ pub extern "C" fn execute_pvm(
   instance.set_gas(gas_limit as i64);
 
   let mut current_pc = ProgramCounter(0);
+  let mut segfault_address = 0;
   let status = loop {
     match instance.run() {
       Ok(interrupt) => match interrupt {
@@ -177,7 +185,10 @@ pub extern "C" fn execute_pvm(
           eprintln!("OutOfGas");
           break ExecutionStatus::OutOfGas;
         }
-        InterruptKind::Segfault(_) => break ExecutionStatus::Segfault,
+        InterruptKind::Segfault(sfault) => {
+          segfault_address = sfault.page_address;
+          break ExecutionStatus::Segfault;
+        }
         InterruptKind::Step => {
           current_pc = instance.program_counter().unwrap_or(ProgramCounter(0));
           eprintln!("Current PC {}", current_pc);
@@ -196,6 +207,7 @@ pub extern "C" fn execute_pvm(
           page_count: 0,
           registers: [0; 13],
           gas_remaining: gas_limit as i64,
+          segfault_address: 0,
         };
       }
     }
@@ -237,6 +249,7 @@ pub extern "C" fn execute_pvm(
     page_count,
     registers,
     gas_remaining: instance.gas(),
+    segfault_address,
   }
 }
 

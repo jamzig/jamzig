@@ -37,6 +37,7 @@ const RawExecutionResult = extern struct {
     page_count: usize,
     registers: [13]u64,
     gas_remaining: i64,
+    segfault_address: u32,
 };
 
 pub const ExecutionResult = struct {

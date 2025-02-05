@@ -437,10 +437,38 @@ pub const PVMFuzzer = struct {
         if (self.config.enable_cross_check) {
             const polkavm_ffi = @import("polkavm_ffi.zig");
             // copy over the register values from the exec_ctx
+            //
+            var pages = try std.ArrayList(polkavm_ffi.MemoryPage).initCapacity(
+                self.allocator,
+                exec_ctx.memory.page_table.pages.items.len,
+            );
+            defer pages.deinit();
+
+            // Initialize memory pages with same layout as our PVM
+            // We need to copy each page from our page table with zeroed data
+            for (exec_ctx.memory.page_table.pages.items) |page| {
+                const page_data = try self.allocator.alloc(u8, page.data.len);
+                @memset(page_data, 0);
+
+                try pages.append(.{
+                    .address = page.address,
+                    .data = page_data.ptr,
+                    .size = page.data.len,
+                    .is_writable = page.flags == .ReadWrite,
+                });
+            }
+            defer {
+                // Free allocated page data
+                for (pages.items) |page| {
+                    self.allocator.free(page.data[0..page.size]);
+                }
+            }
+
+            // Execute PVM with the initialized memory pages
             const ref_result = try polkavm_ffi.executePvmWithGeneratedProgram(
                 self.allocator,
                 program,
-                try polkavm_ffi.MemoryPage.empty(self.allocator),
+                pages.items,
                 &initial_registers,
                 @intCast(self.config.max_gas),
             );
@@ -450,7 +478,7 @@ pub const PVMFuzzer = struct {
             const ref_status = switch (ref_result.raw.status) {
                 .Success => PVM.Result{ .halt = &[_]u8{} }, // Empty halt output on success
                 .OutOfGas => PVM.Result{ .err = .out_of_gas },
-                .Segfault => PVM.Result{ .err = .{ .page_fault = 0 } }, // TODO: push page_fault from ffi
+                .Segfault => PVM.Result{ .err = .{ .page_fault = ref_result.raw.segfault_address } },
                 .EngineError,
                 .ProgramError,
                 .ModuleError,
