@@ -772,23 +772,23 @@ pub const PVM = struct {
 
             .div_u_32 => {
                 const args = i.args.ThreeReg;
-                if (context.registers[args.second_register_index] == 0) {
+                const rega = @as(u32, @truncate(context.registers[args.first_register_index]));
+                const regb = @as(u32, @truncate(context.registers[args.second_register_index]));
+                if (regb == 0) {
                     context.registers[args.third_register_index] = 0xFFFFFFFFFFFFFFFF;
                 } else {
-                    context.registers[args.third_register_index] = signExtendToU64(u32, @divTrunc(
-                        @as(u32, @truncate(context.registers[args.first_register_index])),
-                        @as(u32, @truncate(context.registers[args.second_register_index])),
-                    ));
+                    context.registers[args.third_register_index] = signExtendToU64(u32, @divTrunc(rega, regb));
                 }
             },
 
             .div_s_32 => {
                 const args = i.args.ThreeReg;
-                if (context.registers[args.second_register_index] == 0) {
+                const rega = @as(i32, @bitCast(@as(u32, @truncate(context.registers[args.first_register_index]))));
+                const regb = @as(i32, @bitCast(@as(u32, @truncate(context.registers[args.second_register_index]))));
+
+                if (regb == 0) {
                     context.registers[args.third_register_index] = 0xFFFFFFFFFFFFFFFF;
                 } else {
-                    const rega = @as(i32, @bitCast(@as(u32, @truncate(context.registers[args.first_register_index]))));
-                    const regb = @as(i32, @bitCast(@as(u32, @truncate(context.registers[args.second_register_index]))));
                     if (rega == std.math.minInt(i32) and regb == -1) {
                         context.registers[args.third_register_index] = signExtendToU64(i32, rega);
                     } else {
