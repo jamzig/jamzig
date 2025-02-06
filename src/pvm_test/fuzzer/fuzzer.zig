@@ -321,7 +321,13 @@ pub const PVMFuzzer = struct {
         const program_bytes = try program.getRawBytes(self.allocator);
         const will_mutate = seed_gen.randomIntRange(u16, 0, 999) < self.config.mutation.program_mutation_probability;
 
-        if (will_mutate) {
+        if (will_mutate) mutate: {
+            // We do not want crazy stuff when we are cross checking
+            if (self.config.enable_cross_check) {
+                span.warn("Skipping program mutation during cross-check validation", .{});
+                break :mutate;
+            }
+
             span.warn("Mutating program", .{});
             mutateProgramBytes(program_bytes, self.config.mutation, &seed_gen);
         }

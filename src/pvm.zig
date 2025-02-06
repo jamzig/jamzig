@@ -581,8 +581,8 @@ pub const PVM = struct {
             .shlo_l_imm_alt_32 => {
                 const args = i.args.TwoRegOneImm;
                 const shift = context.registers[args.second_register_index] & 0x1F;
-                const result = args.immediate << @intCast(shift);
-                context.registers[args.first_register_index] = result;
+                const result = @as(u32, @truncate(args.immediate)) << @intCast(shift);
+                context.registers[args.first_register_index] = signExtendToU64(u32, result);
             },
             .shlo_r_imm_alt_32 => {
                 const args = i.args.TwoRegOneImm;
