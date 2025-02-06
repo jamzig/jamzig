@@ -50,6 +50,7 @@ pub const PVM = struct {
     pub const ExecutionContext = @import("./pvm/execution_context.zig").ExecutionContext;
 
     pub const Result = ExecutionResult;
+    pub const StepResult = ExecutionStepResult;
 
     const updatePc = @import("./pvm/utils.zig").updatePc;
 

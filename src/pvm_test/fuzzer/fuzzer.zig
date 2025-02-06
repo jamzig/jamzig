@@ -302,32 +302,16 @@ pub const PVMFuzzer = struct {
         span.debug("Running test case with seed {d}", .{seed});
 
         var seed_gen = SeedGenerator.init(seed);
-
         var program_gen = try ProgramGenerator.init(self.allocator, &seed_gen);
 
         // Generate program
         const num_instructions = seed_gen.randomIntRange(u32, 1, self.config.max_instruction_count);
         span.debug("Generating program with {d} instructions", .{num_instructions});
 
-        const program_span = span.child(.program_generation);
-        defer program_span.deinit();
-
         var program = try program_gen.generate(num_instructions);
         defer program.deinit(self.allocator);
 
-        program_span.debug("Program generated successfully", .{});
-        program_span.trace("Code size: {d}, Mask size: {d}, Jump table size: {d}", .{
-            program.code.len,
-            program.mask.len,
-            program.jump_table.len,
-        });
-
-        // Get raw program bytes and potentially mutate them
-        const mutation_span = span.child(.mutation);
-        defer mutation_span.deinit();
-
-        // write the memory access in program, since we have no readonly data we can calculate the start
-        // of the heap and we set a HEAP_SIZE of 4 pages
+        // Rewrite memory accesses
         try program.rewriteMemoryAccesses(
             &seed_gen,
             try PVM.Memory.HEAP_BASE_ADDRESS(0),
@@ -338,17 +322,11 @@ pub const PVMFuzzer = struct {
         const will_mutate = seed_gen.randomIntRange(u16, 0, 999) < self.config.mutation.program_mutation_probability;
 
         if (will_mutate) {
-            mutation_span.warn("Program mutation probability check: will_mutate={}", .{will_mutate});
-            // mutation_span.trace("Raw bytes before mutation: {any}", .{std.fmt.fmtSliceHexLower(program_bytes)});
+            span.warn("Mutating program", .{});
             mutateProgramBytes(program_bytes, self.config.mutation, &seed_gen);
-            // mutation_span.trace("Raw bytes after mutation: {any}", .{std.fmt.fmtSliceHexLower(program_bytes)});
         }
 
-        // Initialize PVM with error handling
-        const init_span = span.child(.pvm_init);
-        defer init_span.deinit();
-        init_span.debug("Initializing PVM with {d} bytes, {d} initial gas", .{ program_bytes.len, self.config.max_gas });
-
+        // Initialize our PVM
         var exec_ctx = PVM.ExecutionContext.initSimple(
             self.allocator,
             program_bytes,
@@ -356,8 +334,7 @@ pub const PVMFuzzer = struct {
             4, // Heap size
             self.config.max_gas,
         ) catch |err| {
-            init_span.err("ExecutionContext initialization failed: {s}", .{@errorName(err)});
-
+            span.err("ExecutionContext initialization failed: {s}", .{@errorName(err)});
             return FuzzResult{
                 .seed = seed,
                 .status = err,
@@ -368,100 +345,54 @@ pub const PVMFuzzer = struct {
         };
         defer exec_ctx.deinit(self.allocator);
 
-        // pub const HostCallFn = *const fn (gas: *i64, registers: *[13]u64, memory: *Memory) HostCallResult;
+        // Register host call handler
         try exec_ctx.registerHostCall(0, struct {
             pub fn func(gas: *i64, registers: *[13]u64, memory: *PVM.Memory) PVM.HostCallResult {
                 _ = gas;
                 _ = registers;
                 _ = memory;
-                // std.debug.print("Host call called!", .{});
                 return .play;
             }
         }.func);
 
-        // Limit the total amount of PVM (sbrk) allocations to 8 pages
+        // Limit PVM allocations
         exec_ctx.memory.heap_allocation_limit = 8;
 
-        // Run program and collect results
-        const execution_span = span.child(.execution);
-        defer execution_span.deinit();
-
-        const initial_gas = exec_ctx.gas;
-        execution_span.debug("Starting program execution with {d} gas", .{initial_gas});
-
-        // Randomize the registers
+        // Initialize registers
         seed_gen.randomBytes(std.mem.asBytes(&exec_ctx.registers));
-
-        // Store initial registers to crosscheck
         const initial_registers = exec_ctx.registers;
 
-        // Dump initial register state
-        //
-        execution_span.debug("Initial register state:", .{});
-        for (initial_registers, 0..) |reg, i| {
-            execution_span.debug("  {s} r{d:<2} = 0x{X:0>16}", .{ @tagName(try std.meta.intToEnum(Register, i)), i, reg });
-        }
+        // Optional FFI executor for cross-checking
+        var ref_executor: ?polkavm_ffi.Executor = null;
+        defer if (ref_executor) |*executor| executor.deinit();
 
-        const status = PVM.execute(&exec_ctx);
-        const gas_used = initial_gas - exec_ctx.gas;
-
-        if (status) |result| {
-            switch (result) {
-                .halt => |output| {
-                    execution_span.debug("Program halted normally PC {d}. Output size: {d} bytes. Gas used: {d}", .{ exec_ctx.pc, output.len, gas_used });
-                    if (output.len > 0) {
-                        execution_span.trace("Program output: {s}", .{output});
-                    }
-                },
-                .err => |error_type| switch (error_type) {
-                    .panic => execution_span.err("Program panicked at PC 0x{X:0>8}. Gas used: {d}", .{ exec_ctx.pc, gas_used }),
-                    .out_of_gas => execution_span.err("Program ran out of gas at PC 0x{X:0>8} after using {d} units", .{ exec_ctx.pc, gas_used }),
-                    .page_fault => |addr| execution_span.err("Program encountered page fault at PC 0x{X:0>8}, address 0x{X:0>8}. Gas used: {d}", .{ exec_ctx.pc, addr, gas_used }),
-                    .host_call => |idx| execution_span.err("Program attempted invalid host call {d} at PC 0x{X:0>8}. Gas used: {d}", .{ idx, exec_ctx.pc, gas_used }),
-                },
-            }
-        } else |err| {
-            // Correctly generated programs whould never return an Error, sometimes when we do
-            // some random bitflips this can happen and it is expected.
-
-            // Memory errors expected due to uncontrolled register additions
-            if (!will_mutate and !PVM.Memory.isMemoryError(err) and !(err == error.MemoryLimitExceeded)) {
-                std.debug.print("\n\nProgram execution failed (non-mutated) with error: {s}. Gas used: {d}\n\n", .{ @errorName(err), gas_used });
-
-                try exec_ctx.debugState(4, std.io.getStdErr().writer());
-
-                if (exec_ctx.error_data) |error_data| {
-                    std.debug.print("Error data: {any}", .{error_data});
-                }
-                return error.PvmErroredInNormalOperation;
-            }
-        }
-
-        // Cross-check against reference implementation if enabled
-        if (self.config.enable_cross_check) crosscheck: {
-            // if the program contains a sbrk we skip it for now
-            // as its not implemented in the pvm with dynamic memory
+        // Initialize FFI executor if cross-checking is enabled
+        if (self.config.enable_cross_check) cross_check_init: {
+            // Check for sbrk instruction
             var inst_iter = exec_ctx.decoder.iterator();
             while (try inst_iter.next()) |e| {
                 if (e.inst.instruction == .sbrk) {
-                    std.debug.print("skipping code with unimplemented sbrk", .{});
-                    break :crosscheck;
+                    span.debug("skipping cross-check for code with unimplemented sbrk", .{});
+                    break :cross_check_init;
                 }
             }
 
-            const polkavm_ffi = @import("polkavm_ffi.zig");
-            // copy over the register values from the exec_ctx
-            //
+            // Check if pvm scope tracing is enabled, in that case we want polkavm logging as well
+            if (@import("../../tracing.zig").findScope("pvm")) |_| {
+                polkavm_ffi.initLogging();
+            }
+
+            // Setup memory pages for FFI
             var pages = try std.ArrayList(polkavm_ffi.MemoryPage).initCapacity(
                 self.allocator,
                 exec_ctx.memory.page_table.pages.items.len,
             );
             defer pages.deinit();
 
-            // Initialize memory pages with same layout as our PVM
-            // We need to copy each page from our page table with zeroed data
+            // Create pages matching our PVM layout
             for (exec_ctx.memory.page_table.pages.items) |page| {
                 const page_data = try self.allocator.alloc(u8, page.data.len);
+                errdefer self.allocator.free(page_data);
                 @memset(page_data, 0);
 
                 try pages.append(.{
@@ -471,134 +402,113 @@ pub const PVMFuzzer = struct {
                     .is_writable = page.flags == .ReadWrite,
                 });
             }
-            defer {
-                // Free allocated page data
-                for (pages.items) |page| {
-                    self.allocator.free(page.data[0..page.size]);
-                }
-            }
 
-            // Execute PVM with the initialized memory pages
-            const ref_result = try polkavm_ffi.executePvmWithGeneratedProgram(
+            // Initialize FFI executor
+            ref_executor = try polkavm_ffi.createExecutorFromProgram(
                 self.allocator,
                 program,
                 pages.items,
                 &initial_registers,
                 @intCast(self.config.max_gas),
             );
-            defer ref_result.deinit();
 
-            // Compare execution status
-            const ref_status = switch (ref_result.raw.status) {
-                .Success => PVM.Result{ .halt = &[_]u8{} }, // Empty halt output on success
-                .OutOfGas => PVM.Result{ .err = .out_of_gas },
-                .Segfault => PVM.Result{ .err = .{ .page_fault = ref_result.raw.segfault_address } },
-                .EngineError,
-                .ProgramError,
-                .ModuleError,
-                .InstantiationError,
-                .InstanceRunError,
-                .UnknownError,
-                .MemoryError,
-                => {
-                    @panic("FFI InstantionError");
-                },
-                .Trap,
-                => PVM.Result{ .err = .panic },
-            };
-
-            if (status) |our_status| {
-                if (!std.meta.eql(our_status, ref_status)) {
-                    std.debug.print("\nStatus mismatch detected!\n", .{});
-                    std.debug.print("  Our implementation: {any}\n", .{our_status});
-                    std.debug.print("  Reference impl: {any}\n", .{ref_status});
-                    return error.CrossCheckStatusMismatch;
-                }
-            } else |our_err| {
-                // If we got an error and reference succeeded, that's a mismatch
-                if (ref_result.raw.status == .Success) {
-                    std.debug.print("\nStatus mismatch - our impl errored but reference succeeded!\n", .{});
-                    std.debug.print("  Our implementation error: {s}\n", .{@errorName(our_err)});
-                    return error.CrossCheckStatusMismatch;
-                }
-            }
-
-            // Compare final register states
-
-            // Compare final register states
-            // Skip PC register (last one) since it might differ between implementations
-            const registers = ref_result.getRegisters()[0..13];
-            const our_registers = exec_ctx.registers[0..13];
-
-            for (registers, 0..) |ref_reg, i| {
-                if (ref_reg != our_registers[i]) {
-                    std.debug.print("\nRegister state mismatch detected!\n", .{});
-                    std.debug.print("Register {d}:\n", .{i});
-                    std.debug.print("  Our implementation: 0x{X:0>16}\n", .{our_registers[i]});
-                    std.debug.print("  Reference impl:     0x{X:0>16}\n", .{ref_reg});
-                    return error.CrossCheckMismatch;
-                }
-            }
-
-            // Compare memory state
-            const ref_pages = ref_result.getPages();
-            for (ref_pages) |ref_page| {
-                // Get our corresponding page
-                if (exec_ctx.memory.page_table.findPageOfAddresss(ref_page.address)) |our_page| {
-                    // Compare page contents
-                    const ref_data = ref_page.data[0..ref_page.size];
-                    const our_data = our_page.page.data[0..ref_page.size];
-
-                    if (!std.mem.eql(u8, ref_data, our_data)) {
-                        std.debug.print("\nMemory state mismatch detected!\n", .{});
-                        std.debug.print("Page address: 0x{X:0>8}\n", .{ref_page.address});
-                        std.debug.print("First differing byte at offset: {d}\n", .{
-                            std.mem.indexOfDiff(u8, ref_data, our_data).?,
-                        });
-                        return error.CrossCheckMemoryMismatch;
-                    }
-                } else {
-                    std.debug.print("\nMissing memory page in our implementation!\n", .{});
-                    std.debug.print("Page address: 0x{X:0>8}\n", .{ref_page.address});
-                    return error.CrossCheckMemoryMismatch;
-                }
-            }
-
-            // Debug print if we have a Gas mismatch between reference and our implementation
-            // NOTE: Gas metering comparison is skipped on out-of-gas conditions due to architectural differences:
-            // The reference implementation (polkavm) meters gas at basic block granularity, while our
-            // implementation meters at instruction granularity. Will converge in future iterations.
-            if (ref_result.raw.status != .OutOfGas and ref_result.raw.status != .Segfault) {
-                if (ref_result.raw.gas_remaining != exec_ctx.gas) {
-                    std.debug.print("\nGas usage mismatch detected!\n", .{});
-                    std.debug.print("  Our implementation:\n", .{});
-                    std.debug.print("    Initial gas:  {d}\n", .{initial_gas});
-                    std.debug.print("    Remaining:    {d}\n", .{exec_ctx.gas});
-                    std.debug.print("    Used:         {d}\n", .{initial_gas - exec_ctx.gas});
-                    std.debug.print("  Reference impl:\n", .{});
-                    std.debug.print("    Initial gas:  {d}\n", .{self.config.max_gas});
-                    std.debug.print("    Remaining:    {d}\n", .{ref_result.raw.gas_remaining});
-                    std.debug.print("    Used:         {d}\n", .{@as(i64, @intCast(self.config.max_gas)) - ref_result.raw.gas_remaining});
-                    return error.CrossCheckGasMismatch;
-                }
-
-                // Compare final PC values
-                if (ref_result.raw.final_pc != exec_ctx.pc) {
-                    std.debug.print("\nPC mismatch detected!\n", .{});
-                    std.debug.print("  Our implementation: 0x{X:0>8}\n", .{exec_ctx.pc});
-                    std.debug.print("  Reference impl:     0x{X:0>8}\n", .{ref_result.raw.final_pc});
-                    return error.CrossCheckPCMismatch;
-                }
+            // Free temporary page data
+            for (pages.items) |page| {
+                self.allocator.free(page.data[0..page.size]);
             }
         }
 
-        return FuzzResult{
-            .seed = seed,
-            .status = status,
-            .gas_used = gas_used,
-            .was_mutated = will_mutate,
-            .init_failed = false,
-        };
+        if (ref_executor) |*executor| {
+            _ = executor.step();
+        }
+
+        // Main execution loop
+        const initial_gas = exec_ctx.gas;
+        while (true) {
+            // Execute one step in our PVM
+            const current_pc = exec_ctx.pc;
+            const current_instruction = try exec_ctx.decoder.decodeInstruction(current_pc);
+
+            const step_result = PVM.executeStep(&exec_ctx) catch |err| {
+                std.debug.print("\nPVM errored during execution: {s}\n", .{@errorName(err)});
+                return error.PvmErroredInNormalOperation;
+            };
+
+            // If cross-checking is enabled and we have a reference executor
+            if (ref_executor) |*executor| {
+                // Execute one step in reference implementation
+                const ref_result = executor.step();
+
+                // we need to inject another step if we run into a hostcall
+                if (current_instruction.instruction == .ecalli) {
+                    _ = executor.step();
+                }
+
+                // Compare states
+                try compareRegisters("Step", exec_ctx.registers[0..13], ref_result.getRegisters()[0..13]);
+                try compareMemoryPages(&exec_ctx.memory, ref_result.getPages());
+
+                // Compare execution status
+                const expected_status = pvmStepToFfiStatus(step_result);
+                if (ref_result.raw.status != expected_status) check_status: {
+                    if (ref_result.raw.status == .OutOfGas) {
+                        // Gas accounting is different on polkavm ignoring this for now
+                        break :check_status;
+                    }
+                    std.debug.print("\nStatus mismatch during step-by-step execution!\n", .{});
+                    std.debug.print("  Our implementation: {any}\n", .{step_result});
+                    std.debug.print("  Reference impl: {any}\n", .{ref_result.raw.status});
+                    return error.CrossCheckStatusMismatch;
+                }
+            }
+
+            // Process step result
+            switch (step_result) {
+                .cont => continue,
+                .host_call => |host| {
+                    const handler = exec_ctx.host_calls.get(host.idx) orelse
+                        return FuzzResult{
+                        .seed = seed,
+                        .status = .{ .err = .{ .host_call = host.idx } },
+                        .gas_used = initial_gas - exec_ctx.gas,
+                        .was_mutated = will_mutate,
+                        .init_failed = false,
+                    };
+
+                    // Execute host call
+                    const result = handler(&exec_ctx.gas, &exec_ctx.registers, &exec_ctx.memory);
+                    switch (result) {
+                        .play => {
+                            exec_ctx.pc = host.next_pc;
+                            continue;
+                        },
+                        .page_fault => |addr| {
+                            return FuzzResult{
+                                .seed = seed,
+                                .status = .{ .err = .{ .page_fault = addr } },
+                                .gas_used = initial_gas - exec_ctx.gas,
+                                .was_mutated = will_mutate,
+                                .init_failed = false,
+                            };
+                        },
+                    }
+                },
+                .terminal => |result| {
+                    return FuzzResult{
+                        .seed = seed,
+                        .status = switch (result) {
+                            .halt => |output| .{ .halt = output },
+                            .panic => .{ .err = .panic },
+                            .out_of_gas => .{ .err = .out_of_gas },
+                            .page_fault => |addr| .{ .err = .{ .page_fault = addr } },
+                        },
+                        .gas_used = initial_gas - exec_ctx.gas,
+                        .was_mutated = will_mutate,
+                        .init_failed = false,
+                    };
+                },
+            }
+        }
     }
 
     fn printTestResult(_: *Self, test_number: u32, result: FuzzResult) void {
@@ -651,4 +561,66 @@ pub fn fuzzSimple(allocator: Allocator) !void {
     try stats.error_stats.writeErrorCounts(std.io.getStdErr().writer());
     try results.writeExecutionStats(std.io.getStdErr().writer());
     std.debug.print("Average Gas: {d}\n", .{stats.avg_gas});
+}
+
+// Crosscheck
+const polkavm_ffi = @import("polkavm_ffi.zig");
+
+pub const CrossCheckError = error{
+    CrossCheckStatusMismatch,
+    CrossCheckMemoryMismatch,
+    CrossCheckRegisterMismatch,
+    CrossCheckGasMismatch,
+    CrossCheckPCMismatch,
+    PvmErroredInNormalOperation,
+};
+
+// Helper function to convert PVM step result to FFI status
+fn pvmStepToFfiStatus(step: PVM.StepResult) polkavm_ffi.ExecutionStatus {
+    return switch (step) {
+        .cont => .Running,
+        .host_call => .Running, // Host calls should be played in PVM first
+        .terminal => |t| switch (t) {
+            .halt => .Success,
+            .panic => .Trap,
+            .out_of_gas => .OutOfGas,
+            .page_fault => .Segfault,
+        },
+    };
+}
+
+pub fn compareRegisters(msg: []const u8, our_registers: []const u64, ref_registers: []const u64) !void {
+    for (ref_registers, 0..) |ref_reg, i| {
+        if (ref_reg != our_registers[i]) {
+            std.debug.print("\n{s} register state mismatch detected!\n", .{msg});
+            std.debug.print("Register {d}:\n", .{i});
+            std.debug.print("  Our implementation: 0x{X:0>16}\n", .{our_registers[i]});
+            std.debug.print("  Reference impl:     0x{X:0>16}\n", .{ref_reg});
+            return error.CrossCheckRegisterMismatch;
+        }
+    }
+}
+
+pub fn compareMemoryPages(memory: *PVM.Memory, ref_pages: []const polkavm_ffi.MemoryPage) !void {
+    for (ref_pages) |ref_page| {
+        // Get our corresponding page
+        if (memory.page_table.findPageOfAddresss(ref_page.address)) |our_page| {
+            // Compare page contents
+            const ref_data = ref_page.data[0..ref_page.size];
+            const our_data = our_page.page.data[0..ref_page.size];
+
+            if (!std.mem.eql(u8, ref_data, our_data)) {
+                std.debug.print("\nMemory state mismatch detected!\n", .{});
+                std.debug.print("Page address: 0x{X:0>8}\n", .{ref_page.address});
+                std.debug.print("First differing byte at offset: {d}\n", .{
+                    std.mem.indexOfDiff(u8, ref_data, our_data).?,
+                });
+                return error.CrossCheckMemoryMismatch;
+            }
+        } else {
+            std.debug.print("\nMissing memory page in our implementation!\n", .{});
+            std.debug.print("Page address: 0x{X:0>8}\n", .{ref_page.address});
+            return error.CrossCheckMemoryMismatch;
+        }
+    }
 }
