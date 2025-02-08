@@ -425,8 +425,10 @@ pub const PVMFuzzer = struct {
             }
         }
 
+        // We need to do one step to "initialze" the polkavm
         if (ref_executor) |*executor| {
-            _ = executor.step();
+            const _r = executor.step();
+            defer _r.deinit();
         }
 
         // Main execution loop
@@ -436,6 +438,9 @@ pub const PVMFuzzer = struct {
             const current_pc = exec_ctx.pc;
             const current_instruction = try exec_ctx.decoder.decodeInstruction(current_pc);
 
+            // NOTE: that when .sbrk is present we do not do do a crosscheck
+            // which is why the crosscheck will not fail as we do not skip
+            // the instruction there
             if (current_instruction.instruction == .sbrk) {
                 span.warn("Skipping sbrk instruction for now", .{});
                 exec_ctx.pc += 1 + current_instruction.skip_l();
@@ -456,10 +461,12 @@ pub const PVMFuzzer = struct {
 
                 // Execute one step in reference implementation
                 const ref_result = executor.step();
+                defer ref_result.deinit();
 
                 // we need to inject another step if we run into a hostcall
                 if (current_instruction.instruction == .ecalli) {
-                    _ = executor.step();
+                    const _r = executor.step();
+                    defer _r.deinit();
                 }
 
                 // Compare states
