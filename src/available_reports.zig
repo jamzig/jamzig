@@ -86,6 +86,25 @@ pub const Entry = struct {
     /// set of work package hashes
     dependencies: std.AutoHashMapUnmanaged([32]u8, void),
 
+    pub fn initWithDependencies(
+        allocator: std.mem.Allocator,
+        work_report: WorkReport,
+        dependencies: []const [32]u8,
+    ) !Entry {
+        var deps = std.AutoHashMapUnmanaged([32]u8, void){};
+        errdefer deps.deinit(allocator);
+
+        // Add all dependencies to the hash map
+        for (dependencies) |dep| {
+            try deps.put(allocator, dep, {});
+        }
+
+        return Entry{
+            .work_report = work_report,
+            .dependencies = deps,
+        };
+    }
+
     pub fn deinit(self: *Entry, allocator: std.mem.Allocator) void {
         self.dependencies.deinit(allocator);
         self.* = undefined;

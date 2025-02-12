@@ -1,17 +1,17 @@
 const std = @import("std");
 const types = @import("types.zig");
 
-const WorkReportHash = types.Hash;
-const SegmentRootHash = types.Hash;
+const WorkPackageHash = types.WorkPackageHash;
 
 pub fn Xi(comptime epoch_size: usize) type {
     return struct {
-        entries: [epoch_size]std.AutoHashMapUnmanaged(WorkReportHash, SegmentRootHash),
+        // Array of sets, each containing work package hashes
+        entries: [epoch_size]std.AutoHashMapUnmanaged(WorkPackageHash, void),
         allocator: std.mem.Allocator,
 
         pub fn init(allocator: std.mem.Allocator) @This() {
             return .{
-                .entries = [_]std.AutoHashMapUnmanaged(types.WorkReportHash, types.Hash){.{}} ** epoch_size,
+                .entries = [_]std.AutoHashMapUnmanaged(WorkPackageHash, void){.{}} ** epoch_size,
                 .allocator = allocator,
             };
         }
@@ -21,22 +21,19 @@ pub fn Xi(comptime epoch_size: usize) type {
                 .entries = undefined,
                 .allocator = allocator,
             };
-
             for (self.entries, 0..) |slot_entries, i| {
-                cloned.entries[i] = std.AutoHashMapUnmanaged(types.WorkReportHash, types.Hash){};
-
+                cloned.entries[i] = std.AutoHashSetUnmanaged(WorkPackageHash){};
                 var iterator = slot_entries.iterator();
                 while (iterator.next()) |entry| {
-                    try cloned.entries[i].put(allocator, entry.key_ptr.*, entry.value_ptr.*);
+                    try cloned.entries[i].put(allocator, entry.*);
                 }
             }
-
             return cloned;
         }
 
         pub fn deinit(self: *@This()) void {
-            for (self.entries) |slot_entries| {
-                @constCast(&slot_entries).deinit(self.allocator);
+            for (&self.entries) |*slot_entries| {
+                slot_entries.deinit(self.allocator);
             }
             self.* = undefined;
         }
@@ -54,35 +51,43 @@ pub fn Xi(comptime epoch_size: usize) type {
             try @import("state_format/accumulated_reports.zig").format(epoch_size, self, fmt, options, writer);
         }
 
-        pub fn addEntryToTimeSlot(
+        pub fn addWorkPackageToTimeSlot(
             self: *@This(),
             time_slot: types.TimeSlot,
-            key: types.Hash,
-            value: types.Hash,
+            work_package_hash: WorkPackageHash,
         ) !void {
-            try self.entries[time_slot].put(self.allocator, key, value);
+            try self.entries[time_slot].put(self.allocator, work_package_hash, {});
+        }
+
+        pub fn containsWorkPackage(
+            self: *const @This(),
+            work_package_hash: WorkPackageHash,
+        ) bool {
+            for (self.entries) |slot_entries| {
+                if (slot_entries.contains(work_package_hash)) {
+                    return true;
+                }
+            }
+            return false;
         }
     };
 }
 
 const testing = std.testing;
-
 test "Xi - init, add entries, and verify" {
     const allocator = std.testing.allocator;
     var xi = Xi(12).init(allocator);
     defer xi.deinit();
 
-    // Create sample key-value pairs
-    const key = [_]u8{1} ** 32;
-    const value = [_]u8{2} ** 32;
+    // Create sample work package hash
+    const work_package_hash = [_]u8{1} ** 32;
 
-    // Add entry to time slot
-    try xi.addEntryToTimeSlot(2, key, value);
+    // Add work package to time slot
+    try xi.addWorkPackageToTimeSlot(2, work_package_hash);
 
     // Verify the contents
     try testing.expectEqual(@as(usize, 12), xi.entries.len);
     try testing.expectEqual(@as(usize, 1), xi.entries[2].count());
-
-    const stored_value = xi.entries[2].get(key) orelse return error.TestUnexpectedNull;
-    try testing.expectEqualSlices(u8, &value, &stored_value);
+    try testing.expect(xi.entries[2].contains(work_package_hash));
+    try testing.expect(xi.containsWorkPackage(work_package_hash));
 }

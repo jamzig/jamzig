@@ -254,6 +254,7 @@ pub fn formatValue(value: anytype, writer: anytype) !void {
 
             // check it's a generic data structure we recognize, if that is the case
             // we can format it in a more human-readable way
+            @setEvalBranchQuota(10_000);
             if (try formatContainer(T, value, writer)) return;
 
             try writer.writeAll(@typeName(T));
