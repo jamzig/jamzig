@@ -35,6 +35,29 @@ pub fn decodeServiceAccountBase(
     _ = items;
 }
 
+/// Decodes a preimage lookup from the encoded format: E(↕[E_4(x) | x <− t])
+/// The encoding consists of a length prefix followed by timestamps
+pub fn decodePreimageLookup(reader: anytype) !services.PreimageLookup {
+
+    // Read timestamp count
+    const codec = @import("../codec.zig");
+    const timestamp_count = try codec.readInteger(reader);
+    if (timestamp_count > 3) return error.InvalidData;
+
+    // Initialize lookup with null status
+    var lookup = services.PreimageLookup{
+        .status = .{ null, null, null },
+    };
+
+    // Read timestamps
+    for (0..timestamp_count) |i| {
+        const timestamp = try reader.readInt(u32, .little);
+        lookup.status[i] = timestamp;
+    }
+
+    return lookup;
+}
+
 /// Helper function to read a 32-byte hash
 fn readHash(reader: anytype) !types.OpaqueHash {
     var hash: types.OpaqueHash = undefined;

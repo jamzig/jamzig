@@ -111,11 +111,43 @@ pub fn reconstructPreimageLookupEntry(
     value: []const u8,
 ) !void {
     _ = allocator;
-    _ = delta;
-    _ = key;
-    _ = value;
 
-    return error.PreimageLookupEntryCannotBeReconstructed;
+    // Deconstruct the dkey and the preimageLookupEntry
+    const dkey = state_dictionary.deconstructServiceIndexHashKey(key);
+    const dhash = state_dictionary.deconstructPreimageLookupKey(dkey.hash.hash);
+
+    // Now walk the delta to see if we have on the service a preimage which matches our hash
+    var account = delta.getAccount(dkey.service_index) orelse return error.PreimageLookupEntryCannotBeReconstructedAccountMissing;
+    var key_iter = account.preimages.keyIterator();
+
+    var restored_hash: ?types.OpaqueHash = null;
+    while (key_iter.next()) |pih| {
+        // We need to compare against the hash of hash
+        var hash_of_pih: types.OpaqueHash = undefined;
+        Blake2b256.hash(pih, &hash_of_pih, .{});
+        if (dhash.lossy_hash_of_hash.matches(&hash_of_pih)) {
+            restored_hash = pih.*;
+            break;
+        }
+    }
+
+    // TODO: check if the length is correct against the preimage
+
+    if (restored_hash == null) {
+        return error.PreimageLookupEntryCannotBeReconstructedMissingHashInPreImages;
+    }
+
+    // decode the entry
+    var stream = std.io.fixedBufferStream(value);
+    const entry = try state_decoding.delta.decodePreimageLookup(
+        stream.reader(),
+    );
+
+    // add it to the account
+    try account.preimage_lookups.put(
+        services.PreimageLookupKey{ .hash = restored_hash.?, .length = dhash.length },
+        entry,
+    );
 }
 
 test "reconstructStorageEntry with hash reconstruction" {

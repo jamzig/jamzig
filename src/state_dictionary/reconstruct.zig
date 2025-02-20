@@ -26,6 +26,13 @@ pub fn reconstructState(
     errdefer jam_state.deinit(allocator);
     span.debug("Initialized empty JamState", .{});
 
+    // Buffer for storing preimage lookup entries until we can process them
+    var preimage_lookup_buffer = std.ArrayList(struct {
+        key: [32]u8,
+        value: []const u8,
+    }).init(allocator);
+    defer preimage_lookup_buffer.deinit();
+
     // Helper function to get reader for value
 
     const fbs = std.io.fixedBufferStream;
@@ -176,7 +183,12 @@ pub fn reconstructState(
                     jam_state.delta = state.Delta.init(allocator);
                 }
 
-                try delta_reconstruction.reconstructPreimageLookupEntry(allocator, &jam_state.delta.?, key, value);
+                // Buffer the lookup entry for later processing after all preimages are loaded
+                try preimage_lookup_buffer.append(.{
+                    .key = key,
+                    .value = value,
+                });
+                lookup_span.debug("Buffered preimage lookup entry for later processing", .{});
             },
             .unknown => {
                 entry_span.err("Invalid key encountered: {any}", .{key});
@@ -185,7 +197,25 @@ pub fn reconstructState(
         }
     }
 
-    span.debug("State reconstruction completed successfully. Processed {d} entries", .{entry_count});
+    // Second pass: Process buffered preimage lookup entries now that all preimages are loaded
+    var lookup_span = span.child(.process_lookups);
+    defer lookup_span.deinit();
+
+    lookup_span.debug("Processing {d} buffered preimage lookup entries", .{preimage_lookup_buffer.items.len});
+
+    for (preimage_lookup_buffer.items) |buffered| {
+        try delta_reconstruction.reconstructPreimageLookupEntry(
+            allocator,
+            &jam_state.delta.?,
+            buffered.key,
+            buffered.value,
+        );
+    }
+
+    span.debug("State reconstruction completed successfully. Processed {d} entries total, including {d} preimage lookups", .{
+        entry_count,
+        preimage_lookup_buffer.items.len,
+    });
 
     return jam_state;
 }

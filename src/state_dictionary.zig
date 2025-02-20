@@ -186,12 +186,12 @@ pub fn buildPreimageLookupKey(key: services.PreimageLookupKey) [32]u8 {
     return lookup_key;
 }
 
-pub fn deconstructPreimageLookupKey(key: [28]u8) struct { lenght: u32, lossy_hash_of_hash: LossyHash(24) } {
+pub fn deconstructPreimageLookupKey(key: [28]u8) struct { length: u32, lossy_hash_of_hash: LossyHash(24) } {
     // Extract the length from the first 4 bytes
     const length = std.mem.readInt(u32, key[0..4], .little);
 
     // Create a zeroed hash buffer
-    var result: [28]u8 = undefined;
+    var result: [24]u8 = undefined;
 
     // Copy the stored hash portion (bytes 2-29 of the original Blake2b hash)
     @memcpy(&result, key[4..]);

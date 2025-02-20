@@ -87,11 +87,11 @@ pub const TestStateTransition = struct {
         self.* = undefined;
     }
 
-    pub fn pre_state_as_merklization_dict(self: *const TestStateTransition, allocator: std.mem.Allocator) !state_dictionary.MerklizationDictionary {
+    pub fn preStateAsMerklizationDict(self: *const TestStateTransition, allocator: std.mem.Allocator) !state_dictionary.MerklizationDictionary {
         return keyValArrayToMerklizationDict(allocator, self.pre_state.keyvals, "pre_state");
     }
 
-    pub fn post_state_as_merklization_dict(self: *const TestStateTransition, allocator: std.mem.Allocator) !state_dictionary.MerklizationDictionary {
+    pub fn postStateAsMerklizationDict(self: *const TestStateTransition, allocator: std.mem.Allocator) !state_dictionary.MerklizationDictionary {
         return keyValArrayToMerklizationDict(allocator, self.post_state.keyvals, "post_state");
     }
 

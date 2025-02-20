@@ -43,11 +43,11 @@ test "jamtestnet.jamduna: verifying state reconstruction" {
     var state_transition = try jamtestnet.parsers.bin.state_transition.loadTestVector(
         JAMDUNA_PARAMS,
         allocator,
-        "src/jamtestnet/data/safrole/state_transitions/425530_000.bin",
+        "src/jamtestnet/data/data/safrole/state_transitions/1_000.bin",
     );
     defer state_transition.deinit(allocator);
 
-    var genesis_mdict = try state_transition.pre_state_as_merklization_dict(allocator);
+    var genesis_mdict = try state_transition.preStateAsMerklizationDict(allocator);
     defer genesis_mdict.deinit();
 
     // Reonstruct state from state dict
@@ -94,9 +94,9 @@ test "jamtestnet.jamduna: verifying state reconstruction" {
     }
 }
 
-test "jamtestnet.jamduna.state-transitions" {
+test "jamtestnet.jamduna.fallback" {
     const allocator = std.testing.allocator;
-    std.debug.print("\n=== Starting Safrole State Transitions Test ===\n", .{});
+    std.debug.print("\nJAMDUNA Fallback\n", .{});
 
     // if (true) {
     //     // DISABLED FOR THE MOMENT
@@ -104,7 +104,7 @@ test "jamtestnet.jamduna.state-transitions" {
     //     return;
     // }
 
-    var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions("src/jamtestnet/data/safrole", allocator);
+    var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions("src/jamtestnet/data/data/fallback", allocator);
     defer state_transition_vectors.deinit(allocator);
     std.debug.print("Collected {d} state transition vectors\n", .{state_transition_vectors.items().len});
 
@@ -118,11 +118,14 @@ test "jamtestnet.jamduna.state-transitions" {
 
         var state_transition = try state_transition_vector.decodeBin(JAMDUNA_PARAMS, allocator);
         defer state_transition.deinit(allocator);
+
+        // std.debug.print("{}", .{types.fmt.format(state_transition)});
+
         std.debug.print("Block header slot: {d}\n", .{state_transition.block.header.slot});
 
         if (current_state == null) {
             std.debug.print("Initializing genesis state...\n", .{});
-            var dict = try state_transition.pre_state_as_merklization_dict(allocator);
+            var dict = try state_transition.preStateAsMerklizationDict(allocator);
             defer dict.deinit();
             current_state = try state_dict.reconstruct.reconstructState(
                 JAMDUNA_PARAMS,
@@ -144,17 +147,16 @@ test "jamtestnet.jamduna.state-transitions" {
         );
         defer transition.deinitHeap();
 
-        std.debug.print("Merging states...\n", .{});
-        var delta_state = try transition.cloneBaseAndMergeWithPrime();
-        defer delta_state.deinit(allocator);
-        std.debug.print("State merge complete\n", .{});
+        // Let's assume the transition went well, lets merge into
+        // the base state.
+        try transition.mergePrimeOntoBase();
 
-        // std.debug.print("New state {s}", .{current_state.?});
+        // std.debug.print("New state {s}", .{types.fmt.format(current_state.?)});
 
         var current_state_mdict = try current_state.?.buildStateMerklizationDictionaryWithConfig(allocator, .{ .include_preimage_timestamps = false });
         defer current_state_mdict.deinit();
 
-        var expected_state_mdict = try state_transition.post_state_as_merklization_dict(allocator);
+        var expected_state_mdict = try state_transition.postStateAsMerklizationDict(allocator);
         defer expected_state_mdict.deinit();
 
         var expected_state_diff = try current_state_mdict.diff(&expected_state_mdict);
@@ -170,7 +172,7 @@ test "jamtestnet.jamduna.state-transitions" {
             return error.UnexpectedStateDiff;
         }
 
-        const state_root = try delta_state.buildStateRootWithConfig(allocator, .{ .include_preimage_timestamps = false });
+        const state_root = try current_state.?.buildStateRootWithConfig(allocator, .{ .include_preimage_timestamps = false });
         std.debug.print("New state root: {s}\n", .{std.fmt.fmtSliceHexLower(&state_root)});
 
         try std.testing.expectEqualSlices(u8, &state_root, &state_transition.post_state.state_root);
