@@ -112,7 +112,7 @@ pub fn printDiffBasedOnFormatToStdErr(
     before: anytype,
     after: anytype,
 ) !void {
-    try (try diffBasedOnFormat(allocator, before, after)).debugPrintDeinitAndReturnErrorOnDiff(allocator);
+    try @constCast(&try diffBasedOnFormat(allocator, before, after)).debugPrintDeinitAndReturnErrorOnDiff(allocator);
 }
 
 /// Test function to compare two values based on their evaluated format

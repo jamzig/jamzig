@@ -98,11 +98,11 @@ test "jamtestnet.jamduna.state-transitions" {
     const allocator = std.testing.allocator;
     std.debug.print("\n=== Starting Safrole State Transitions Test ===\n", .{});
 
-    if (true) {
-        // DISABLED FOR THE MOMENT
-        std.debug.print("Disabled for the moment\n", .{});
-        return;
-    }
+    // if (true) {
+    //     // DISABLED FOR THE MOMENT
+    //     std.debug.print("Disabled for the moment\n", .{});
+    //     return;
+    // }
 
     var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions("src/jamtestnet/data/safrole", allocator);
     defer state_transition_vectors.deinit(allocator);
@@ -136,16 +136,17 @@ test "jamtestnet.jamduna.state-transitions" {
         // std.debug.print("Current state {s}", .{current_state.?});
 
         std.debug.print("Executing state transition...\n", .{});
-        var delta_state = try stf.stateTransition(
+        var transition = try stf.stateTransition(
             JAMDUNA_PARAMS,
             allocator,
             &current_state.?,
             &state_transition.block,
         );
-        defer delta_state.deinit(allocator);
+        defer transition.deinitHeap();
 
         std.debug.print("Merging states...\n", .{});
-        try current_state.?.merge(&delta_state, allocator);
+        var delta_state = try transition.cloneBaseAndMergeWithPrime();
+        defer delta_state.deinit(allocator);
         std.debug.print("State merge complete\n", .{});
 
         // std.debug.print("New state {s}", .{current_state.?});
