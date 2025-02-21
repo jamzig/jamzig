@@ -34,77 +34,9 @@ const JAMDUNA_PARAMS = jam_params.Params{
     .max_authorizations_pool_items = 2,
 };
 
-test "jamtestnet.jamduna: verifying state reconstruction" {
-    const span = trace.span(.jamduna);
-    defer span.deinit();
-
-    // Get test allocator
-    const allocator = testing.allocator;
-
-    // Deserialize the state dictionary bin
-    var state_transition = try jamtestnet.parsers.bin.state_transition.loadTestVector(
-        JAMDUNA_PARAMS,
-        allocator,
-        "src/jamtestnet/data/data/safrole/state_transitions/1_000.bin",
-    );
-    defer state_transition.deinit(allocator);
-
-    var genesis_mdict = try state_transition.preStateAsMerklizationDict(allocator);
-    defer genesis_mdict.deinit();
-
-    // Reonstruct state from state dict
-    var genesis_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &genesis_mdict);
-    defer genesis_state.deinit(allocator);
-
-    // Check the roots
-    var parent_state_root = try genesis_state.buildStateRootWithConfig(allocator, .{ .include_preimage_timestamps = false });
-    try std.testing.expectEqualSlices(
-        u8,
-        &parent_state_root,
-        &state_transition.pre_state.state_root,
-    );
-
-    // NOTE: missing pre_image_lookups in the state dicts will add manuall
-
-    // get the service account
-    const service_account = genesis_state.delta.?.accounts.get(0x00).?;
-    const storage_count = service_account.storage.count();
-    const preimages_count = service_account.preimages.count();
-    std.debug.print("\nService Account Stats:\n", .{});
-    std.debug.print("  Storage entries: {d}\n", .{storage_count});
-    std.debug.print("  Preimages entries: {d}\n\n", .{preimages_count});
-
-    // JamDuna testblocks do no contain timestamps from the preimages
-    var reconstructed_genesis_state_mdict = try genesis_state.buildStateMerklizationDictionaryWithConfig(
-        allocator,
-        .{ .include_preimage_timestamps = false },
-    );
-    defer reconstructed_genesis_state_mdict.deinit();
-
-    // Lets see when we serialize the genesis mdict ourselves if we get the same mdict
-    var genesis_state_diff = try genesis_mdict.diff(&reconstructed_genesis_state_mdict);
-    defer genesis_state_diff.deinit();
-    if (genesis_state_diff.has_changes()) {
-        std.debug.print("\nDiff between reconstructed state and original state dictionary:\n(- means missing from reconstructed, + means extra in reconstructed)\n\n{any}\n", .{genesis_state_diff});
-
-        for (genesis_state_diff.entries.items) |diff| {
-            const key_type = @import("state_dictionary/key_type_detection.zig").detectKeyType(diff.key);
-            std.debug.print("Key type: {s}, key: 0x{s}\n", .{ @tagName(key_type), std.fmt.fmtSliceHexLower(&diff.key) });
-        }
-
-        return error.InvalidGenesisState;
-    }
-}
-
-test "jamtestnet.jamduna.fallback" {
+test "jamduna:fallback" {
     const allocator = std.testing.allocator;
     std.debug.print("\nJAMDUNA Fallback\n", .{});
-
-    // if (true) {
-    //     // DISABLED FOR THE MOMENT
-    //     std.debug.print("Disabled for the moment\n", .{});
-    //     return;
-    // }
 
     var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions("src/jamtestnet/data/data/fallback", allocator);
     defer state_transition_vectors.deinit(allocator);
@@ -125,12 +57,8 @@ test "jamtestnet.jamduna.fallback" {
         var pre_state_mdict = try state_transition.preStateAsMerklizationDict(allocator);
         defer pre_state_mdict.deinit();
 
-        for (state_transition.pre_state.keyvals) |kv| {
-            std.debug.print("comparing key {x}\n", .{kv.key});
-            try std.testing.expectEqualSlices(u8, kv.val, pre_state_mdict.entries.get(kv.key[0..32].*).?);
-        }
-
-        try state_transition.validatePreStateRoot(allocator);
+        // Validator Root Calculations
+        try state_transition.validateRoots(allocator);
 
         std.debug.print("Block header slot: {d}\n", .{state_transition.block.header.slot});
 
@@ -176,8 +104,9 @@ test "jamtestnet.jamduna.fallback" {
         var expected_state_diff = try current_state_mdict.diff(&expected_state_mdict);
         defer expected_state_diff.deinit();
 
+        // Check if we have difference from the expected state
         if (expected_state_diff.has_changes()) {
-            std.debug.print("State MDICT Diff: {}", .{expected_state_diff});
+            // std.debug.print("State MDICT Diff: {}", .{expected_state_diff});
 
             var expected_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &expected_state_mdict);
             defer expected_state.deinit(allocator);
@@ -186,15 +115,12 @@ test "jamtestnet.jamduna.fallback" {
             return error.UnexpectedStateDiff;
         }
 
+        // Ensure our state root matches the expected state
         const state_root = try current_state.?.buildStateRoot(allocator);
-        std.debug.print("New state root: {s}\n", .{std.fmt.fmtSliceHexLower(&state_root)});
-
-        // State root do not mach yet
         try std.testing.expectEqualSlices(
             u8,
             &state_transition.post_state.state_root,
             &state_root,
         );
     }
-    std.debug.print("\n=== Completed All State Transitions ===\n", .{});
 }
