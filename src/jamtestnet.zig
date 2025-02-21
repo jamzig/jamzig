@@ -2,7 +2,6 @@ const std = @import("std");
 const testing = std.testing;
 
 pub const parsers = @import("jamtestnet/parsers.zig");
-pub const collector = @import("jamtestnet/collector.zig");
 pub const state_transitions = @import("jamtestnet/state_transitions.zig");
 
 const stf = @import("stf.zig");
