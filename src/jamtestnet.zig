@@ -35,104 +35,35 @@ const JAMDUNA_PARAMS = jam_params.Params{
 
 test "jamduna:fallback" {
     const allocator = std.testing.allocator;
-    std.debug.print("\nJAMDUNA Fallback\n", .{});
-
-    var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions("src/jamtestnet/teams/jamduna/data/fallback", allocator);
-    defer state_transition_vectors.deinit(allocator);
-    std.debug.print("Collected {d} state transition vectors\n", .{state_transition_vectors.items().len});
-
-    var current_state: ?state.JamState(JAMDUNA_PARAMS) = null;
-    defer {
-        if (current_state) |*cs| cs.deinit(allocator);
-    }
-
-    for (state_transition_vectors.items(), 0..) |state_transition_vector, i| {
-        std.debug.print("\nProcessing transition {d}/{d}\n", .{ i + 1, state_transition_vectors.items().len });
-
-        var state_transition = try state_transition_vector.decodeBin(JAMDUNA_PARAMS, allocator);
-        defer state_transition.deinit(allocator);
-
-        // First lest validate the roots
-        var pre_state_mdict = try state_transition.preStateAsMerklizationDict(allocator);
-        defer pre_state_mdict.deinit();
-
-        // Validator Root Calculations
-        try state_transition.validateRoots(allocator);
-
-        std.debug.print("Block header slot: {d}\n", .{state_transition.block.header.slot});
-
-        if (current_state == null) {
-            std.debug.print("Initializing genesis state...\n", .{});
-            var dict = try state_transition.preStateAsMerklizationDict(allocator);
-            defer dict.deinit();
-            current_state = try state_dict.reconstruct.reconstructState(
-                JAMDUNA_PARAMS,
-                allocator,
-                &dict,
-            );
-            std.debug.print("Genesis state initialized\n", .{});
-        }
-
-        // std.debug.print("Current state {s}", .{current_state.?});
-
-        std.debug.print("Executing state transition...\n", .{});
-        var transition = try stf.stateTransition(
-            JAMDUNA_PARAMS,
-            allocator,
-            &current_state.?,
-            &state_transition.block,
-        );
-        defer transition.deinitHeap();
-
-        // Let's assume the transition went well, lets merge into
-        // the base state.
-        try transition.mergePrimeOntoBase();
-
-        // std.debug.print("New state {s}", .{types.fmt.format(current_state.?)});
-
-        // Now lets produce a MerkleDict for our current state and from the expected state
-        // They should result in the same output.
-        var current_state_mdict = try current_state.?.buildStateMerklizationDictionary(allocator);
-        defer current_state_mdict.deinit();
-
-        var expected_state_mdict = try state_transition.postStateAsMerklizationDict(allocator);
-        defer expected_state_mdict.deinit();
-
-        // std.debug.print("{}\n", .{types.fmt.format(&expected_state_mdict)});
-
-        var expected_state_diff = try current_state_mdict.diff(&expected_state_mdict);
-        defer expected_state_diff.deinit();
-
-        // Check if we have difference from the expected state
-        if (expected_state_diff.has_changes()) {
-            // std.debug.print("State MDICT Diff: {}", .{expected_state_diff});
-
-            var expected_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &expected_state_mdict);
-            defer expected_state.deinit(allocator);
-
-            try @import("tests/diff.zig").printDiffBasedOnFormatToStdErr(allocator, &current_state.?, &expected_state);
-            return error.UnexpectedStateDiff;
-        }
-
-        // Ensure our state root matches the expected state
-        const state_root = try current_state.?.buildStateRoot(allocator);
-        try std.testing.expectEqualSlices(
-            u8,
-            &state_transition.post_state.state_root,
-            &state_root,
-        );
-    }
+    try runStateTransitionTests(
+        JAMDUNA_PARAMS,
+        allocator,
+        "src/jamtestnet/teams/jamduna/data/fallback",
+    );
 }
 
 test "jamduna:safrole" {
     const allocator = std.testing.allocator;
-    std.debug.print("\nJAMDUNA Safrole\n", .{});
+    try runStateTransitionTests(
+        JAMDUNA_PARAMS,
+        allocator,
+        "src/jamtestnet/teams/jamduna/data/safrole",
+    );
+}
 
-    var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions("src/jamtestnet/teams/jamduna/data/safrole", allocator);
+/// Run state transition tests using vectors from the specified directory
+pub fn runStateTransitionTests(
+    comptime params: jam_params.Params,
+    allocator: std.mem.Allocator,
+    test_dir: []const u8,
+) !void {
+    std.debug.print("\nRunning state transition tests from: {s}\n", .{test_dir});
+
+    var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions(test_dir, allocator);
     defer state_transition_vectors.deinit(allocator);
     std.debug.print("Collected {d} state transition vectors\n", .{state_transition_vectors.items().len});
 
-    var current_state: ?state.JamState(JAMDUNA_PARAMS) = null;
+    var current_state: ?state.JamState(params) = null;
     defer {
         if (current_state) |*cs| cs.deinit(allocator);
     }
@@ -140,10 +71,10 @@ test "jamduna:safrole" {
     for (state_transition_vectors.items(), 0..) |state_transition_vector, i| {
         std.debug.print("\nProcessing transition {d}/{d}\n", .{ i + 1, state_transition_vectors.items().len });
 
-        var state_transition = try state_transition_vector.decodeBin(JAMDUNA_PARAMS, allocator);
+        var state_transition = try state_transition_vector.decodeBin(params, allocator);
         defer state_transition.deinit(allocator);
 
-        // First lest validate the roots
+        // First validate the roots
         var pre_state_mdict = try state_transition.preStateAsMerklizationDict(allocator);
         defer pre_state_mdict.deinit();
 
@@ -152,60 +83,51 @@ test "jamduna:safrole" {
 
         std.debug.print("Block header slot: {d}\n", .{state_transition.block.header.slot});
 
+        // Initialize genesis state if needed
         if (current_state == null) {
             std.debug.print("Initializing genesis state...\n", .{});
             var dict = try state_transition.preStateAsMerklizationDict(allocator);
             defer dict.deinit();
             current_state = try state_dict.reconstruct.reconstructState(
-                JAMDUNA_PARAMS,
+                params,
                 allocator,
                 &dict,
             );
             std.debug.print("Genesis state initialized\n", .{});
         }
 
-        // std.debug.print("Current state {s}", .{current_state.?});
-
         std.debug.print("Executing state transition...\n", .{});
         var transition = try stf.stateTransition(
-            JAMDUNA_PARAMS,
+            params,
             allocator,
             &current_state.?,
             &state_transition.block,
         );
         defer transition.deinitHeap();
 
-        // Let's assume the transition went well, lets merge into
-        // the base state.
+        // Merge transition into base state
         try transition.mergePrimeOntoBase();
 
-        // std.debug.print("New state {s}", .{types.fmt.format(current_state.?)});
-
-        // Now lets produce a MerkleDict for our current state and from the expected state
-        // They should result in the same output.
+        // Validate against expected state
         var current_state_mdict = try current_state.?.buildStateMerklizationDictionary(allocator);
         defer current_state_mdict.deinit();
 
         var expected_state_mdict = try state_transition.postStateAsMerklizationDict(allocator);
         defer expected_state_mdict.deinit();
 
-        // std.debug.print("{}\n", .{types.fmt.format(&expected_state_mdict)});
-
         var expected_state_diff = try current_state_mdict.diff(&expected_state_mdict);
         defer expected_state_diff.deinit();
 
-        // Check if we have difference from the expected state
+        // Check for differences from expected state
         if (expected_state_diff.has_changes()) {
-            // std.debug.print("State MDICT Diff: {}", .{expected_state_diff});
-
-            var expected_state = try state_dict.reconstruct.reconstructState(JAMDUNA_PARAMS, allocator, &expected_state_mdict);
+            var expected_state = try state_dict.reconstruct.reconstructState(params, allocator, &expected_state_mdict);
             defer expected_state.deinit(allocator);
 
             try @import("tests/diff.zig").printDiffBasedOnFormatToStdErr(allocator, &current_state.?, &expected_state);
             return error.UnexpectedStateDiff;
         }
 
-        // Ensure our state root matches the expected state
+        // Validate state root
         const state_root = try current_state.?.buildStateRoot(allocator);
         try std.testing.expectEqualSlices(
             u8,
