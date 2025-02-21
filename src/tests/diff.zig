@@ -112,7 +112,8 @@ pub fn printDiffBasedOnFormatToStdErr(
     before: anytype,
     after: anytype,
 ) !void {
-    try (try diffBasedOnFormat(allocator, before, after)).debugPrintDeinitAndReturnErrorOnDiff(allocator);
+    var diff = try diffBasedOnFormat(allocator, before, after);
+    try diff.debugPrintDeinitAndReturnErrorOnDiff(allocator);
 }
 
 /// Test function to compare two values based on their evaluated format

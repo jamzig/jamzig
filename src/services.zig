@@ -137,7 +137,13 @@ pub const ServiceAccount = struct {
         return self.preimages.get(hash);
     }
 
-    pub fn integratePreimageLookup(self: *ServiceAccount, hash: Hash, length: u32, timeslot: ?Timeslot) !void {
+    // method to always set the pre-image lookup value
+    pub fn integratePreimageLookup(
+        self: *ServiceAccount,
+        hash: Hash,
+        length: u32,
+        timeslot: ?Timeslot,
+    ) !void {
         const key = PreimageLookupKey{ .hash = hash, .length = length };
         const lookup = self.preimage_lookups.get(key) orelse PreimageLookup{
             .status = .{ timeslot, null, null },

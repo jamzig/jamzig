@@ -186,12 +186,12 @@ pub fn buildPreimageLookupKey(key: services.PreimageLookupKey) [32]u8 {
     return lookup_key;
 }
 
-pub fn deconstructPreimageLookupKey(key: [28]u8) struct { lenght: u32, lossy_hash_of_hash: LossyHash(24) } {
+pub fn deconstructPreimageLookupKey(key: [28]u8) struct { length: u32, lossy_hash_of_hash: LossyHash(24) } {
     // Extract the length from the first 4 bytes
     const length = std.mem.readInt(u32, key[0..4], .little);
 
     // Create a zeroed hash buffer
-    var result: [28]u8 = undefined;
+    var result: [24]u8 = undefined;
 
     // Copy the stored hash portion (bytes 2-29 of the original Blake2b hash)
     @memcpy(&result, key[4..]);
@@ -384,6 +384,11 @@ pub const MerklizationDictionary = struct {
         };
     }
 
+    /// Calculate the state root for this dict
+    pub fn buildStateRoot(self: *const MerklizationDictionary, allocator: std.mem.Allocator) !types.StateRoot {
+        return try @import("state_merklization.zig").merklizeStateDictionary(allocator, self);
+    }
+
     /// Slice is owned, the values are owned by the dictionary.
     pub fn toOwnedSlice(self: *const MerklizationDictionary) ![]Entry {
         var buffer = std.ArrayList(Entry).init(self.entries.allocator);
@@ -393,6 +398,20 @@ pub const MerklizationDictionary = struct {
         }
 
         return buffer.toOwnedSlice();
+    }
+
+    /// Returns a new owned slice of entries sorted by key.
+    /// The slice should be freed by the caller.
+    /// The values remain owned by the dictionary.
+    pub fn toOwnedSliceSortedByKey(self: *const MerklizationDictionary) ![]Entry {
+        const slice = try self.toOwnedSlice();
+        const Context = struct {
+            pub fn lessThan(_: @This(), a: Entry, b: Entry) bool {
+                return std.mem.lessThan(u8, &a.k, &b.k);
+            }
+        };
+        std.mem.sort(Entry, slice, Context{}, Context.lessThan);
+        return slice;
     }
 
     pub fn deinit(self: *MerklizationDictionary) void {

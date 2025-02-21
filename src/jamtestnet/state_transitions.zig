@@ -33,7 +33,7 @@ pub const StateTransitions = struct {
     }
 
     pub fn deinit(self: *StateTransitions, allocator: Allocator) void {
-        for (self.transitions.items) |transition| {
+        for (self.transitions.items) |*transition| {
             transition.deinit(allocator);
         }
         self.transitions.deinit();

@@ -104,7 +104,7 @@ pub fn StateTransition(comptime params: Params) type {
         }
 
         /// Type-hinted variant of ensure() for IDE support
-        pub fn ensureT(self: *Self, comptime T: type, comptime field: STAccessors(State)) Error!T {
+        pub fn ensureT(self: *Self, comptime T: type, comptime field: STAccessors(State)) Error!*T {
             return try self.ensure(field);
         }
 
