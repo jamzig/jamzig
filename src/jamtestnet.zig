@@ -38,7 +38,7 @@ test "jamduna:fallback" {
     try runStateTransitionTests(
         JAMDUNA_PARAMS,
         allocator,
-        "src/jamtestnet/teams/jamduna/data/fallback",
+        "src/jamtestnet/teams/jamduna/data/fallback/state_transitions",
     );
 }
 
@@ -47,9 +47,19 @@ test "jamduna:safrole" {
     try runStateTransitionTests(
         JAMDUNA_PARAMS,
         allocator,
-        "src/jamtestnet/teams/jamduna/data/safrole",
+        "src/jamtestnet/teams/jamduna/data/safrole/state_transitions",
     );
 }
+
+// NOTE: disabled, not following the standard.
+// test "javajam:fallback" {
+//     const allocator = std.testing.allocator;
+//     try runStateTransitionTests(
+//         JAMDUNA_PARAMS,
+//         allocator,
+//         "src/jamtestnet/teams/javajam/state_transitions",
+//     );
+// }
 
 /// Run state transition tests using vectors from the specified directory
 pub fn runStateTransitionTests(
@@ -73,6 +83,8 @@ pub fn runStateTransitionTests(
 
         var state_transition = try state_transition_vector.decodeBin(params, allocator);
         defer state_transition.deinit(allocator);
+
+        // std.debug.print("{}", .{types.fmt.format(state_transition)});
 
         // First validate the roots
         var pre_state_mdict = try state_transition.preStateAsMerklizationDict(allocator);

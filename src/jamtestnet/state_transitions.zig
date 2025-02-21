@@ -44,24 +44,10 @@ pub const StateTransitions = struct {
 fn isValidStateTransitionFilename(filename: []const u8) bool {
     if (filename.len < 7) return false;
 
-    const underscore_pos = std.mem.indexOf(u8, filename, "_") orelse return false;
-    if (underscore_pos == 0) return false;
-
     const ext_pos = std.mem.indexOf(u8, filename, ".") orelse return false;
-    if (ext_pos <= underscore_pos + 1) return false;
 
     const ext = filename[ext_pos..];
     if (!std.mem.eql(u8, ext, ".bin") and !std.mem.eql(u8, ext, ".json")) return false;
-
-    const first_num = filename[0..underscore_pos];
-    const second_num = filename[underscore_pos + 1 .. ext_pos];
-
-    for (first_num) |c| {
-        if (c < '0' or c > '9') return false;
-    }
-    for (second_num) |c| {
-        if (c < '0' or c > '9') return false;
-    }
 
     return true;
 }
@@ -71,10 +57,7 @@ fn getBaseNameFromEntry(entry: ordered_files.Entry) ![]const u8 {
     return entry.name[0..ext_pos];
 }
 
-pub fn collectStateTransitions(base_path: []const u8, allocator: Allocator) !StateTransitions {
-    const state_transitions_path = try std.fs.path.join(allocator, &[_][]const u8{ base_path, "state_transitions" });
-    defer allocator.free(state_transitions_path);
-
+pub fn collectStateTransitions(state_transitions_path: []const u8, allocator: Allocator) !StateTransitions {
     var files = try getOrderedFiles(allocator, state_transitions_path);
     defer files.deinit();
 
