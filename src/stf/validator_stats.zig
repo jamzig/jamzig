@@ -13,7 +13,7 @@ pub const Error = error{};
 pub fn transition(
     comptime params: Params,
     stx: *StateTransition(params),
-    current_validator: types.ValidatorIndex,
+    new_block: *const types.Block,
 ) !void {
     const span = trace.span(.transition_validator_stats);
     defer span.deinit();
@@ -25,6 +25,7 @@ pub fn transition(
         try pi.transitionToNextEpoch();
     }
 
-    var stats = try pi.getValidatorStats(current_validator);
+    var stats = try pi.getValidatorStats(new_block.header.author_index);
     stats.blocks_produced += 1;
+    stats.tickets_introduced += @intCast(new_block.extrinsic.tickets.data.len);
 }

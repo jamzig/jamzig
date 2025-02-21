@@ -62,7 +62,11 @@ pub fn stateTransition(
     );
     defer markers.deinit(allocator);
 
-    try validator_stats.transition(params, state_transition, new_block.header.author_index);
+    try validator_stats.transition(
+        params,
+        state_transition,
+        new_block,
+    );
 
     return state_transition;
 }
