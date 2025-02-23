@@ -69,7 +69,7 @@ pub fn writeStateTransition(
             transition,
             .{
                 .whitespace = .indent_2,
-                .emit_strings_as_arrays = true,
+                .emit_strings_as_arrays = false,
                 .emit_bytes_as_hex = true,
             },
             file.writer(),
@@ -77,24 +77,97 @@ pub fn writeStateTransition(
     }
 }
 
+fn buildMetadataString(allocator: std.mem.Allocator, metadata: *const state_dictionary.DictMetadata) ![]u8 {
+    switch (metadata.*) {
+        .state_component => |_| {
+            // State components don't have additional metadata description
+            return allocator.dupe(u8, "");
+        },
+        .delta_base => |m| {
+            // Format: s=<service_index>|c=<code_hash> b=<balance> g=<min_gas> m=<min_memo_gas> l=<bytes> i=<items>|clen=32
+            const service_index = m.service_index;
+            return std.fmt.allocPrint(allocator, "s={d}", .{service_index});
+        },
+        .delta_storage => |m| {
+            // Format: s=<service_index>|hk=<hex_masked_key> k=<hex_key_suffix>
+            // Extract first 4 bytes for masked_key and remaining for suffix
+            return std.fmt.allocPrint(allocator, "s={d}|hk=0xFFFF{s}", .{
+                m.service_index,
+                std.fmt.fmtSliceHexLower(&m.storage_key),
+            });
+        },
+        .delta_preimage => |m| {
+            // Format: s=<service_index>|h=<hash>|plen=<preimage_length>
+            return std.fmt.allocPrint(allocator, "s={d}|h=0x{s}|plen={d}", .{
+                m.service_index,
+                std.fmt.fmtSliceHexLower(&m.hash),
+                m.preimage_length,
+            });
+        },
+        .delta_preimage_lookup => |m| {
+            // Format: s=<service_index>|h=<hash> l=<length>|t=[<timeslots>] tlen=<timeslot_count>
+            // Note: Currently we always show empty timeslots array as that's what's shown in the example
+            return std.fmt.allocPrint(allocator, "s={d}|h=0x{s} l={d}|t=[]", .{
+                m.service_index,
+                std.fmt.fmtSliceHexLower(&m.hash),
+                m.preimage_length,
+            });
+        },
+        .unknown => {
+            return allocator.dupe(u8, "");
+        },
+    }
+}
+
+fn buildIdString(allocator: std.mem.Allocator, metadata: *const state_dictionary.DictMetadata) ![]u8 {
+    switch (metadata.*) {
+        .state_component => |m| {
+            return std.fmt.allocPrint(allocator, "c{d}", .{m.component_index});
+        },
+        .delta_base => |_| {
+            return std.fmt.allocPrint(allocator, "service_account", .{});
+        },
+        .delta_storage => |_| {
+            return std.fmt.allocPrint(allocator, "account_storage", .{});
+        },
+        .delta_preimage => |_| {
+            return std.fmt.allocPrint(allocator, "account_preimage", .{});
+        },
+        .delta_preimage_lookup => |_| {
+            return std.fmt.allocPrint(allocator, "account_lookup", .{});
+        },
+        .unknown => {
+            return error.UnknownType;
+        },
+    }
+}
+
 fn buildKeyValsFromState(comptime params: jam_params.Params, allocator: std.mem.Allocator, jam_state: *const state.JamState(params)) ![]KeyVal {
     var mdict = try jam_state.buildStateMerklizationDictionary(allocator);
     defer mdict.deinit();
 
-    const entries = try mdict.toOwnedSliceSortedByKey();
-    defer allocator.free(entries);
+    var entries = mdict.entries.iterator();
 
-    var keyvals = try std.ArrayList(KeyVal).initCapacity(allocator, entries.len);
+    var keyvals = try std.ArrayList(KeyVal).initCapacity(allocator, mdict.entries.count());
     defer keyvals.deinit();
 
-    for (entries) |entry| {
+    while (entries.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const dict_entry = entry.value_ptr.*;
         try keyvals.append(.{
-            .key = try allocator.dupe(u8, &entry.k),
-            .val = try allocator.dupe(u8, entry.v),
-            .id = try allocator.dupe(u8, &[_]u8{}), // Empty for now
-            .desc = try allocator.dupe(u8, &[_]u8{}), // Empty for now
+            .key = try allocator.dupe(u8, &key),
+            .val = try allocator.dupe(u8, dict_entry.value),
+            .id = try buildIdString(allocator, &dict_entry.metadata),
+            .desc = try buildMetadataString(allocator, &dict_entry.metadata),
         });
     }
+
+    // sort the keyvals on key in place
+    std.mem.sort(KeyVal, keyvals.items, {}, struct {
+        fn lessThan(_: void, a: KeyVal, b: KeyVal) bool {
+            return std.mem.lessThan(u8, a.key, b.key);
+        }
+    }.lessThan);
 
     return keyvals.toOwnedSlice();
 }
