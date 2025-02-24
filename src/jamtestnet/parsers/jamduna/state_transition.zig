@@ -285,7 +285,7 @@ pub const TestStateTransition = struct {
         return dict;
     }
 
-    fn keyValToKey(key_bytes: []const u8) !types.StateRoot {
+    fn keyValToKey(key_bytes: []const u8) !types.OpaqueHash {
         if (key_bytes.len != 32) {
             return error.InvalidKeyLength;
         }

@@ -1,12 +1,14 @@
 const std = @import("std");
 const types = @import("../../types.zig");
+
 pub const state_dictionary = @import("../../state_dictionary.zig");
-pub const state_transition = @import("jamduna/state_transition.zig");
 
 const Params = @import("../../jam_params.zig").Params;
 
 const MerklizationDictionary = state_dictionary.MerklizationDictionary;
-const TestStateTransition = state_transition.TestStateTransition;
+
+pub const jamzig_state_transition = @import("jamzig/state_transition.zig");
+const JamZigStateTransition = jamzig_state_transition.StateTransition;
 
 const parsers = @import("../parsers.zig");
 
@@ -25,7 +27,7 @@ pub fn Loader(comptime params: Params) type {
             allocator: std.mem.Allocator,
             file_path: []const u8,
         ) anyerror!parsers.StateTransition {
-            const transition = try state_transition.loadTestVector(params, allocator, file_path);
+            const transition = try jamzig_state_transition.loadTestVector(params, allocator, file_path);
             return .{
                 .ptr = @ptrCast(try StateTransition.initOnHeap(allocator, transition)),
                 .vtable = &StateTransition.VTable,
@@ -35,12 +37,12 @@ pub fn Loader(comptime params: Params) type {
 }
 
 pub const StateTransition = struct {
-    state_transition: TestStateTransition,
+    state_transition: JamZigStateTransition,
 
     const Context = @This();
 
     ///
-    pub fn initOnHeap(allocator: std.mem.Allocator, transition: TestStateTransition) !*StateTransition {
+    pub fn initOnHeap(allocator: std.mem.Allocator, transition: JamZigStateTransition) !*StateTransition {
         const self = try allocator.create(@This());
         self.state_transition = transition;
         return self;
@@ -60,39 +62,39 @@ pub const StateTransition = struct {
         ctx: *anyopaque,
         allocator: std.mem.Allocator,
     ) anyerror!MerklizationDictionary {
-        return try @as(*TestStateTransition, @alignCast(@ptrCast(ctx))).preStateAsMerklizationDict(allocator);
+        return try @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).preStateAsMerklizationDict(allocator);
     }
 
     fn preStateRoot(ctx: *anyopaque) types.StateRoot {
-        return @as(*TestStateTransition, @alignCast(@ptrCast(ctx))).preStateRoot();
+        return @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).preStateRoot();
     }
 
     fn block(ctx: *anyopaque) types.Block {
-        return @as(*TestStateTransition, @alignCast(@ptrCast(ctx))).block;
+        return @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).block;
     }
 
     fn postStateAsMerklizationDict(
         ctx: *anyopaque,
         allocator: std.mem.Allocator,
     ) !MerklizationDictionary {
-        return try @as(*TestStateTransition, @alignCast(@ptrCast(ctx))).postStateAsMerklizationDict(allocator);
+        return try @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).postStateAsMerklizationDict(allocator);
     }
 
     fn postStateRoot(ctx: *anyopaque) types.StateRoot {
-        return @as(*TestStateTransition, @alignCast(@ptrCast(ctx))).postStateRoot();
+        return @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).postStateRoot();
     }
 
     fn validateRoots(
         ctx: *anyopaque,
         allocator: std.mem.Allocator,
     ) !void {
-        return @as(*TestStateTransition, @alignCast(@ptrCast(ctx))).validateRoots(allocator);
+        return @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).validateRoots(allocator);
     }
 
     fn deinit(
         ctx: *anyopaque,
         allocator: std.mem.Allocator,
     ) void {
-        return @as(*TestStateTransition, @alignCast(@ptrCast(ctx))).deinitHeap(allocator);
+        return @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).deinitHeap(allocator);
     }
 };

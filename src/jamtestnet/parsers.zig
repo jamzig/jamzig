@@ -10,6 +10,9 @@ const MerklizationDictionary = state_dictionary.MerklizationDictionary;
 pub const jamduna =
     @import("parsers/jamduna.zig");
 
+pub const jamzig =
+    @import("parsers/jamzig.zig");
+
 pub const Loader = struct {
     const Context = @This();
 

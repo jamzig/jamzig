@@ -73,8 +73,10 @@ test "javajam:safrole" {
 
 test "jamzig:safrole" {
     const allocator = std.testing.allocator;
+    const loader = jamtestnet.jamzig.Loader(JAMDUNA_PARAMS){};
     try runStateTransitionTests(
         JAMDUNA_PARAMS,
+        loader.loader(),
         allocator,
         "src/jamtestnet/teams/jamzig/safrole/state_transitions",
     );
