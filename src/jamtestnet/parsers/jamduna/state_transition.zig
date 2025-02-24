@@ -13,7 +13,6 @@ const PreimageLookupInfo = struct {
 
 /// Find and parse the length part that starts with "l="
 fn parseLengthFromDesc(desc: []const u8) !u32 {
-    std.debug.print("{s}\n", .{desc});
     const len_prefix = "l=";
     const len_start = std.mem.indexOf(u8, desc, len_prefix) orelse return error.InvalidDescFormat;
     const num_start = len_start + len_prefix.len;
@@ -29,7 +28,6 @@ fn parseLengthFromDesc(desc: []const u8) !u32 {
 }
 
 fn parseKFromDesc(desc: []const u8) ![4]u8 {
-    std.debug.print("{s}\n", .{desc});
     const k_prefix = " k=";
     const k_start = std.mem.indexOf(u8, desc, k_prefix) orelse return error.InvalidDescFormat;
     const hex_start = k_start + k_prefix.len;
@@ -222,12 +220,27 @@ pub const TestStateTransition = struct {
         self.* = undefined;
     }
 
+    pub fn deinitHeap(self: *TestStateTransition, allocator: std.mem.Allocator) void {
+        self.pre_state.deinit(allocator);
+        self.block.deinit(allocator);
+        self.post_state.deinit(allocator);
+        allocator.destroy(self);
+    }
+
     pub fn preStateAsMerklizationDict(self: *const TestStateTransition, allocator: std.mem.Allocator) !state_dictionary.MerklizationDictionary {
         return keyValArrayToMerklizationDict(allocator, self.pre_state.keyvals, "pre_state");
     }
 
     pub fn postStateAsMerklizationDict(self: *const TestStateTransition, allocator: std.mem.Allocator) !state_dictionary.MerklizationDictionary {
         return keyValArrayToMerklizationDict(allocator, self.post_state.keyvals, "post_state");
+    }
+
+    pub fn preStateRoot(self: *const TestStateTransition) types.StateRoot {
+        return self.pre_state.state_root;
+    }
+
+    pub fn postStateRoot(self: *const TestStateTransition) types.StateRoot {
+        return self.post_state.state_root;
     }
 
     pub fn validatePreStateRoot(self: *const TestStateTransition, allocator: std.mem.Allocator) !void {

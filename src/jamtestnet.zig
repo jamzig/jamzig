@@ -13,7 +13,7 @@ const services = @import("services.zig");
 
 const jam_params = @import("jam_params.zig");
 
-const jamtestnet = @This();
+const jamtestnet = @import("jamtestnet/parsers.zig");
 
 const trace = @import("tracing.zig").scoped(.stf_test);
 
@@ -44,8 +44,10 @@ test "jamduna:fallback" {
 
 test "jamduna:safrole" {
     const allocator = std.testing.allocator;
+    const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
     try runStateTransitionTests(
         JAMDUNA_PARAMS,
+        loader.loader(),
         allocator,
         "src/jamtestnet/teams/jamduna/data/safrole/state_transitions",
     );
@@ -60,16 +62,6 @@ test "jamduna:assurances" {
     );
 }
 
-test "jamzig:safrole" {
-    const allocator = std.testing.allocator;
-    try runStateTransitionTests(
-        JAMDUNA_PARAMS,
-        allocator,
-        "src/jamtestnet/teams/jamzig/safrole/state_transitions",
-    );
-}
-
-// NOTE: disabled, not following the standard.
 test "javajam:safrole" {
     const allocator = std.testing.allocator;
     try runStateTransitionTests(
@@ -79,9 +71,19 @@ test "javajam:safrole" {
     );
 }
 
+test "jamzig:safrole" {
+    const allocator = std.testing.allocator;
+    try runStateTransitionTests(
+        JAMDUNA_PARAMS,
+        allocator,
+        "src/jamtestnet/teams/jamzig/safrole/state_transitions",
+    );
+}
+
 /// Run state transition tests using vectors from the specified directory
 pub fn runStateTransitionTests(
     comptime params: jam_params.Params,
+    loader: jamtestnet.Loader,
     allocator: std.mem.Allocator,
     test_dir: []const u8,
 ) !void {
@@ -99,11 +101,11 @@ pub fn runStateTransitionTests(
     for (state_transition_vectors.items()) |state_transition_vector| {
         // std.debug.print("\nProcessing transition {d}/{d}\n", .{ i + 1, state_transition_vectors.items().len });
 
-        var state_transition = try state_transition_vector.decodeBin(params, allocator);
+        var state_transition = try loader.loadTestVector(allocator, state_transition_vector.bin.path);
         defer state_transition.deinit(allocator);
 
         // std.debug.print("{}", .{types.fmt.format(state_transition)});
-        std.debug.print("{}", .{types.fmt.format(state_transition.block)});
+        // std.debug.print("{}", .{types.fmt.format(state_transition.block)});
 
         // First validate the roots
         var pre_state_mdict = try state_transition.preStateAsMerklizationDict(allocator);
@@ -132,7 +134,7 @@ pub fn runStateTransitionTests(
             params,
             allocator,
             &current_state.?,
-            &state_transition.block,
+            &state_transition.block(),
         );
         defer transition.deinitHeap();
 
@@ -142,7 +144,7 @@ pub fn runStateTransitionTests(
         // Log block information for debugging
         @import("sequoia.zig").logging.printBlockEntropyDebug(
             JAMDUNA_PARAMS,
-            &state_transition.block,
+            &state_transition.block(),
             &current_state.?,
         );
 
@@ -173,7 +175,7 @@ pub fn runStateTransitionTests(
         const state_root = try current_state.?.buildStateRoot(allocator);
         try std.testing.expectEqualSlices(
             u8,
-            &state_transition.post_state.state_root,
+            &state_transition.postStateRoot(),
             &state_root,
         );
     }
