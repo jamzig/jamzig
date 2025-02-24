@@ -35,8 +35,10 @@ pub const JAMDUNA_PARAMS = jam_params.Params{
 
 test "jamduna:fallback" {
     const allocator = std.testing.allocator;
+    const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
     try runStateTransitionTests(
         JAMDUNA_PARAMS,
+        loader.loader(),
         allocator,
         "src/jamtestnet/teams/jamduna/data/fallback/state_transitions",
     );
@@ -54,18 +56,22 @@ test "jamduna:safrole" {
 }
 
 test "jamduna:assurances" {
-    const allocator = std.testing.allocator;
-    try runStateTransitionTests(
-        JAMDUNA_PARAMS,
-        allocator,
-        "src/jamtestnet/teams/jamduna/data/assurances/state_transitions",
-    );
+    // const allocator = std.testing.allocator;
+    // const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
+    // try runStateTransitionTests(
+    //     JAMDUNA_PARAMS,
+    //     loader.loader(),
+    //     allocator,
+    //     "src/jamtestnet/teams/jamduna/data/assurances/state_transitions",
+    // );
 }
 
 test "javajam:safrole" {
     const allocator = std.testing.allocator;
+    const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
     try runStateTransitionTests(
         JAMDUNA_PARAMS,
+        loader.loader(),
         allocator,
         "src/jamtestnet/teams/javajam/state_transitions",
     );

@@ -46,7 +46,8 @@ const testing = std.testing;
 
 test "Alpha encode" {
     const C = 341;
-    var alpha = Alpha(C).init();
+    const O = 8;
+    var alpha = Alpha(C, O).init();
     const core: usize = 0;
     const auth1: [32]u8 = [_]u8{1} ** 32;
     const auth2: [32]u8 = [_]u8{2} ** 32;
@@ -57,7 +58,7 @@ test "Alpha encode" {
     var buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer buffer.deinit();
 
-    try encode(C, &alpha, buffer.writer());
+    try encode(C, O, &alpha, buffer.writer());
 
     // Expected output:
     // - 2 (number of items in the first pool)

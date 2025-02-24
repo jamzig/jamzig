@@ -17,8 +17,8 @@ pub fn transition(
 ) !void {
     const current_kappa: *const types.ValidatorSet = try stx.ensure(.kappa);
     const current_lambda: *const types.ValidatorSet = try stx.ensure(.lambda);
-    const current_psi: *const state.Psi = try stx.ensure(.psi);
 
+    const psi_prime: *state.Psi = try stx.ensure(.psi_prime);
     const rho_prime: *state.Rho(params.core_count) = try stx.ensure(.rho_prime);
 
     // Map current_kappa to extract Edwards public keys
@@ -31,7 +31,7 @@ pub fn transition(
     // Verify correctness of the disputes extrinsic
     try disputes.verifyDisputesExtrinsicPre(
         xtdisputes,
-        current_psi,
+        psi_prime,
         current_kappa_keys,
         current_lambda_keys,
         params.validators_count,
@@ -40,11 +40,11 @@ pub fn transition(
 
     try disputes.processDisputesExtrinsic(
         params.core_count,
-        current_psi,
+        psi_prime,
         rho_prime,
         xtdisputes,
         params.validators_count,
     );
 
-    try disputes.verifyDisputesExtrinsicPost(xtdisputes, current_psi);
+    try disputes.verifyDisputesExtrinsicPost(xtdisputes, psi_prime);
 }

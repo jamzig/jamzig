@@ -135,5 +135,5 @@ test "detectKeyType service entries" {
     key[3] = 0x00;
     key[5] = 0x00;
     key[7] = 0x00;
-    try testing.expectEqual(detectKeyType(key), .delta_lookup);
+    try testing.expectEqual(detectKeyType(key), .delta_preimage_lookup);
 }

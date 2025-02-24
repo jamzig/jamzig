@@ -24,7 +24,7 @@ pub fn Alpha(comptime core_count: u16, comptime max_pool_items: u8) type {
         }
 
         pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-            try @import("state_json/authorization.zig").jsonStringify(core_count, self, jw);
+            try @import("state_json/authorization.zig").jsonStringify(core_count, max_pool_items, self, jw);
         }
 
         pub fn isAuthorized(self: *const @This(), core: usize, auth: Hash) bool {
@@ -80,7 +80,7 @@ pub fn Alpha(comptime core_count: u16, comptime max_pool_items: u8) type {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try @import("state_format/authorization.zig").format(core_count, self, fmt, options, writer);
+            try @import("state_format/authorization.zig").format(core_count, max_pool_items, self, fmt, options, writer);
         }
 
         pub fn deinit(self: *@This()) void {
