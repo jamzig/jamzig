@@ -10,6 +10,23 @@ comptime {
     // _ = @import("pvm_test/host_call.zig");
 }
 
+test "pvm:jamduna_service_code:machine_invocation" {
+    const allocator = std.testing.allocator;
+
+    const program_code = @embedFile("pvm_test/fixtures/jam_duna_service_code.pvm");
+
+    const result = try pvmlib.invoke.machineInvocation(
+        allocator,
+        program_code,
+        5,
+        std.math.maxInt(u32),
+        &[_]u8{0} ** 20,
+        .{},
+    );
+
+    std.debug.print("{}", .{result});
+}
+
 test "pvm:jamduna_service_code" {
     const allocator = std.testing.allocator;
     const raw_program = @embedFile("pvm_test/fixtures/jam_duna_service_code.pvm");

@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 
 const trace = @import("tracing.zig").scoped(.pvm);
 
+pub const invoke = @import("pvm/invocation.zig");
+
 pub const PVM = struct {
     pub const Program = @import("./pvm/program.zig").Program;
     pub const Decoder = @import("./pvm/decoder.zig").Decoder;
@@ -12,8 +14,9 @@ pub const PVM = struct {
 
     pub const Memory = @import("./pvm/memory.zig").Memory;
 
-    pub const HostCallFn = @import("./pvm/host_calls.zig").HostCallFn;
-    pub const HostCallResult = @import("./pvm/host_calls.zig").HostCallResult;
+    pub const HostCallMap = ExecutionContext.HostCallMap;
+    pub const HostCallFn = ExecutionContext.HostCallFn;
+    pub const HostCallResult = ExecutionContext.HostCallResult;
 
     pub const ExecutionContext = @import("./pvm/execution_context.zig").ExecutionContext;
 
@@ -32,36 +35,6 @@ pub const PVM = struct {
 
         pub fn isError(self: @This()) bool {
             return self != .halt;
-        }
-    };
-
-    pub const SingleStepResult = union(enum) {
-        // Continue execution with next instruction
-        cont: void,
-        // Need to execute host call
-        host_call: HostCallInvocation,
-        // Terminal conditions from graypaper
-        terminal: InvocationException,
-
-        pub fn isTerminal(self: *const @This()) bool {
-            return self.* == .terminal;
-        }
-    };
-
-    pub const BasicInvocationResult = union(enum) {
-        host_call: HostCallInvocation,
-        terminal: InvocationException,
-
-        pub fn isError(self: @This()) bool {
-            return self == .terminal and self.terminal.isError();
-        }
-    };
-
-    pub const HostCallInvocationResult = union(enum) {
-        terminal: InvocationException,
-
-        pub fn isError(self: @This()) bool {
-            return self == .terminal and self.terminal.isError();
         }
     };
 
@@ -102,6 +75,19 @@ pub const PVM = struct {
         DivisionByZero,
     };
 
+    pub const SingleStepResult = union(enum) {
+        // Continue execution with next instruction
+        cont: void,
+        // Need to execute host call
+        host_call: HostCallInvocation,
+        // Terminal conditions from graypaper
+        terminal: InvocationException,
+
+        pub fn isTerminal(self: *const @This()) bool {
+            return self.* == .terminal;
+        }
+    };
+
     // Single step invocation
     pub fn singleStepInvocation(context: *ExecutionContext) Error!SingleStepResult {
         const span = trace.span(.execute_step);
@@ -126,6 +112,15 @@ pub const PVM = struct {
         // Execute instruction
         return executeInstruction(context, instruction);
     }
+
+    pub const BasicInvocationResult = union(enum) {
+        host_call: HostCallInvocation,
+        terminal: InvocationException,
+
+        pub fn isError(self: @This()) bool {
+            return self == .terminal and self.terminal.isError();
+        }
+    };
 
     /// Basic invocation (Basic & Hostcall in one)
     /// Calls singleStepInvocation until we reach a terminal condition/hostcall
@@ -154,6 +149,14 @@ pub const PVM = struct {
         }
     }
 
+    pub const HostCallInvocationResult = union(enum) {
+        terminal: InvocationException,
+
+        pub fn isError(self: @This()) bool {
+            return self == .terminal and self.terminal.isError();
+        }
+    };
+
     // Host call invocation invocation
     // Calls basicInvocation until we against
     pub fn hostcallInvocation(context: *ExecutionContext) Error!HostCallInvocationResult {
@@ -163,7 +166,7 @@ pub const PVM = struct {
                     switch (host_call_fn(context)) {
                         .play => {
                             context.pc = params.next_pc;
-                            hostcallInvocation(context);
+                            return try hostcallInvocation(context);
                         },
                         .page_fault => |addr| {
                             return .{
@@ -177,6 +180,41 @@ pub const PVM = struct {
             },
             .terminal => |terminal| {
                 return .{ .terminal = terminal };
+            },
+        }
+    }
+
+    // Machine Invocation
+    pub const MachineInvocationResult = union(enum) {
+        halt: []const u8,
+        terminal: union(enum) {
+            panic,
+            out_of_gas,
+        },
+
+        pub fn isError(self: @This()) bool {
+            return self == .terminal;
+        }
+    };
+
+    pub fn machineInvocation(context: *ExecutionContext) Error!MachineInvocationResult {
+        switch (try hostcallInvocation(context)) {
+            .terminal => |terminal| {
+                switch (terminal) {
+                    .halt => {
+                        // if memory range in valid memory
+                        // read the memory range and return it
+
+                        // else return empty
+                        return .{ .halt = &[_]u8{} };
+                    },
+                    .out_of_gas => {
+                        return .{ .terminal = .out_of_gas };
+                    },
+                    else => {
+                        return .{ .terminal = .panic };
+                    },
+                }
             },
         }
     }

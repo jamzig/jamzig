@@ -5,8 +5,6 @@ const Program = @import("program.zig").Program;
 const Decoder = @import("decoder.zig").Decoder;
 const Memory = @import("memory.zig").Memory;
 
-const HostCallFn = @import("host_calls.zig").HostCallFn;
-
 const trace = @import("../tracing.zig").scoped(.pvm);
 
 pub const ExecutionContext = struct {
@@ -14,11 +12,19 @@ pub const ExecutionContext = struct {
     decoder: Decoder,
     registers: [13]u64,
     memory: Memory,
-    host_calls: std.AutoHashMap(u32, HostCallFn),
+    // NOTE: we cannot use HostCallMap here due to circular dep
+    host_calls: std.AutoHashMapUnmanaged(u32, *const fn (*ExecutionContext) HostCallResult),
 
     gas: i64,
     pc: u32,
     error_data: ?ErrorData,
+
+    pub const HostCallResult = union(enum) {
+        play,
+        page_fault: u32,
+    };
+    pub const HostCallFn = *const fn (*ExecutionContext) HostCallResult;
+    pub const HostCallMap = std.AutoHashMapUnmanaged(u32, *const fn (*ExecutionContext) HostCallResult);
 
     pub const ErrorData = union(enum) {
         page_fault: u32,
@@ -151,7 +157,7 @@ pub const ExecutionContext = struct {
         return ExecutionContext{
             .memory = memory,
             .decoder = Decoder.init(program.code, program.mask),
-            .host_calls = std.AutoHashMap(u32, HostCallFn).init(allocator),
+            .host_calls = .{},
             .program = program,
             .registers = [_]u64{0} ** 13,
             .pc = 0,
@@ -175,12 +181,19 @@ pub const ExecutionContext = struct {
 
     pub fn deinit(self: *ExecutionContext, allocator: Allocator) void {
         self.memory.deinit();
-        self.host_calls.deinit();
+        self.host_calls.deinit(allocator);
         self.program.deinit(allocator);
     }
 
-    pub fn registerHostCall(self: *ExecutionContext, idx: u32, handler: HostCallFn) !void {
-        try self.host_calls.put(idx, handler);
+    pub fn registerHostCall(self: *ExecutionContext, allocator: std.mem.Allocator, idx: u32, handler: HostCallFn) !void {
+        try self.host_calls.put(allocator, idx, handler);
+    }
+
+    pub fn setHostCalls(self: *ExecutionContext, allocator: std.mem.Allocator, new_host_calls: HostCallMap) void {
+        // Deinit the old host calls map
+        self.host_calls.deinit(allocator);
+        // Replace with the new one
+        self.host_calls = new_host_calls;
     }
 
     pub fn debugProgram(self: *const ExecutionContext, writer: anytype) !void {

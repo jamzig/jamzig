@@ -353,7 +353,7 @@ pub const PVMFuzzer = struct {
         defer exec_ctx.deinit(self.allocator);
 
         // Register host call handler
-        try exec_ctx.registerHostCall(0, struct {
+        try exec_ctx.registerHostCall(self.allocator, 0, struct {
             pub fn func(ctx: *PVM.ExecutionContext) PVM.HostCallResult {
                 _ = ctx;
                 return .play;
