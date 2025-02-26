@@ -98,14 +98,14 @@ pub fn Phi(
 
         // Remove and return the first authorization from the queue for a specific core
         pub fn popAuthorization(self: *@This(), core: usize) ?AuthorizerHash {
-            if (core >= core_count) return null;
+            if (core >= core_count) return error.InvalidCore;
             if (self.queue[core].items.len == 0) return null;
             return self.queue[core].orderedRemove(0);
         }
 
         // Get the number of authorizations in the queue for a specific core
         pub fn getQueueLength(self: *@This(), core: usize) usize {
-            if (core >= core_count) return 0;
+            if (core >= core_count) return error.InvalidCore;
             return self.queue[core].items.len;
         }
     };

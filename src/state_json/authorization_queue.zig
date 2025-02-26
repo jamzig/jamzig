@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const auth_queue = @import("../authorization_queue.zig");
-const H = auth_queue.H;
+const auth_queue = @import("../authorizer_queue.zig");
+const H = auth_queue.H; // TODO: remove
 const Phi = auth_queue.Phi;
 
 pub fn jsonStringify(self: anytype, jw: anytype) !void {

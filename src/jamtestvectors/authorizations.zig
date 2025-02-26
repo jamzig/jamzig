@@ -62,6 +62,18 @@ pub fn TestCase(comptime params: jam_params.Params) type {
             );
         }
 
+        pub fn debugInput(self: *@This()) void {
+            std.debug.print("{}\n", .{types.fmt.format(self.input)});
+        }
+
+        pub fn debugPrintStateDiff(self: *@This(), alloc: std.mem.Allocator) !void {
+            try @import("../tests/diff.zig").printDiffBasedOnFormatToStdErr(
+                alloc,
+                types.fmt.format(self.pre_state),
+                types.fmt.format(self.post_state),
+            );
+        }
+
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             self.input.deinit(allocator);
             self.pre_state.deinit(allocator);
@@ -76,6 +88,8 @@ test "authorizations:single" {
 
     const test_jsons: [1][]const u8 = .{
         BASE_PATH ++ "tiny/progress_authorizations-1.bin",
+        // BASE_PATH ++ "tiny/progress_authorizations-2.bin",
+        // BASE_PATH ++ "tiny/progress_authorizations-3.bin",
     };
 
     for (test_jsons) |test_json| {
@@ -85,8 +99,10 @@ test "authorizations:single" {
         );
         defer test_vector.deinit(allocator);
 
-        // std.debug.print("{}", .{types.fmt.format(test_vector)});
+        std.debug.print("{}", .{types.fmt.format(test_vector.input)});
+        try test_vector.debugPrintStateDiff(allocator);
 
+        // std.debug.print("{}", .{types.fmt.format(test_vector)});
     }
 }
 

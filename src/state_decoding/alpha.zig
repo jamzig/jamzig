@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const authorization_pool = @import("../authorization_pool.zig");
+const authorization_pool = @import("../authorizer_pool.zig");
 const decoder = @import("../codec/decoder.zig");
 const codec = @import("../codec.zig");
 const Alpha = authorization_pool.Alpha;

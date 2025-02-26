@@ -2,7 +2,7 @@ const std = @import("std");
 const encoder = @import("../codec/encoder.zig");
 const codec = @import("../codec.zig");
 
-const authorization_pool = @import("../authorization_pool.zig");
+const authorization_pool = @import("../authorizer_pool.zig");
 const Alpha = authorization_pool.Alpha;
 
 const trace = @import("../tracing.zig").scoped(.codec);

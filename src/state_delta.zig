@@ -69,7 +69,7 @@ pub fn StateTransition(comptime params: Params) type {
         }
 
         /// Returns base or prime value. Creates prime by cloning base if needed.
-        pub fn ensure(self: *Self, comptime field: STAccessors(State)) Error!STAccessorPointerType(STBaseType(State, field), field) {
+        pub fn ensure(self: *Self, comptime field: STAccessors(State)) anyerror!STAccessorPointerType(STBaseType(State, field), field) {
             const builtin = @import("builtin");
             const name = @tagName(field);
 
@@ -197,7 +197,7 @@ pub fn StateTransition(comptime params: Params) type {
             return try self.get(field);
         }
 
-        fn cloneField(self: *Self, field: anytype) error{OutOfMemory}!@TypeOf(field.?) {
+        fn cloneField(self: *Self, field: anytype) anyerror!@TypeOf(field.?) {
             const T = @TypeOf(field.?);
             return switch (@typeInfo(T)) {
                 .@"struct", .@"union" => if (@hasDecl(T, "deepClone")) blk: {
