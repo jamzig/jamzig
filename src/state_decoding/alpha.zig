@@ -1,9 +1,9 @@
 const std = @import("std");
 const testing = std.testing;
-const authorization = @import("../authorization.zig");
+const authorization_pool = @import("../authorization_pool.zig");
 const decoder = @import("../codec/decoder.zig");
 const codec = @import("../codec.zig");
-const Alpha = authorization.Alpha;
+const Alpha = authorization_pool.Alpha;
 
 pub fn decode(comptime core_count: u16, comptime max_pool_items: u8, reader: anytype) !Alpha(core_count, max_pool_items) {
     var alpha = Alpha(core_count, max_pool_items).init();

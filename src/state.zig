@@ -303,7 +303,7 @@ pub fn JamStateView(comptime params: Params) type {
     };
 }
 
-pub const Alpha = @import("authorization.zig").Alpha;
+pub const Alpha = @import("authorization_pool.zig").Alpha;
 pub const Beta = @import("recent_blocks.zig").RecentHistory;
 
 // History and Queuing or work reports

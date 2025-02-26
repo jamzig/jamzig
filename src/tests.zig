@@ -70,7 +70,7 @@ comptime {
 
     _ = @import("recent_blocks.zig");
 
-    _ = @import("authorization.zig");
+    _ = @import("authorization_pool.zig");
     _ = @import("authorization_queue.zig");
 
     _ = @import("assurances.zig");
