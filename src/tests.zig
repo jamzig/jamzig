@@ -9,6 +9,7 @@ comptime {
     _ = @import("jamtestvectors/erasure_coding.zig");
     _ = @import("jamtestvectors/assurances.zig");
     _ = @import("jamtestvectors/fisher_yates.zig");
+    _ = @import("jamtestvectors/authorizations.zig");
 
     _ = @import("codec.zig");
     _ = @import("codec_test.zig");
@@ -70,8 +71,11 @@ comptime {
 
     _ = @import("recent_blocks.zig");
 
-    _ = @import("authorization.zig");
-    _ = @import("authorization_queue.zig");
+    _ = @import("authorizations.zig");
+    _ = @import("authorizations_test.zig");
+
+    _ = @import("authorizer_pool.zig");
+    _ = @import("authorizer_queue.zig");
 
     _ = @import("assurances.zig");
     _ = @import("assurances_test.zig");

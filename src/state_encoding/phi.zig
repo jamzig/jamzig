@@ -5,7 +5,7 @@ const types = @import("../types.zig");
 const encoder = @import("../codec/encoder.zig");
 const codec = @import("../codec.zig");
 
-const authorization_queue = @import("../authorization_queue.zig");
+const authorization_queue = @import("../authorizer_queue.zig");
 const Phi = authorization_queue.Phi;
 
 const trace = @import("../tracing.zig").scoped(.codec);

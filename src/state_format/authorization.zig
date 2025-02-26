@@ -1,7 +1,7 @@
 const std = @import("std");
 const tfmt = @import("../types/fmt.zig");
 
-const Alpha = @import("../authorization.zig").Alpha;
+const Alpha = @import("../authorizer_pool.zig").Alpha;
 
 pub fn format(
     comptime core_count: u32,

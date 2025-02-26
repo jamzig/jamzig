@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const authorization_queue = @import("../authorization_queue.zig");
+const authorization_queue = @import("../authorizer_queue.zig");
 const Phi = authorization_queue.Phi;
 
 const H = 32; // Hash size (32)
