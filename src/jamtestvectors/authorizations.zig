@@ -62,7 +62,7 @@ pub fn TestCase(comptime params: jam_params.Params) type {
             );
         }
 
-        pub fn debugInput(self: *@This()) void {
+        pub fn debugInput(self: *const @This()) void {
             std.debug.print("{}\n", .{types.fmt.format(self.input)});
         }
 

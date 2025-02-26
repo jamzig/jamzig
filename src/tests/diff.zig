@@ -11,7 +11,7 @@ pub const DiffResult = union(enum) {
     pub fn debugPrint(self: @This()) void {
         switch (self) {
             .EmptyDiff => {
-                std.debug.print("<empty diff>\n", .{});
+                // std.debug.print("<empty diff>\n", .{});
             },
             .Diff => |diff| {
                 std.debug.print("\n\n", .{});
