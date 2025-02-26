@@ -37,5 +37,5 @@ pub fn machineInvocation(
     exec_ctx.setHostCalls(allocator, host_call_fns);
 
     // Run the machine invocation
-    return PVM.machineInvocation(&exec_ctx);
+    return PVM.machineInvocation(allocator, &exec_ctx);
 }

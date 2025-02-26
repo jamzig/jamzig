@@ -179,6 +179,23 @@ pub const ExecutionContext = struct {
         @memset(&self.registers, 0);
     }
 
+    /// Construct the return value by looking determining if we can
+    /// read the range between registers 7 and 8. If the range is invalid we return []
+    pub fn readSliceBetweenRegister7AndRegister8(self: *@This()) []const u8 {
+        const span = trace.span(.return_value_as_slice);
+        defer span.deinit();
+
+        if (self.registers[7] < self.registers[8]) {
+            const reg7 = @as(u32, @truncate(self.registers[7]));
+            const reg8 = @as(u32, @truncate(self.registers[8]));
+            return self.memory.readSlice(reg7, reg8 - reg7) catch {
+                return &[_]u8{};
+            };
+        }
+
+        return &[_]u8{};
+    }
+
     pub fn deinit(self: *ExecutionContext, allocator: Allocator) void {
         self.memory.deinit();
         self.host_calls.deinit(allocator);

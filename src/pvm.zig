@@ -195,18 +195,25 @@ pub const PVM = struct {
         pub fn isError(self: @This()) bool {
             return self == .terminal;
         }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .halt => |result| allocator.free(result),
+                .terminal => {}, // No allocated memory to free
+            }
+            self.* = undefined;
+        }
     };
 
-    pub fn machineInvocation(context: *ExecutionContext) Error!MachineInvocationResult {
+    pub fn machineInvocation(allocator: std.mem.Allocator, context: *ExecutionContext) Error!MachineInvocationResult {
         switch (try hostcallInvocation(context)) {
             .terminal => |terminal| {
                 switch (terminal) {
                     .halt => {
                         // if memory range in valid memory
                         // read the memory range and return it
-
-                        // else return empty
-                        return .{ .halt = &[_]u8{} };
+                        const return_value = context.readSliceBetweenRegister7AndRegister8();
+                        return .{ .halt = try allocator.dupe(u8, return_value) };
                     },
                     .out_of_gas => {
                         return .{ .terminal = .out_of_gas };

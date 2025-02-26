@@ -15,7 +15,7 @@ test "pvm:jamduna_service_code:machine_invocation" {
 
     const program_code = @embedFile("pvm_test/fixtures/jam_duna_service_code.pvm");
 
-    const result = try pvmlib.invoke.machineInvocation(
+    var result = try pvmlib.invoke.machineInvocation(
         allocator,
         program_code,
         5,
@@ -23,6 +23,7 @@ test "pvm:jamduna_service_code:machine_invocation" {
         &[_]u8{0} ** 20,
         .{},
     );
+    defer result.deinit(allocator);
 
     std.debug.print("{}", .{result});
 }
