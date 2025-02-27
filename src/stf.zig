@@ -40,7 +40,10 @@ pub fn stateTransition(
         }
     }
 
-    const transition_time = params.Time().init(current_state.tau.?, new_block.header.slot);
+    const transition_time = params.Time().init(
+        current_state.tau.?,
+        new_block.header.slot,
+    );
     var state_transition = try StateTransition(params).initHeap(allocator, current_state, transition_time);
     errdefer state_transition.deinit();
 
