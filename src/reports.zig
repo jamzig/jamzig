@@ -9,6 +9,8 @@ const tracing = @import("tracing.zig");
 const trace = tracing.scoped(.reports);
 const guarantor_validation = @import("guarantor_validation.zig");
 
+const StateTransition = @import("state_delta.zig").StateTransition;
+
 /// Error types for report validation and processing
 pub const Error = error{
     BadCoreIndex,
@@ -49,9 +51,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
     pub fn validate(
         comptime params: @import("jam_params.zig").Params,
         allocator: std.mem.Allocator,
+        stx: *StateTransition(params),
         guarantees: types.GuaranteesExtrinsic,
-        slot: types.TimeSlot,
-        jam_state: *const state.JamStateView(params),
     ) !@This() {
         const span = trace.span(.validate_guarantees);
         defer span.deinit();
@@ -204,13 +205,13 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             defer slot_span.deinit();
             slot_span.debug("Validating report slot {d} against current slot {d} for core {d}", .{
                 guarantee.slot,
-                slot,
+                stx.time.current_slot,
                 guarantee.report.core_index,
             });
 
             // Validate report slot is not in future
-            if (guarantee.slot > slot) {
-                slot_span.err("Report slot {d} is in the future (current: {d})", .{ guarantee.slot, slot });
+            if (guarantee.slot > stx.time.current_slot) {
+                slot_span.err("Report slot {d} is in the future (current: {d})", .{ guarantee.slot, stx.time.current_slot });
                 return Error.FutureReportSlot;
             }
 
@@ -218,7 +219,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             defer rotation_span.deinit();
 
             // Check rotation period according to graypaper 11.27
-            const current_rotation = @divFloor(slot, params.validator_rotation_period);
+            const current_rotation = @divFloor(stx.time.current_slot, params.validator_rotation_period);
             const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
             const is_current_rotation = (current_rotation == report_rotation);
 
@@ -244,7 +245,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             const anchor_span = span.child(.validate_anchor);
             defer anchor_span.deinit();
 
-            if (jam_state.beta.?.getBlockInfoByHash(guarantee.report.context.anchor)) |binfo| {
+            const beta: *const state.Beta = try stx.ensure(.beta);
+            if (beta.getBlockInfoByHash(guarantee.report.context.anchor)) |binfo| {
                 anchor_span.debug("Found anchor block, validating roots", .{});
                 anchor_span.trace("Block info - hash: {s}, state root: {s}", .{
                     std.fmt.fmtSliceHexLower(&binfo.header_hash),
@@ -312,6 +314,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 defer service_span.deinit();
                 service_span.debug("Validating {d} service results", .{guarantee.report.results.len});
 
+                const delta: *const state.Delta = try stx.ensure(.delta);
                 for (guarantee.report.results, 0..) |result, i| {
                     const result_span = service_span.child(.validate_service_result);
                     defer result_span.deinit();
@@ -322,7 +325,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                         result.accumulate_gas,
                     });
 
-                    if (jam_state.delta.?.getAccount(result.service_id)) |service| {
+                    if (delta.getAccount(result.service_id)) |service| {
                         result_span.debug("Found service account, validating code hash and gas", .{});
                         result_span.trace("Service code hash: {s}, min gas: {d}", .{
                             std.fmt.fmtSliceHexLower(&service.code_hash),
@@ -383,9 +386,9 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                         const blocks_span = single_prereq_span.child(.check_recent_blocks);
                         defer blocks_span.deinit();
 
-                        blocks_span.debug("Searching in {d} recent blocks", .{jam_state.beta.?.blocks.items.len});
+                        blocks_span.debug("Searching in {d} recent blocks", .{beta.blocks.items.len});
 
-                        outer: for (jam_state.beta.?.blocks.items, 0..) |block, block_idx| {
+                        outer: for (beta.blocks.items, 0..) |block, block_idx| {
                             blocks_span.trace("Checking block {d} with {d} reports", .{ block_idx, block.work_reports.len });
 
                             for (block.work_reports, 0..) |report, report_idx| {
@@ -465,9 +468,9 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                         const blocks_span = lookup_span.child(.check_recent_blocks);
                         defer blocks_span.deinit();
 
-                        blocks_span.debug("Searching in {d} recent blocks", .{jam_state.beta.?.blocks.items.len});
+                        blocks_span.debug("Searching in {d} recent blocks", .{beta.blocks.items.len});
 
-                        outer: for (jam_state.beta.?.blocks.items, 0..) |block, block_idx| {
+                        outer: for (beta.blocks.items, 0..) |block, block_idx| {
                             blocks_span.trace("Checking block {d} with {d} reports", .{
                                 block_idx,
                                 block.work_reports.len,
@@ -567,12 +570,12 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             }
 
             // Check timeslot is within valid range
-            const min_guarantee_slot = (@divFloor(slot, params.validator_rotation_period) -| 1) * params.validator_rotation_period;
-            const max_guarantee_slot = slot;
+            const min_guarantee_slot = (@divFloor(stx.time.current_slot, params.validator_rotation_period) -| 1) * params.validator_rotation_period;
+            const max_guarantee_slot = stx.time.current_slot;
             rotation_span.debug("Validating guarantee time slot {d} is between {d} and {d}", .{ guarantee.slot, min_guarantee_slot, max_guarantee_slot });
 
             // Report must be from current  rotation
-            if (!(guarantee.slot >= min_guarantee_slot and guarantee.slot <= slot)) {
+            if (!(guarantee.slot >= min_guarantee_slot and guarantee.slot <= stx.time.current_slot)) {
                 rotation_span.err(
                     "Guarantee time slot out of range: {d} is NOT between {d} and {d}",
                     .{ guarantee.slot, min_guarantee_slot, max_guarantee_slot },
@@ -623,10 +626,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     guarantor_validation.validateGuarantors(
                         params,
                         allocator,
+                        stx,
                         guarantee,
-                        slot,
-                        jam_state.eta.?[2], // Current epoch entropy
-                        jam_state.eta.?[3], // Previous epoch entropy
                     ) catch |err| switch (err) {
                         error.InvalidGuarantorAssignment => return Error.WrongAssignment,
                         error.InvalidRotationPeriod => return Error.InvalidRotationPeriod,
@@ -638,6 +639,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 }
 
                 // Validate signatures
+                const kappa: *const state.Kappa = try stx.ensure(.kappa);
+                const lambda: *const state.Kappa = try stx.ensure(.lambda);
                 for (guarantee.signatures) |sig| {
                     const sig_detail_span = sig_span.child(.validate_signature);
                     defer sig_detail_span.deinit();
@@ -646,9 +649,9 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     sig_detail_span.trace("Signature: {s}", .{std.fmt.fmtSliceHexLower(&sig.signature)});
 
                     const validator = if (is_current_rotation)
-                        jam_state.kappa.?.validators[sig.validator_index] //
+                        kappa.validators[sig.validator_index] //
                     else
-                        jam_state.lambda.?.validators[sig.validator_index]; //
+                        lambda.validators[sig.validator_index]; //
 
                     const public_key = validator.ed25519;
                     sig_detail_span.trace("Validator public key: {s}", .{std.fmt.fmtSliceHexLower(&public_key)});
@@ -681,7 +684,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 const timeout_span = span.child(.validate_timeout);
                 defer timeout_span.deinit();
 
-                if (jam_state.rho.?.getReport(guarantee.report.core_index)) |entry| {
+                const rho: *const state.Rho(params.core_count) = try stx.ensure(.rho);
+                if (rho.getReport(guarantee.report.core_index)) |entry| {
                     timeout_span.debug("Checking core {d} timeout - last: {d}, current: {d}, period: {d}", .{
                         guarantee.report.core_index,
                         entry.assignment.timeout,
@@ -712,7 +716,11 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     std.fmt.fmtSliceHexLower(&guarantee.report.authorizer_hash),
                 });
 
-                if (!jam_state.alpha.?.isAuthorized(guarantee.report.core_index, guarantee.report.authorizer_hash)) {
+                const alpha: *const state.Alpha(
+                    params.core_count,
+                    params.max_authorizations_pool_items,
+                ) = try stx.ensure(.alpha);
+                if (!alpha.isAuthorized(guarantee.report.core_index, guarantee.report.authorizer_hash)) {
                     auth_span.err("Core {d} not authorized for hash {s}", .{
                         guarantee.report.core_index,
                         std.fmt.fmtSliceHexLower(&guarantee.report.authorizer_hash),
@@ -733,7 +741,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     std.fmt.fmtSliceHexLower(&package_hash),
                 });
 
-                const blocks = jam_state.beta.?.blocks;
+                const blocks = beta.blocks;
                 dup_span.debug("Comparing against {d} blocks", .{blocks.items.len});
                 for (blocks.items, 0..) |block, block_idx| {
                     const block_span = dup_span.child(.check_block);

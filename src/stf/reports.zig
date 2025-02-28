@@ -36,9 +36,8 @@ pub fn transition(
     const validated = try reports.ValidatedGuaranteeExtrinsic.validate(
         params,
         allocator,
+        stx,
         block.extrinsic.guarantees,
-        stx.time.current_slot,
-        &state_view,
     );
 
     // Process
