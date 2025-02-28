@@ -795,14 +795,12 @@ pub const Result = struct {
 pub fn processGuaranteeExtrinsic(
     comptime params: @import("jam_params.zig").Params,
     allocator: std.mem.Allocator,
+    stx: *StateTransition(params),
     validated: ValidatedGuaranteeExtrinsic,
-    slot: types.TimeSlot,
-    jam_state: *const state.JamStateView(params),
-    rho: *state.Rho(params.core_count),
 ) !Result {
     const span = trace.span(.process_guarantees);
     defer span.deinit();
-    span.debug("Processing guarantees - count: {d}, slot: {d}", .{ validated.guarantees.len, slot });
+    span.debug("Processing guarantees - count: {d}, slot: {d}", .{ validated.guarantees.len, stx.time.current_slot });
     // span.trace("Current state root: {s}", .{
     //     std.fmt.fmtSliceHexLower(&jam_state.beta.?.blocks.items[0].state_root),
     // });
@@ -823,12 +821,13 @@ pub fn processGuaranteeExtrinsic(
 
         // Core can be reused, this is checked when validating the guarantee
         // Add report to Rho state
-        process_span.debug("Creating availability assignment with timeout {d}", .{slot});
+        process_span.debug("Creating availability assignment with timeout {d}", .{stx.time.current_slot});
         const assignment = types.AvailabilityAssignment{
             .report = try guarantee.report.deepClone(allocator),
-            .timeout = slot,
+            .timeout = stx.time.current_slot,
         };
 
+        var rho: *state.Rho(params.core_count) = try stx.ensure(.rho_prime);
         rho.setReport(
             core_index,
             assignment,
@@ -850,17 +849,20 @@ pub fn processGuaranteeExtrinsic(
             .exports_root = guarantee.report.package_spec.exports_root,
         });
 
-        const current_rotation = @divFloor(slot, params.validator_rotation_period);
+        const current_rotation = @divFloor(stx.time.current_slot, params.validator_rotation_period);
         const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
 
         const is_current_rotation = (current_rotation == report_rotation);
 
         // Track reporters and update Pi stats
+
+        const kappa: *const types.ValidatorSet = try stx.ensure(.kappa);
+        const lambda: *const types.ValidatorSet = try stx.ensure(.lambda);
         for (guarantee.signatures) |sig| {
             const validator = if (is_current_rotation)
-                jam_state.kappa.?.validators[sig.validator_index]
+                kappa.validators[sig.validator_index]
             else
-                jam_state.lambda.?.validators[sig.validator_index];
+                lambda.validators[sig.validator_index];
 
             try reporters.append(validator.ed25519);
 

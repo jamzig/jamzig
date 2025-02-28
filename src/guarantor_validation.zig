@@ -3,7 +3,7 @@ const types = @import("types.zig");
 const tracing = @import("tracing.zig");
 const guarantor_assignments = @import("guarantor_assignments.zig");
 
-const trace = tracing.scoped(.guarantor_validation);
+const trace = tracing.scoped(.reports);
 
 const StateTransition = @import("state_delta.zig").StateTransition;
 
@@ -42,6 +42,7 @@ pub fn validateGuarantorAssignment(
     span.debug("Building assignments using {s} rotation entropy", .{if (is_current_rotation) "current" else "previous"});
 
     var result = if (is_current_rotation)
+        // current rotation
         try guarantor_assignments.buildForTimeSlot(
             params,
             allocator,
@@ -49,18 +50,30 @@ pub fn validateGuarantorAssignment(
             stx.time.current_slot,
         )
     else
+    // previous rotation
+    if (@divFloor(stx.time.current_slot -| params.validator_rotation_period, params.epoch_length) ==
+        @divFloor(stx.time.current_slot, params.epoch_length))
         try guarantor_assignments.buildForTimeSlot(
             params,
             allocator,
-            (try stx.ensure(.eta))[2], // state eta
+            (try stx.ensure(.eta_prime))[2], // prev eta
+            stx.time.current_slot - params.validator_rotation_period,
+        )
+    else
+        try guarantor_assignments.buildForTimeSlot(
+            params,
+            allocator,
+            (try stx.ensure(.eta_prime))[3], // prev eta
             stx.time.current_slot - params.validator_rotation_period,
         );
+
     defer result.deinit(allocator);
 
     span.debug("Built guarantor assignments successfully", .{});
 
     // Check if validator is assigned to the core
     const is_assigned = result.assignments[validator_index] == core_index;
+    // TODO: check if validator keys match
 
     if (is_assigned) {
         span.debug("Validator {d} correctly assigned to core {d}", .{ validator_index, core_index });

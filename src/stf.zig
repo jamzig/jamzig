@@ -53,6 +53,12 @@ pub fn stateTransition(
         new_block.header.slot,
     );
 
+    try eta.transition(
+        params,
+        state_transition,
+        try new_block.header.getEntropy(),
+    );
+
     try recent_history.transition(
         params,
         state_transition,
@@ -89,12 +95,6 @@ pub fn stateTransition(
         params,
         state_transition,
         new_block.extrinsic.guarantees,
-    );
-
-    try eta.transition(
-        params,
-        state_transition,
-        try new_block.header.getEntropy(),
     );
 
     var markers = try safrole.transition(

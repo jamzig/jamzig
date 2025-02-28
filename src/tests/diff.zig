@@ -101,6 +101,7 @@ pub fn diffBasedOnStrings(allocator: std.mem.Allocator, before_str: []const u8, 
             before_file.abs_path,
             after_file.abs_path,
         },
+        .max_output_bytes = 400 * 1024,
     });
     defer allocator.free(result.stderr);
 
