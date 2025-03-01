@@ -304,20 +304,20 @@ pub fn JamStateView(comptime params: Params) type {
 }
 
 // Core imports
-pub const authorization = @import("authorization.zig");
+pub const authorizer_pool = @import("authorizer_pool.zig");
 pub const recent_blocks = @import("recent_blocks.zig");
 pub const accumulated_reports = @import("accumulated_reports.zig");
 pub const available_reports = @import("available_reports.zig");
 pub const safrole_state = @import("safrole_state.zig");
 pub const services = @import("services.zig");
 pub const pending_reports = @import("pending_reports.zig");
-pub const authorization_queue = @import("authorization_queue.zig");
+pub const authorizer_queue = @import("authorizer_queue.zig");
 pub const services_priviledged = @import("services_priviledged.zig");
 pub const disputes = @import("disputes.zig");
 pub const validator_stats = @import("validator_stats.zig");
 
 // State components
-pub const Alpha = authorization.Alpha;
+pub const Alpha = authorizer_pool.Alpha;
 pub const Beta = recent_blocks.RecentHistory;
 
 // History and Queuing of work reports
@@ -333,7 +333,7 @@ pub const Kappa = types.Kappa;
 pub const Lambda = types.Lambda;
 pub const Rho = pending_reports.Rho;
 pub const Tau = types.TimeSlot;
-pub const Phi = authorization_queue.Phi;
+pub const Phi = authorizer_queue.Phi;
 pub const Chi = services_priviledged.Chi;
 pub const Psi = disputes.Psi;
 pub const Pi = validator_stats.Pi;
