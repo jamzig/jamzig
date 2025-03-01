@@ -2,6 +2,9 @@ const std = @import("std");
 const types = @import("types.zig");
 const WorkReport = types.WorkReport;
 
+pub const TimeslotEntries = std.ArrayListUnmanaged(WorkReportAndDeps);
+pub const WorkPackageHashSet = std.AutoArrayHashMapUnmanaged(types.WorkPackageHash, void);
+
 // We also maintain knowledge of ready (i.e. available and/or audited) but
 // not-yet-accumulated work-reports in the state item ϑ. Each of these were
 // made available at most one epoch ago but have or had unfulfilled dependen-
@@ -9,14 +12,14 @@ const WorkReport = types.WorkReport;
 // dependencies, a set of work-package hashes.
 pub fn Theta(comptime epoch_size: usize) type {
     return struct {
-        entries: [epoch_size]SlotEntries,
+        entries: [epoch_size]TimeslotEntries,
         allocator: std.mem.Allocator,
 
         pub const Entry = WorkReportAndDeps;
 
         pub fn init(allocator: std.mem.Allocator) @This() {
             return .{
-                .entries = [_]SlotEntries{.{}} ** epoch_size,
+                .entries = [_]TimeslotEntries{.{}} ** epoch_size,
                 .allocator = allocator,
             };
         }
@@ -99,7 +102,7 @@ pub fn Theta(comptime epoch_size: usize) type {
             errdefer cloned.deinit();
 
             // Initialize the entries array with empty SlotEntries
-            cloned.entries = [_]SlotEntries{.{}} ** epoch_size;
+            cloned.entries = [_]TimeslotEntries{.{}} ** epoch_size;
 
             // Clone each SlotEntries and their contained Entry items
             for (self.entries, 0..) |slot_entries, i| {
@@ -141,20 +144,18 @@ pub fn Theta(comptime epoch_size: usize) type {
     };
 }
 
-pub const SlotEntries = std.ArrayListUnmanaged(WorkReportAndDeps);
-
 pub const WorkReportAndDeps = struct {
     /// a work report
     work_report: WorkReport,
     /// set of work package hashes
-    dependencies: std.AutoArrayHashMapUnmanaged(types.WorkPackageHash, void),
+    dependencies: WorkPackageHashSet,
 
     pub fn initWithDependencies(
         allocator: std.mem.Allocator,
         work_report: WorkReport,
         dependencies: []const [32]u8,
     ) !WorkReportAndDeps {
-        var deps = std.AutoArrayHashMapUnmanaged([32]u8, void){};
+        var deps = WorkPackageHashSet{};
         errdefer deps.deinit(allocator);
 
         // Add all dependencies to the hash map
@@ -186,7 +187,7 @@ pub const WorkReportAndDeps = struct {
 
     pub fn deepClone(self: WorkReportAndDeps, allocator: std.mem.Allocator) !WorkReportAndDeps {
         // Create a new dependencies map
-        var cloned_dependencies = std.AutoHashMapUnmanaged([32]u8, void){};
+        var cloned_dependencies = WorkPackageHashSet{};
 
         // Clone each dependency key-value pair
         var iter = self.dependencies.iterator();

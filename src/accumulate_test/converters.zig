@@ -1,11 +1,49 @@
 const std = @import("std");
 const types = @import("../types.zig");
 const state = @import("../state.zig");
+const state_delta = @import("../state_delta.zig");
+const accumulate = @import("../accumulate.zig");
 
-const state_delta = @import("../services.zig");
+const services = @import("../services.zig");
 const state_theta = @import("../available_reports.zig");
 
 const tv_types = @import("../jamtestvectors/accumulate.zig");
+const Params = @import("../jam_params.zig").Params;
+
+pub fn convertTestStateIntoJamState(
+    comptime params: Params,
+    allocator: std.mem.Allocator,
+    testcase_pre_state: tv_types.State,
+) !state.JamState(params) {
+    // Create a JamState to use as the base state
+    var jam_state = try state.JamState(params).init(allocator);
+    errdefer jam_state.deinit(allocator);
+
+    // Convert and set the individual components
+    jam_state.delta = try convertServiceAccounts(
+        allocator,
+        testcase_pre_state.accounts,
+    );
+
+    jam_state.chi = try convertPrivileges(
+        allocator,
+        testcase_pre_state.privileges,
+    );
+
+    jam_state.theta = try convertReadyQueue(
+        params.epoch_length,
+        allocator,
+        testcase_pre_state.ready_queue,
+    );
+
+    jam_state.xi = try convertAccumulatedQueue(
+        params.epoch_length,
+        allocator,
+        testcase_pre_state.accumulated,
+    );
+
+    return jam_state;
+}
 
 pub fn convertServiceAccounts(
     allocator: std.mem.Allocator,
@@ -21,8 +59,8 @@ pub fn convertServiceAccounts(
     return delta;
 }
 
-pub fn convertServiceAccount(allocator: std.mem.Allocator, account: tv_types.ServiceAccount) !state_delta.ServiceAccount {
-    var service_account = state_delta.ServiceAccount.init(allocator);
+pub fn convertServiceAccount(allocator: std.mem.Allocator, account: tv_types.ServiceAccount) !state.services.ServiceAccount {
+    var service_account = state.services.ServiceAccount.init(allocator);
     errdefer service_account.deinit();
 
     // Set the code hash and basic account info

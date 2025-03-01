@@ -2,10 +2,9 @@ const std = @import("std");
 const types = @import("types.zig");
 
 const state = @import("state.zig");
+const state_delta = @import("state_delta.zig");
+
 const WorkReportAndDeps = state.available_reports.WorkReportAndDeps;
-
-const itertools = @import("itertools.zig");
-
 const Params = @import("jam_params.zig").Params;
 
 /// Partitions reports into those ready for immediate accumulation and those
@@ -28,20 +27,6 @@ fn partitionReports(
     }
 }
 
-/// Gets reports from the queue that are now ready for accumulation
-/// essentially going through Theta, and removing the newly reports
-/// for any of the dependencies in the entries. This will
-/// result in an updated Theta where some work reports will have no unmet
-/// dependencies, and as such are ready to be processed.
-///
-/// This function will essentially add the queued to Theta, and then
-/// remove the workpackages which can be processed immediate from the theta
-/// dependencies, which will result in a set of packages which will be immediatly
-/// available.
-///
-/// So theta essentially keeps track of dependencies, and dependencies
-/// will be removed, and when dependencies are 0, there will be returned
-/// a list of packages which are ready to be accumulated.
 fn deinitEntriesAndObject(allocator: std.mem.Allocator, aggregate: anytype) void {
     for (aggregate.items) |*item| {
         item.deinit(allocator);
@@ -53,13 +38,17 @@ fn deinitEntriesAndObject(allocator: std.mem.Allocator, aggregate: anytype) void
 /// work reports in the correct order
 fn processAccumulationQueue(
     comptime params: Params,
-    allocator: std.mem.Allocator,
-    time: params.Time(),
-    xi: *state.Xi(params.epoch_length),
-    theta: *state.Theta(params.epoch_length),
+    stx: *state_delta.StateTransition(params),
     reports_immediate: []const types.WorkReport,
     reports_queued: []const types.WorkReport,
 ) !std.ArrayList(types.WorkReport) {
+    const allocator = stx.allocator;
+    const time = stx.time;
+
+    // Initialize the necessary state components
+    var xi = try stx.ensureT(state.Xi(params.epoch_length), .xi_prime);
+    var theta = try stx.ensureT(state.Theta(params.epoch_length), .theta_prime);
+
     // Transform reports_queued to a WorkReportAndDeps queue
     var reports_queued_w_deps = try std.ArrayList(WorkReportAndDeps).initCapacity(allocator, reports_queued.len);
     defer deinitEntriesAndObject(allocator, reports_queued_w_deps);
@@ -191,16 +180,13 @@ fn processAccumulationQueue(
 
 pub fn processAccumulateReports(
     comptime params: Params,
-    allocator: std.mem.Allocator,
+    stx: *state_delta.StateTransition(params),
     reports: []types.WorkReport,
-    time: params.Time(),
-    delta: *state.Delta,
-    theta: *state.Theta(params.epoch_length),
-    chi: *state.Chi,
-    xi: *state.Xi(params.epoch_length),
 ) !types.AccumulateRoot {
-    _ = delta;
-    _ = chi;
+    const allocator = stx.allocator;
+
+    // Initialize the necessary state components
+    var xi: *state.Xi(params.epoch_length) = try stx.ensure(.xi_prime);
 
     // Initialize lists for various report categories
     var immediate = std.ArrayList(types.WorkReport).init(allocator);
@@ -214,10 +200,7 @@ pub fn processAccumulateReports(
     // Process reports that are ready from the queue
     var accumulatable_reports = try processAccumulationQueue(
         params,
-        allocator,
-        time,
-        xi,
-        theta,
+        stx,
         immediate.items,
         queued.items,
     );
@@ -238,14 +221,5 @@ pub fn processAccumulateReports(
     //     try theta.addWorkReport(time.current_slot_in_epoch, report);
     // }
 
-    return [_]u8{0} ** 32;
-}
-
-fn calculateAccumulateRoot(
-    allocator: std.mem.Allocator,
-    processed: *itertools.ConcatSlicesIterator(types.WorkPackageHash),
-) !types.AccumulateRoot {
-    _ = allocator;
-    _ = processed;
     return [_]u8{0} ** 32;
 }

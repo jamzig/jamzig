@@ -5,6 +5,7 @@ const accumulate = @import("../accumulate.zig");
 const state = @import("../state.zig");
 const types = @import("../types.zig");
 const helpers = @import("../tests/helpers.zig");
+const state_delta = @import("../state_delta.zig");
 const diff = @import("../tests/diff.zig");
 const Params = @import("../jam_params.zig").Params;
 
@@ -12,89 +13,47 @@ pub fn processAccumulateReports(
     comptime params: Params,
     allocator: std.mem.Allocator,
     test_case: *const tvector.TestCase,
-    delta: *state.Delta,
-    theta: *state.Theta(params.epoch_length),
-    chi: *state.Chi,
-    xi: *state.Xi(params.epoch_length),
+    base_state: *state.JamState(params),
 ) !types.AccumulateRoot {
-    // Process the work reports
+    // Create a StateTransition using the provided base_state
+    var stx = try state_delta.StateTransition(params).init(
+        allocator,
+        base_state,
+        params.Time().init(test_case.pre_state.slot, test_case.input.slot),
+    );
+    defer stx.deinit();
+
+    // Call the accumulate function with StateTransition
     return try accumulate.processAccumulateReports(
         params,
-        allocator,
+        &stx,
         test_case.input.reports,
-        params.Time().init(test_case.pre_state.slot, test_case.input.slot),
-        delta,
-        theta,
-        chi,
-        xi,
     );
 }
 
 pub fn runAccumulateTest(comptime params: Params, allocator: std.mem.Allocator, test_case: tvector.TestCase) !void {
-    // Convert pre-state from test vector format to native format
-    var pre_state_services = try converters.convertServiceAccounts(
-        allocator,
-        test_case.pre_state.accounts,
-    );
-    defer pre_state_services.deinit();
-
-    var pre_state_privileges = try converters.convertPrivileges(
-        allocator,
-        test_case.pre_state.privileges,
-    );
-    defer pre_state_privileges.deinit();
-
-    var pre_state_ready = try converters.convertReadyQueue(
-        params.epoch_length,
-        allocator,
-        test_case.pre_state.ready_queue,
-    );
-    defer pre_state_ready.deinit();
-
-    var pre_state_accumulated = try converters.convertAccumulatedQueue(
-        params.epoch_length,
-        allocator,
-        test_case.pre_state.accumulated,
-    );
-    defer pre_state_accumulated.deinit();
+    // Convert pre-state and post-state from test vector format to native format
+    var pre_state = try converters.convertTestStateIntoJamState(params, allocator, test_case.pre_state);
+    defer pre_state.deinit(allocator);
 
     // Convert post-state for later comparison
-    var expected_services = try converters.convertServiceAccounts(
-        allocator,
-        test_case.post_state.accounts,
-    );
-    defer expected_services.deinit();
+    var expected_state = try converters.convertTestStateIntoJamState(params, allocator, test_case.post_state);
+    defer expected_state.deinit(allocator);
 
-    var expected_privileges = try converters.convertPrivileges(
-        allocator,
-        test_case.post_state.privileges,
-    );
-    defer expected_privileges.deinit();
-
-    var expected_ready = try converters.convertReadyQueue(
-        params.epoch_length,
-        allocator,
-        test_case.post_state.ready_queue,
-    );
-    defer expected_ready.deinit();
-
-    var expected_accumulated = try converters.convertAccumulatedQueue(
-        params.epoch_length,
-        allocator,
-        test_case.post_state.accumulated,
-    );
-    defer expected_accumulated.deinit();
-
+    // Process the work reports using StateTransition
     const process_result = processAccumulateReports(
         params,
         allocator,
         &test_case,
-        &pre_state_services,
-        &pre_state_ready,
-        &pre_state_privileges,
-        &pre_state_accumulated,
+        &pre_state,
     );
 
+    // Print delta if availabe
+    var delta = try diff.diffBasedOnFormat(allocator, &pre_state, &expected_state);
+    defer delta.deinit(allocator);
+    delta.debugPrint();
+
+    // Check expected output
     switch (test_case.output) {
         .err => {
             if (process_result) |_| {
@@ -110,31 +69,15 @@ pub fn runAccumulateTest(comptime params: Params, allocator: std.mem.Allocator, 
                     std.debug.print("Mismatch: actual root != expected root\n", .{});
                     return error.RootMismatch;
                 }
-
-                // Verify state matches expected state
-                diff.expectFormattedEqual(*state.Delta, allocator, &pre_state_services, &expected_services) catch {
-                    std.debug.print("Mismatch: actual Delta != expected Delta\n", .{});
-                    return error.StateDeltaMismatch;
-                };
-
-                diff.expectTypesFmtEqual(*state.Chi, allocator, &pre_state_privileges, &expected_privileges) catch {
-                    std.debug.print("Mismatch: actual Chi != expected Chi\n", .{});
-                    return error.StateChiMismatch;
-                };
-
-                diff.expectTypesFmtEqual(*state.Theta(params.epoch_length), allocator, &pre_state_ready, &expected_ready) catch {
-                    std.debug.print("Mismatch: actual Theta != expected Theta\n", .{});
-                    return error.StateThetaMismatch;
-                };
-
-                diff.expectTypesFmtEqual(*state.Xi(params.epoch_length), allocator, &pre_state_accumulated, &expected_accumulated) catch {
-                    std.debug.print("Mismatch: actual Xi != expected Xi\n", .{});
-                    return error.StateXiMismatch;
-                };
             } else |err| {
                 std.debug.print("UnexpectedError: {any}\n", .{err});
                 return error.UnexpectedError;
             }
         },
+    }
+
+    // If we have a diff return error
+    if (delta.hasChanges()) {
+        return error.StateDiffDetected;
     }
 }
