@@ -42,11 +42,11 @@ test "tiny/enqueue_and_unlock_simple-1.bin" {
     const allocator = std.testing.allocator;
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/enqueue_and_unlock_simple-1.bin");
 }
-//
-// test "tiny/enqueue_and_unlock_simple-2.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/enqueue_and_unlock_simple-2.bin");
-// }
+
+test "tiny/enqueue_and_unlock_simple-2.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/enqueue_and_unlock_simple-2.bin");
+}
 //
 // test "tiny/enqueue_and_unlock_chain-1.bin" {
 //     const allocator = std.testing.allocator;

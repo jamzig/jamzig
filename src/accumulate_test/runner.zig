@@ -7,6 +7,7 @@ const types = @import("../types.zig");
 const helpers = @import("../tests/helpers.zig");
 const state_delta = @import("../state_delta.zig");
 const diff = @import("../tests/diff.zig");
+const state_diff = @import("../tests/state_diff.zig");
 const Params = @import("../jam_params.zig").Params;
 
 pub fn processAccumulateReports(
@@ -57,9 +58,9 @@ pub fn runAccumulateTest(comptime params: Params, allocator: std.mem.Allocator, 
     );
 
     // Print delta if availabe
-    var delta = try diff.diffBasedOnFormat(allocator, &pre_state, &expected_state);
-    defer delta.deinit(allocator);
-    delta.debugPrint();
+    var delta = try state_diff.JamStateDiff(params).build(allocator, &pre_state, &expected_state);
+    defer delta.deinit();
+    delta.printToStdErr();
 
     // Check expected output
     switch (test_case.output) {
