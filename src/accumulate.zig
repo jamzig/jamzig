@@ -63,8 +63,7 @@ fn queueEditingFunction(
 
             span.trace("Checking dependency: {s}", .{std.fmt.fmtSliceHexLower(&work_package_hash)});
             // else try to remove and resolve
-            const removed = wradeps.dependencies.swapRemove(work_package_hash);
-            if (removed) {
+            if (wradeps.dependencies.swapRemove(work_package_hash)) {
                 span.debug("Resolved dependency: {s}", .{std.fmt.fmtSliceHexLower(&work_package_hash)});
             }
 
@@ -355,8 +354,15 @@ pub fn processAccumulateReports(
 
             update_span.debug("Adding {d} queued items to time slot {d}", .{ queued.items.len, widx });
             for (queued.items, 0..) |*wradeps, qidx| {
-                update_span.trace("Adding queued item {d} to slot {d}", .{ qidx, widx });
-                try theta.addEntryToTimeSlot(@intCast(widx), try wradeps.deepClone(allocator));
+                // NOTE: testvectors are empty, but queue editing function does not remove items on 0 deps
+                //       this is based on testvectors
+                // TODO: check this against GP
+                if (wradeps.dependencies.count() > 0) {
+                    update_span.trace("Adding queued item {d} to slot {d}", .{ qidx, widx });
+                    try theta.addEntryToTimeSlot(@intCast(widx), try wradeps.deepClone(allocator));
+                } else {
+                    update_span.trace("Skipping queued item {d} to slot {d}: no dependencies", .{ qidx, widx });
+                }
             }
 
             // try theta.entries[widx].insertSlice(allocator, 0, queued.items);
@@ -367,6 +373,9 @@ pub fn processAccumulateReports(
             update_span.debug("Processing entries for time slot {d}", .{widx});
             var entries = theta.entries[widx].toManaged(allocator);
             queueEditingFunction(&entries, try mapWorkPackageHash(&map_buffer, accumulated));
+            // NOTE: testvectors are empty, but queue editing function does not remove items on 0 deps
+            // TODO: check this against GP
+            theta.removeReportsWithoutDependenciesAtSlot(@intCast(widx));
         }
     }
 

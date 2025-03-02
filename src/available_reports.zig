@@ -57,6 +57,34 @@ pub fn Theta(comptime epoch_size: usize) type {
             try self.addEntryToTimeSlot(time_slot, entry);
         }
 
+        /// Remove all WorkReports which have no dependencies from a specific time slot
+        pub fn removeReportsWithoutDependenciesAtSlot(self: *@This(), time_slot: types.TimeSlot) void {
+            var slot_entries = &self.entries[time_slot];
+            var i: usize = 0;
+            while (i < slot_entries.items.len) {
+                // If this entry has no dependencies, remove it
+                if (slot_entries.items[i].dependencies.count() == 0) {
+                    // Deinit the entry we're removing
+                    slot_entries.items[i].deinit(self.allocator);
+
+                    // Remove the entry from the slot by swapping with the last item
+                    _ = slot_entries.orderedRemove(i);
+                    continue;
+                }
+
+                // Only increment if we didn't remove an item
+                i += 1;
+            }
+        }
+
+        /// Remove all WorkReports which have no dependencies from all time slots
+        pub fn removeReportsWithoutDependencies(self: *@This()) void {
+            // Iterate through all time slots
+            for (0..self.entries.len) |slot| {
+                self.removeReportsWithoutDependenciesAtSlot(@intCast(slot));
+            }
+        }
+
         pub fn getReportsAtSlot(self: *const @This(), time_slot: types.TimeSlot) []const WorkReportAndDeps {
             return self.entries[time_slot].items;
         }
