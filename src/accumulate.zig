@@ -50,7 +50,8 @@ fn queueEditingFunction(
         for (resolved_reports) |work_package_hash| {
             if (std.mem.eql(u8, &wradeps.work_report.package_spec.hash, &work_package_hash)) {
                 span.debug("Found matching report, removing from queue at index {d}", .{idx});
-                _ = queued.orderedRemove(idx);
+                var removed = queued.orderedRemove(idx);
+                removed.deinit(queued.allocator); // TODO: pass allocator to function
                 continue;
             }
 
@@ -98,7 +99,7 @@ fn processAccumulationQueue(
     // 3. Repeat until no more dependencies can be resolved
     // This creates a natural accumulation order that respects dependencies
     var resolved = ResolvedReports.init(allocator);
-    errdefer resolved.deinit();
+    defer resolved.deinit();
     span.debug("Initialized resolved reports container", .{});
 
     // Simulate recursion
@@ -121,7 +122,7 @@ fn processAccumulationQueue(
             iter_span.trace("Checking item {d}: dependencies={d}, hash={s}", .{ i, deps_count, std.fmt.fmtSliceHexLower(&wradeps.work_report.package_spec.hash) });
 
             if (deps_count == 0) {
-                try accumulatable.append(wradeps.work_report);
+                try accumulatable.append(try wradeps.work_report.deepClone(allocator));
                 try resolved.append(wradeps.work_report.package_spec.hash);
                 resolved_count += 1;
                 iter_span.debug("Found resolvable report at index {d}, hash: {s}", .{ i, std.fmt.fmtSliceHexLower(&wradeps.work_report.package_spec.hash) });
@@ -236,7 +237,7 @@ pub fn processAccumulateReports(
 
         if (xi.containsWorkPackage(queued.items[idx].work_report.package_spec.hash)) {
             filter_span.debug("Report already accumulated, removing from queue", .{});
-            _ = queued.orderedRemove(idx); // TODO: optimize
+            @constCast(&queued.orderedRemove(idx)).deinit(allocator); // TODO: optimize
             filtered_out += 1;
             continue;
         }
