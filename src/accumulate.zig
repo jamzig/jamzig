@@ -20,82 +20,34 @@ pub const AccumulatableReports = std.ArrayList(*types.WorkReport);
 pub const ResolvedReports = std.ArrayList(*types.WorkReport);
 
 // 12.7 Walks the queued, updates dependencies and removes those who are already resolved
-fn queueEditingFunctionRefs(
-    queued: *QueuedWorkReportAndDepsRefs,
-    resolved_reports: []*types.WorkReport,
-) void {
-    innerQueueEditingFunction(
-        *WorkReportAndDeps,
-        *types.WorkReport,
-        queued,
-        resolved_reports,
-    );
-}
 
 fn queueEditingFunction(
     queued: *QueuedWorkReportAndDeps,
     resolved_reports: []*types.WorkReport,
 ) void {
-    innerQueueEditingFunction(
-        WorkReportAndDeps,
-        *types.WorkReport,
-        queued,
-        resolved_reports,
-    );
-}
-
-// 12.7 Walks the queued, updates dependencies and removes those who are already resolved
-fn innerQueueEditingFunction(
-    comptime QueuedItemType: type,
-    comptime ReportType: type,
-    queued: *std.ArrayList(QueuedItemType),
-    resolved_reports: []ReportType,
-) void {
-    // Determine if we're working with pointers
-    const queued_is_ptr = @typeInfo(QueuedItemType) == .pointer;
-    const report_is_ptr = @typeInfo(ReportType) == .pointer;
-
     var idx: usize = 0;
     while (idx < queued.items.len) {
-        // Get pointer to the item, handling both value and pointer cases
-        const item_ref = if (queued_is_ptr)
-            queued.items[idx]
-        else
-            &queued.items[idx];
-
-        var should_remove = false;
+        var wradeps = queued.items[idx];
 
         for (resolved_reports) |report| {
-            const report_ref = if (report_is_ptr)
-                report
-            else
-                &report;
-
-            // Check if this report matches our current queued item
-            if (std.mem.eql(u8, &item_ref.work_report.package_spec.hash, &report_ref.package_spec.hash)) {
+            if (std.mem.eql(u8, &wradeps.work_report.package_spec.hash, &report.package_spec.hash)) {
                 _ = queued.orderedRemove(idx);
-                should_remove = true;
-                break; // Exit inner loop since we've removed this item
-            }
-
-            // Skip if dependencies are already empty
-            if (item_ref.dependencies.count() == 0) {
                 continue;
             }
 
-            // Try to remove this report from dependencies
-            _ = item_ref.dependencies.swapRemove(report_ref.package_spec.hash);
+            // when dependencies are 0 essentially we can conclude that
+            if (wradeps.dependencies.count() == 0) {
+                continue;
+            }
 
-            // If we've resolved all dependencies, break out
-            if (item_ref.dependencies.count() == 0) {
+            // else try to remove and resolve
+            _ = wradeps.dependencies.swapRemove(report.package_spec.hash);
+            // resolved?
+            if (wradeps.dependencies.count() == 0) {
                 break; // Exit inner loop since we've resolved this report
             }
         }
-
-        // Only increment idx if we didn't remove the item
-        if (!should_remove) {
-            idx += 1;
-        }
+        idx += 1;
     }
 }
 
@@ -104,7 +56,7 @@ fn innerQueueEditingFunction(
 // not-yet-accumulated work-reports and their dependencies.
 fn processAccumulationQueue(
     allocator: std.mem.Allocator,
-    queued: *QueuedWorkReportAndDepsRefs,
+    queued: *QueuedWorkReportAndDeps,
     accumulatable: *AccumulatableReports,
 ) !void {
     // Process work reports in dependency order:
@@ -119,7 +71,7 @@ fn processAccumulationQueue(
     // Simulate recursion
     while (true) {
         resolved.clearRetainingCapacity();
-        for (queued.items) |wradeps| {
+        for (queued.items) |*wradeps| {
             if (wradeps.dependencies.count() == 0) {
                 try accumulatable.append(&wradeps.work_report);
                 try resolved.append(&wradeps.work_report);
@@ -132,7 +84,7 @@ fn processAccumulationQueue(
         }
 
         // update our queue
-        queueEditingFunctionRefs(queued, resolved.items);
+        queueEditingFunction(queued, resolved.items);
     }
 }
 
@@ -212,22 +164,22 @@ pub fn processAccumulateReports(
     // 12.12: Build the initial set of pending_reports
     var theta: *state.Theta(params.epoch_length) = try stx.ensure(.theta_prime);
 
-    var pending_reports_queue = QueuedWorkReportAndDepsRefs.init(allocator);
-    defer pending_reports_queue.deinit();
+    var pending_reports_queue = QueuedWorkReportAndDeps.init(allocator);
+    defer deinitEntriesAndObject(allocator, pending_reports_queue);
 
     // 12.12: walk theta(current_slot_in_epoch..) join theta(..current_slot_in_epoch)
     var pending_reports = theta.iteratorStartingFrom(stx.time.current_slot_in_epoch);
     while (pending_reports.next()) |wradeps| {
-        try pending_reports_queue.append(wradeps);
+        try pending_reports_queue.append(try wradeps.deepClone(allocator));
     }
 
     // add the new queued imports
     for (queued.items) |*wradeps| {
-        try pending_reports_queue.append(wradeps);
+        try pending_reports_queue.append(try wradeps.deepClone(allocator));
     }
 
     // Now resolve dependenceies using E 12.7
-    queueEditingFunctionRefs(&pending_reports_queue, accumulatable.items); // accumulatable is immediate
+    queueEditingFunction(&pending_reports_queue, accumulatable.items); // accumulatable is immediate
 
     // 12.11 Process reports that are ready from the queue and add to accumulatable
     try processAccumulationQueue(
@@ -249,11 +201,7 @@ pub fn processAccumulateReports(
     // Track history of accumulation for an epoch in xi
     try xi.shiftDown();
 
-    // Queue remaining unprocessed reports in theta for later epochs
-    for (pending_reports_queue.items) |wradeps| {
-        try theta.addEntryToTimeSlot(stx.time.current_slot_in_epoch, try wradeps.deepClone(allocator));
-    }
-
+    // 12.27 Update theta pending reports
     for (0..params.epoch_length) |i| {
         const widx = if (i <= stx.time.current_slot_in_epoch)
             stx.time.current_slot_in_epoch - i
