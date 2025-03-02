@@ -28,6 +28,11 @@ pub const TINY_PARAMS = jam_params.TINY_PARAMS;
 
 const loader = @import("jamtestvectors/loader.zig");
 
+test "tiny/no_available_reports-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/no_available_reports-1.bin");
+}
+
 test "tiny/process_one_immediate_report-1.bin" {
     const allocator = std.testing.allocator;
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/process_one_immediate_report-1.bin");
@@ -118,10 +123,6 @@ test "tiny/process_one_immediate_report-1.bin" {
 //     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/enqueue_self_referential-4.bin");
 // }
 //
-// test "tiny/no_available_reports-1.bin" {
-//     const allocator = std.testing.allocator;
-//     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/no_available_reports-1.bin");
-// }
 
 // Full test vectors
 pub const FULL_PARAMS = jam_params.FULL_PARAMS;
