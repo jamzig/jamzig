@@ -17,16 +17,25 @@ fn deinitEntriesAndObject(allocator: std.mem.Allocator, aggregate: anytype) void
     aggregate.deinit();
 }
 
+fn mapWorkPackageHash(buffer: anytype, items: anytype) ![]types.WorkReportHash {
+    buffer.clearRetainingCapacity();
+    for (items) |item| {
+        try buffer.append(item.package_spec.hash);
+    }
+
+    return buffer.items;
+}
+
 pub const QueuedWorkReportAndDeps = std.ArrayList(WorkReportAndDeps);
 pub const QueuedWorkReportAndDepsRefs = std.ArrayList(*WorkReportAndDeps);
-pub const AccumulatableReports = std.ArrayList(*types.WorkReport);
-pub const ResolvedReports = std.ArrayList(*types.WorkReport);
+pub const AccumulatableReports = std.ArrayList(types.WorkReport);
+pub const ResolvedReports = std.ArrayList(types.WorkPackageHash);
 
 // 12.7 Walks the queued, updates dependencies and removes those who are already resolved
 
 fn queueEditingFunction(
     queued: *QueuedWorkReportAndDeps,
-    resolved_reports: []*types.WorkReport,
+    resolved_reports: []types.WorkReportHash,
 ) void {
     const span = trace.span(.queue_editing);
     defer span.deinit();
@@ -38,8 +47,8 @@ fn queueEditingFunction(
         var wradeps = &queued.items[idx];
         span.trace("Processing item {d}: hash={s}", .{ idx, std.fmt.fmtSliceHexLower(&wradeps.work_report.package_spec.hash) });
 
-        for (resolved_reports) |report| {
-            if (std.mem.eql(u8, &wradeps.work_report.package_spec.hash, &report.package_spec.hash)) {
+        for (resolved_reports) |work_package_hash| {
+            if (std.mem.eql(u8, &wradeps.work_report.package_spec.hash, &work_package_hash)) {
                 span.debug("Found matching report, removing from queue at index {d}", .{idx});
                 _ = queued.orderedRemove(idx);
                 continue;
@@ -51,11 +60,11 @@ fn queueEditingFunction(
                 continue;
             }
 
-            span.trace("Checking dependency: {s}", .{std.fmt.fmtSliceHexLower(&report.package_spec.hash)});
+            span.trace("Checking dependency: {s}", .{std.fmt.fmtSliceHexLower(&work_package_hash)});
             // else try to remove and resolve
-            const removed = wradeps.dependencies.swapRemove(report.package_spec.hash);
+            const removed = wradeps.dependencies.swapRemove(work_package_hash);
             if (removed) {
-                span.debug("Resolved dependency: {s}", .{std.fmt.fmtSliceHexLower(&report.package_spec.hash)});
+                span.debug("Resolved dependency: {s}", .{std.fmt.fmtSliceHexLower(&work_package_hash)});
             }
 
             // resolved?
@@ -112,8 +121,8 @@ fn processAccumulationQueue(
             iter_span.trace("Checking item {d}: dependencies={d}, hash={s}", .{ i, deps_count, std.fmt.fmtSliceHexLower(&wradeps.work_report.package_spec.hash) });
 
             if (deps_count == 0) {
-                try accumulatable.append(&wradeps.work_report);
-                try resolved.append(&wradeps.work_report);
+                try accumulatable.append(wradeps.work_report);
+                try resolved.append(wradeps.work_report.package_spec.hash);
                 resolved_count += 1;
                 iter_span.debug("Found resolvable report at index {d}, hash: {s}", .{ i, std.fmt.fmtSliceHexLower(&wradeps.work_report.package_spec.hash) });
             }
@@ -165,6 +174,8 @@ pub fn processAccumulateReports(
     span.debug("Starting process accumulate reports with {d} reports", .{reports.len});
 
     const allocator = stx.allocator;
+    var map_buffer = try std.ArrayList(types.WorkReportHash).initCapacity(allocator, 32);
+    defer map_buffer.deinit();
 
     // Initialize the necessary state components
     var xi: *state.Xi(params.epoch_length) = try stx.ensure(.xi_prime);
@@ -172,15 +183,10 @@ pub fn processAccumulateReports(
 
     // Initialize lists for various report categories
     var accumulatable = AccumulatableReports.init(allocator);
-    defer accumulatable.deinit();
+    defer deinitEntriesAndObject(allocator, accumulatable);
     var queued = QueuedWorkReportAndDeps.init(allocator);
-    defer {
-        for (queued.items) |*q| {
-            q.deinit(allocator);
-        }
+    defer deinitEntriesAndObject(allocator, queued);
 
-        queued.deinit();
-    }
     span.debug("Initialized accumulatable and queued containers", .{});
 
     // Partition reports into immediate and queued based on dependencies
@@ -201,7 +207,7 @@ pub fn processAccumulateReports(
             report.segment_root_lookup.len == 0)
         {
             partition_span.debug("Report {d} is immediately accumulatable", .{i});
-            try accumulatable.append(report);
+            try accumulatable.append(try report.deepClone(allocator));
             immediate_count += 1;
         } else {
             partition_span.debug("Report {d} has dependencies (prereqs: {d}, lookups: {d})", .{ i, report.context.prerequisites.len, report.segment_root_lookup.len });
@@ -295,7 +301,7 @@ pub fn processAccumulateReports(
     pending_span.debug("Resolving dependencies using queue editing function", .{});
     queueEditingFunction(
         &pending_reports_queue,
-        accumulatable.items, // accumulatable contains immediate
+        try mapWorkPackageHash(&map_buffer, accumulatable.items), // accumulatable contains immediate
     );
 
     // 12.11 Process reports that are ready from the queue and add to accumulatable
@@ -343,7 +349,7 @@ pub fn processAccumulateReports(
 
         if (i == 0) {
             update_span.debug("Updating current slot {d}", .{widx});
-            queueEditingFunction(&queued, accumulated);
+            queueEditingFunction(&queued, try mapWorkPackageHash(&map_buffer, accumulated));
             theta.clearTimeSlot(@intCast(widx));
 
             update_span.debug("Adding {d} queued items to time slot {d}", .{ queued.items.len, widx });
@@ -359,7 +365,7 @@ pub fn processAccumulateReports(
         } else if (i >= stx.time.current_slot - stx.time.prior_slot) {
             update_span.debug("Processing entries for time slot {d}", .{widx});
             var entries = theta.entries[widx].toManaged(allocator);
-            queueEditingFunction(&entries, accumulated);
+            queueEditingFunction(&entries, try mapWorkPackageHash(&map_buffer, accumulated));
         }
     }
 
