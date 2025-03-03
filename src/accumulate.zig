@@ -35,13 +35,8 @@ pub fn Accumulatable(T: type) type {
 pub fn Resolved(T: type) type {
     return std.ArrayList(T);
 }
-// pub const QueuedWorkReportAndDeps = std.ArrayList(WorkReportAndDeps);
-// pub const QueuedWorkReportAndDepsRefs = std.ArrayList(*WorkReportAndDeps);
-// pub const AccumulatableReports = std.ArrayList(types.WorkReport);
-// pub const ResolvedReports = std.ArrayList(types.WorkPackageHash);
 
 // 12.7 Walks the queued, updates dependencies and removes those who are already resolved
-
 fn queueEditingFunction(
     queued: *Queued(WorkReportAndDeps),
     resolved_reports: []types.WorkReportHash,
@@ -160,25 +155,7 @@ fn processAccumulationQueue(
     span.debug("Accumulation queue processing complete, found {d} accumulatable reports", .{accumulatable.items.len});
 }
 
-// 1. History and Queuing (12.1):
-// - Tracks accumulated work packages
-// - Maintains queue of ready but not-yet-accumulated work reports
-// - Partitions newly available work reports into immediate accumulation or queued execution
-//
-// 2. Execution (12.2):
-// - Works with a block gas limit
-// - Uses sequential execution but tries to optimize by aggregating work items for the same service
-// - Defines functions ∆+, ∆* and ∆1 for accumulation at different levels
-//
-// 3. Deferred Transfers and State Integration (12.3):
-// - Handles transfers that result from accumulation
-// - Integrates results into posterior state (χ', φ', ι')
-// - Creates Beefy commitment map
-//
-// 4. Preimage Integration (12.4):
-// - Final stage that integrates preimages provided in lookup extrinsic
-// - Results in final posterior account state δ'
-
+/// processes the new to be accumulated reports
 pub fn processAccumulateReports(
     comptime params: Params,
     stx: *state_delta.StateTransition(params),
