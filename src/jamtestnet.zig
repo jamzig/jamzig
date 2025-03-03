@@ -175,7 +175,11 @@ pub fn runStateTransitionTests(
 
             // std.debug.print("{}", .{expected_state});
 
-            try @import("tests/diff.zig").printDiffBasedOnFormatToStdErr(allocator, &current_state.?, &expected_state);
+            var state_diff = try @import("tests/state_diff.zig").JamStateDiff(params).build(allocator, &current_state.?, &expected_state);
+            defer state_diff.deinit();
+
+            state_diff.printToStdErr();
+
             return error.UnexpectedStateDiff;
         }
 

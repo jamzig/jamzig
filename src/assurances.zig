@@ -132,13 +132,13 @@ pub const AvailableAssignments = struct {
 
         return reports;
     }
-    /// Returns allocated slice of WorkReport pointers. Caller owns the slice.
+    /// Returns allocated slice of deepCloned WorkReports
     pub fn getWorkReports(self: @This(), allocator: std.mem.Allocator) ![]types.WorkReport {
         var reports = try allocator.alloc(types.WorkReport, self.inner.len);
         errdefer allocator.free(reports);
 
         for (self.inner, 0..) |assignment, i| {
-            reports[i] = assignment.report;
+            reports[i] = try assignment.report.deepClone(allocator);
         }
 
         return reports;

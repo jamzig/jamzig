@@ -349,16 +349,15 @@ pub fn processAccumulateReports(
     const accumulated = accumulatable.items[0..n];
 
     // Add ready reports to accumulation history
+    execute_span.debug("Shifting down xi, make place for new entry", .{});
+    try xi.shiftDown();
+
     execute_span.debug("Adding {d} reports to accumulation history", .{accumulated.len});
     for (accumulated, 0..) |report, i| {
         const work_package_hash = report.package_spec.hash;
         execute_span.trace("Adding report {d} to history, hash: {s}", .{ i, std.fmt.fmtSliceHexLower(&work_package_hash) });
         try xi.addWorkPackage(work_package_hash);
     }
-
-    // Track history of accumulation for an epoch in xi
-    execute_span.debug("Shifting down xi for history tracking", .{});
-    try xi.shiftDown();
 
     // 12.27 Update theta pending reports
     const update_span = span.child(.update_theta);

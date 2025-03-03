@@ -20,6 +20,7 @@ pub const time = @import("stf/time.zig");
 pub const reports = @import("stf/reports.zig");
 pub const validator_stats = @import("stf/validator_stats.zig");
 pub const assurances = @import("stf/assurances.zig");
+pub const accumulate = @import("stf/accumulate.zig");
 
 const tracing = @import("tracing.zig");
 const trace = tracing.scoped(.stf);
@@ -74,13 +75,14 @@ pub fn stateTransition(
     );
 
     // => rho_double_dagger
-    try assurances.transition(
+    var available_assignments = try assurances.transition(
         params,
         allocator,
         state_transition,
         new_block.extrinsic.assurances,
         new_block.header.parent,
     );
+    defer available_assignments.deinit(allocator);
 
     // => rho_prime
     try reports.transition(
@@ -88,6 +90,21 @@ pub fn stateTransition(
         allocator,
         state_transition,
         new_block,
+    );
+
+    // accumulate
+    const work_reports = try available_assignments.getWorkReports(allocator);
+    defer {
+        for (work_reports) |*report| {
+            report.deinit(allocator);
+        }
+        allocator.free(work_reports);
+    }
+    try accumulate.transition(
+        params,
+        allocator,
+        state_transition,
+        work_reports,
     );
 
     // Process authorizations using guarantees extrinsic data

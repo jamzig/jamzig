@@ -142,10 +142,10 @@ pub fn convertAccumulatedQueue(
     errdefer xi.deinit();
 
     for (accumulated.items) |queue_items| {
+        try xi.shiftDown();
         for (queue_items) |queue_item| {
             try xi.addWorkPackage(queue_item);
         }
-        try xi.shiftDown();
     }
 
     return xi;

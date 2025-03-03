@@ -18,7 +18,7 @@ pub fn transition(
     stx: *StateTransition(params),
     extrinsic: types.AssurancesExtrinsic,
     parent_hash: types.HeaderHash,
-) !void {
+) !assurances.AvailableAssignments {
     const span = trace.span(.assurances);
     defer span.deinit();
 
@@ -33,12 +33,11 @@ pub fn transition(
 
     const pending_reports = try stx.ensureT(state.Rho(params.core_count), .rho_prime);
 
-    var result = try assurances.processAssuranceExtrinsic(
+    return try assurances.processAssuranceExtrinsic(
         params,
         allocator,
         validated,
         stx.time.current_slot,
         pending_reports,
     );
-    defer result.deinit(allocator);
 }
