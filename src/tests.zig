@@ -1,4 +1,6 @@
 comptime {
+    _ = @import("itertools.zig");
+
     _ = @import("jamtestvectors/loader.zig");
     _ = @import("jamtestvectors/safrole.zig");
     _ = @import("jamtestvectors/codec.zig");
@@ -10,6 +12,7 @@ comptime {
     _ = @import("jamtestvectors/assurances.zig");
     _ = @import("jamtestvectors/fisher_yates.zig");
     _ = @import("jamtestvectors/authorizations.zig");
+    _ = @import("jamtestvectors/accumulate.zig");
 
     _ = @import("codec.zig");
     _ = @import("codec_test.zig");
@@ -94,6 +97,9 @@ comptime {
     _ = @import("accumulated_reports.zig");
 
     _ = @import("validator_stats.zig");
+
+    _ = @import("accumulate.zig");
+    _ = @import("accumulate_test.zig");
 
     _ = @import("jamtestnet.zig");
     _ = @import("jamtestnet/parsers/jamduna/state_snapshot.zig");

@@ -8,8 +8,15 @@ pub const DiffResult = union(enum) {
     EmptyDiff,
     Diff: []u8,
 
-    pub fn debugPrint(self: @This()) void {
-        switch (self) {
+    pub fn hasChanges(self: *const @This()) bool {
+        return switch (self.*) {
+            .EmptyDiff => false,
+            else => true,
+        };
+    }
+
+    pub fn debugPrint(self: *const @This()) void {
+        switch (self.*) {
             .EmptyDiff => {
                 // std.debug.print("<empty diff>\n", .{});
             },
@@ -22,7 +29,7 @@ pub const DiffResult = union(enum) {
         }
     }
 
-    pub fn debugPrintAndDeinit(self: @This(), allocator: std.mem.Allocator) void {
+    pub fn debugPrintAndDeinit(self: *const @This(), allocator: std.mem.Allocator) void {
         defer self.deinit(allocator);
         self.debugPrint();
     }

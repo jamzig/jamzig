@@ -30,6 +30,7 @@ pub const WorkPackageHash = OpaqueHash;
 pub const WorkReportHash = OpaqueHash;
 pub const ExportsRoot = OpaqueHash;
 pub const ErasureRoot = OpaqueHash;
+pub const AccumulateRoot = OpaqueHash;
 
 pub const Entropy = OpaqueHash;
 pub const EntropyBuffer = [4]Entropy;
@@ -67,7 +68,7 @@ pub const RefineContext = struct {
     beefy_root: BeefyRoot,
     lookup_anchor: HeaderHash,
     lookup_anchor_slot: TimeSlot,
-    prerequisites: []OpaqueHash,
+    prerequisites: []WorkPackageHash,
 
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){
