@@ -31,6 +31,13 @@ pub fn transition(
         kappa.*,
     );
 
+    // Register updated validator stats
+    const pi: *state.Pi = try stx.ensure(.pi_prime);
+    for (validated.items()) |assurance| {
+        var stats = try pi.getValidatorStats(assurance.validator_index);
+        stats.updateAvailabilityAssurances(1);
+    }
+
     const pending_reports = try stx.ensureT(state.Rho(params.core_count), .rho_prime);
 
     return try assurances.processAssuranceExtrinsic(
