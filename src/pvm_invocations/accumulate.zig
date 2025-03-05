@@ -88,7 +88,7 @@ pub fn invoke(
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.assign), host_calls.callAssignCore);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.designate), host_calls.designateValidators);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.checkpoint), host_calls.checkpoint);
-    // try host_call_map.put(allocator, @intFromEnum(HostCallId.new), host_calls.newService);
+    try host_call_map.put(allocator, @intFromEnum(HostCallId.new), host_calls.newService);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.upgrade), host_calls.upgradeService);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.transfer), host_calls.callTransfer);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.eject), host_calls.ejectService);
@@ -445,6 +445,74 @@ pub fn AccumulateHostCalls(params: Params) type {
 
             // Success result
             exec_ctx.registers[7] = preimage.len; // Success status
+            return .play;
+        }
+
+        /// Host call implementation for new service (Ω_N)
+        fn newService(
+            exec_ctx: *pvm.PVM.ExecutionContext,
+            call_ctx: ?*anyopaque,
+        ) pvm.PVM.HostCallResult {
+            if (call_ctx == null) {
+                return .{ .terminal = .panic };
+            }
+
+            const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
+            const code_hash_ptr = exec_ctx.registers[7];
+            const code_len: u32 = @truncate(exec_ctx.registers[8]);
+            const min_gas_limit = exec_ctx.registers[9];
+            const min_memo_gas = exec_ctx.registers[10];
+
+            // Read code hash from memory
+            const code_hash_slice = exec_ctx.memory.readSlice(@truncate(code_hash_ptr), 32) catch {
+                // if (err == pvm.PVM.Memory.Error.PageFault) {
+                //     return .{ .terminal = .{ .page_fault = exec_ctx.memory.last_violation.?.address } };
+                // }
+                // Unknown error
+                return .{ .terminal = .panic };
+            };
+            const code_hash: [32]u8 = code_hash_slice[0..32].*;
+
+            // Check if the calling service has enough balance for the initial funding
+            const calling_service = host_ctx.context.service_accounts.getAccount(host_ctx.service_id) orelse {
+                // Error: Service not found
+                return .{ .terminal = .panic };
+            };
+
+            // Calculate the minimum balance threshold for a new service (a_t)
+            const initial_balance: types.Balance = params.basic_service_balance + // B_S
+                // 2 * one lookup item + 0 storage items
+                (params.min_balance_per_item * ((2 * 1) + 0)) +
+                // 81 + code_len for preimage lookup length, 0 for storage items
+                params.min_balance_per_octet * (81 + code_len + 0);
+
+            if (calling_service.balance < initial_balance) {
+                exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.CASH); // Error: Insufficient funds
+                return .play;
+            }
+
+            // Create the new service account
+            var new_account = host_ctx.context.service_accounts.getOrCreateAccount(host_ctx.new_service_id) catch {
+                // Error: for some reason failing to create a new account
+                return .{ .terminal = .panic };
+            };
+
+            new_account.code_hash = code_hash;
+            new_account.min_gas_accumulate = min_gas_limit;
+            new_account.min_gas_on_transfer = min_memo_gas;
+
+            new_account.balance = initial_balance;
+
+            new_account.integratePreimageLookup(code_hash, code_len, null) catch {
+                // Error: integratePreimageLookup failed, cause OOM
+                return .{ .terminal = .panic };
+            };
+
+            // Deduct the initial balance from the calling service
+            calling_service.balance -= initial_balance;
+
+            // Success result
+            exec_ctx.registers[7] = check(host_ctx.context.service_accounts, host_ctx.new_service_id); // Return the new service ID on success
             return .play;
         }
     };
