@@ -90,7 +90,7 @@ pub fn invoke(
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.checkpoint), host_calls.checkpoint);
     try host_call_map.put(allocator, @intFromEnum(HostCallId.new), host_calls.newService);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.upgrade), host_calls.upgradeService);
-    // try host_call_map.put(allocator, @intFromEnum(HostCallId.transfer), host_calls.callTransfer);
+    try host_call_map.put(allocator, @intFromEnum(HostCallId.transfer), host_calls.transfer);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.eject), host_calls.ejectService);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.query), host_calls.queryPreimage);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.solicit), host_calls.solicitPreimage);
@@ -512,15 +512,9 @@ pub fn AccumulateHostCalls(params: Params) type {
             }
 
             // Read value from memory
-            const value_slice = exec_ctx.memory.readSlice(@truncate(v_o), @truncate(v_z)) catch {
+            const value = exec_ctx.memory.readSlice(@truncate(v_o), @truncate(v_z)) catch {
                 return .{ .terminal = .panic };
             };
-
-            // Create a copy of the value data
-            const value = host_ctx.allocator.dupe(u8, value_slice) catch {
-                return .{ .terminal = .panic };
-            };
-            errdefer host_ctx.allocator.free(value);
 
             // Check if service has enough balance to store this data
             // This is a simplification - proper implementation would calculate
@@ -539,6 +533,74 @@ pub fn AccumulateHostCalls(params: Params) type {
 
             // Return the previous length per graypaper
             exec_ctx.registers[7] = existing_len;
+            return .play;
+        }
+
+        /// Host call implementation for transfer (Ω_T)
+        fn transfer(
+            exec_ctx: *pvm.PVM.ExecutionContext,
+            call_ctx: ?*anyopaque,
+        ) pvm.PVM.HostCallResult {
+            const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
+
+            // Get registers per graypaper B.7: [d, a, l, o]
+            const destination_id = exec_ctx.registers[7]; // Destination service ID
+            const amount = exec_ctx.registers[8]; // Amount to transfer
+            const gas_limit = exec_ctx.registers[9]; // Gas limit for on_transfer
+            const memo_ptr = exec_ctx.registers[10]; // Pointer to memo data
+
+            // Get source service account
+            const source_service = host_ctx.context.service_accounts.getAccount(host_ctx.service_id) orelse {
+                return .{ .terminal = .panic };
+            };
+
+            // Check if destination service exists
+            const destination_service = host_ctx.context.service_accounts.getAccount(@intCast(destination_id)) orelse {
+                exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.WHO); // Error: destination not found
+                return .play;
+            };
+
+            // Check if gas limit is high enough for destination service's on_transfer
+            if (gas_limit < destination_service.min_gas_on_transfer) {
+                exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.LOW); // Error: gas limit too low
+                return .play;
+            }
+
+            // Check if source has enough balance
+            if (source_service.balance < amount) {
+                exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.CASH); // Error: insufficient funds
+                return .play;
+            }
+
+            // Read memo data from memory
+            const memo_slice = exec_ctx.memory.readSlice(@truncate(memo_ptr), params.transfer_memo_size) catch {
+                return .{ .terminal = .panic };
+            };
+
+            // Create a memo buffer and copy data from memory
+            var memo: [128]u8 = [_]u8{0} ** 128;
+            @memcpy(memo[0..@min(memo_slice.len, 128)], memo_slice[0..@min(memo_slice.len, 128)]);
+
+            // Create a deferred transfer
+            const deferred_transfer = DeferredTransfer{
+                .sender = host_ctx.service_id,
+                .destination = @intCast(destination_id),
+                .amount = @intCast(amount),
+                .memo = memo,
+                .gas_limit = @intCast(gas_limit),
+            };
+
+            // Add the transfer to the list of deferred transfers
+            host_ctx.deferred_transfers.append(deferred_transfer) catch {
+                // Out of memory
+                return .{ .terminal = .panic };
+            };
+
+            // Deduct the amount from the source service's balance
+            source_service.balance -= @intCast(amount);
+
+            // Return success
+            exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.OK);
             return .play;
         }
 
