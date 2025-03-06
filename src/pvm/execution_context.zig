@@ -203,10 +203,6 @@ pub const ExecutionContext = struct {
         self.* = undefined;
     }
 
-    pub fn registerHostCall(self: *ExecutionContext, allocator: std.mem.Allocator, idx: u32, handler: HostCallFn) !void {
-        try self.host_calls.put(allocator, idx, handler);
-    }
-
     pub fn setHostCalls(self: *ExecutionContext, new_host_calls: *const HostCallMap) void {
         // Replace with the new one
         self.host_calls = new_host_calls;

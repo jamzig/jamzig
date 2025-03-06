@@ -353,12 +353,15 @@ pub const PVMFuzzer = struct {
         defer exec_ctx.deinit(self.allocator);
 
         // Register host call handler
-        try exec_ctx.registerHostCall(self.allocator, 0, struct {
+        var host_calls_map = std.AutoHashMapUnmanaged(u32, PVM.HostCallFn){};
+        defer host_calls_map.deinit(self.allocator);
+        try host_calls_map.put(self.allocator, 0, struct {
             pub fn func(ctx: *PVM.ExecutionContext, _: *anyopaque) PVM.HostCallResult {
                 _ = ctx;
                 return .play;
             }
         }.func);
+        exec_ctx.setHostCalls(&host_calls_map);
 
         // Limit PVM allocations
         exec_ctx.memory.heap_allocation_limit = 8;
@@ -490,7 +493,7 @@ pub const PVMFuzzer = struct {
             switch (step_result) {
                 .cont => continue,
                 .host_call => |host| {
-                    const handler = exec_ctx.host_calls.get(host.idx) orelse
+                    const handler = exec_ctx.host_calls.?.get(host.idx) orelse
                         return FuzzResult{
                         .seed = seed,
                         .status = .{ .terminal = .panic },
@@ -507,14 +510,20 @@ pub const PVMFuzzer = struct {
                             exec_ctx.pc = host.next_pc;
                             continue;
                         },
-                        .page_fault => |addr| {
-                            return FuzzResult{
-                                .seed = seed,
-                                .status = .{ .terminal = .{ .page_fault = addr } },
-                                .gas_used = initial_gas - exec_ctx.gas,
-                                .was_mutated = will_mutate,
-                                .init_failed = false,
-                            };
+                        .terminal => |term| switch (term) {
+                            .page_fault => |addr| {
+                                return FuzzResult{
+                                    .seed = seed,
+                                    .status = .{ .terminal = .{ .page_fault = addr } },
+                                    .gas_used = initial_gas - exec_ctx.gas,
+                                    .was_mutated = will_mutate,
+                                    .init_failed = false,
+                                };
+                            },
+                            else => {
+                                // FIXME: we can track more errors on hostcalls
+
+                            },
                         },
                     }
                 },
