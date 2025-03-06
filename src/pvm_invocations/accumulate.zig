@@ -808,7 +808,8 @@ pub fn AccumulateHostCalls(params: Params) type {
             span.debug("Service created successfully, returning service ID: {d}", .{
                 host_ctx.new_service_id,
             });
-            exec_ctx.registers[7] = check(host_ctx.context.service_accounts, host_ctx.new_service_id); // Return the new service ID on success
+            exec_ctx.registers[7] = host_ctx.new_service_id; // Return the new service ID on success
+            host_ctx.new_service_id = check(host_ctx.context.service_accounts, host_ctx.new_service_id); // Return the new service ID on success
             return .play;
         }
     };
