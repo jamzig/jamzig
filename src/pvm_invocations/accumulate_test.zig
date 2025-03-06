@@ -13,6 +13,8 @@ const JAMDUNA_PARAMS = @import("../jamtestnet.zig").JAMDUNA_PARAMS;
 const jamtestnet = @import("../jamtestnet/parsers.zig");
 const state_dict = @import("../state_dictionary.zig");
 
+const state_diff = @import("../tests/state_diff.zig");
+
 const JamdunaLoader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS);
 
 test "accumulate_invocation" {
@@ -107,5 +109,67 @@ test "accumulate_invocation" {
         std.debug.print("Accumulation output: {any}\n", .{accum_output});
     } else {
         std.debug.print("No accumulation output provided\n", .{});
+    }
+
+    // Get the expected post-state that we should compare against
+    var post_state_mdict = try state_transition.postStateAsMerklizationDict(allocator);
+    defer post_state_mdict.deinit();
+    var post_state = try state_dict.reconstruct.reconstructState(
+        JAMDUNA_PARAMS,
+        allocator,
+        &post_state_mdict,
+    );
+    defer post_state.deinit(allocator);
+
+    // Create a filtered version of both states containing only components that should be affected by accumulation
+    try removeUnusedStateComponents(JAMDUNA_PARAMS, &pre_state);
+    try removeUnusedStateComponents(JAMDUNA_PARAMS, &post_state);
+
+    // Now use the state_diff to compare the filtered states
+    var diff = try state_diff.JamStateDiff(JAMDUNA_PARAMS).build(allocator, &pre_state, &post_state);
+    defer diff.deinit();
+
+    // If there are differences, print them and fail the test
+    if (diff.hasChanges()) {
+        std.debug.print("State differences detected after accumulation:\n", .{});
+        diff.printToStdErr();
+        return error.UnexpectedStateDiff;
+    } else {
+        std.debug.print("State verification passed - accumulation produced expected state changes\n", .{});
+    }
+}
+
+fn removeUnusedStateComponents(comptime params: jam_params.Params, jam_state: *state.JamState(params)) !void {
+    const callDeinit = @import("../meta.zig").callDeinit;
+
+    // Define which components we want to keep (relevant for accumulation)
+    const componentsToKeep = [_][]const u8{
+        "delta", // Service accounts
+        "chi", // Privileges
+        "phi", // Authorizer queue
+    };
+
+    // Use metaprogramming to iterate through all fields in the JamState struct
+    inline for (std.meta.fields(state.JamState(params))) |field| {
+        // Skip the fields we want to keep
+        const shouldKeep = blk: {
+            for (componentsToKeep) |keep| {
+                if (std.mem.eql(u8, keep, field.name)) {
+                    break :blk true;
+                }
+            }
+            break :blk false;
+        };
+
+        if (!shouldKeep) {
+            // Check if the field is not null (initialized)
+            if (@field(jam_state, field.name)) |*value| {
+                // Use the existing deinitField helper
+                callDeinit(value, std.testing.allocator);
+
+                // Set the field to null (deinitField doesn't do this for us)
+                @field(jam_state, field.name) = null;
+            }
+        }
     }
 }
