@@ -13,6 +13,7 @@ const Params = @import("../jam_params.zig").Params;
 // Add tracing import
 const trace = @import("../tracing.zig").scoped(.accumulate);
 
+// The to be encoded arguments
 const AccumulateArgs = struct {
     timeslot: types.TimeSlot,
     service_id: types.ServiceId,
@@ -28,7 +29,7 @@ pub fn invoke(
     entropy: types.Entropy, // n0
     service_id: types.ServiceId,
     gas_limit: types.Gas,
-    accumulation_operands: []const AccumulationOperand,
+    accumulation_operands: []const AccumulationOperand, // O
 ) !AccumulationResult(params) {
     const span = trace.span(.invoke);
     defer span.deinit();
