@@ -15,6 +15,7 @@ pub fn transition(
     comptime params: Params,
     stx: *StateTransition(params),
     new_block: *const types.Block,
+    accumulate_root: types.AccumulateRoot,
 ) !void {
     const span = trace.span(.transition_recent_history);
     defer span.deinit();
@@ -26,5 +27,5 @@ pub fn transition(
 
     const RecentBlock = @import("../recent_blocks.zig").RecentBlock;
     // Transition β with information from the new block
-    try beta_prime.import(try RecentBlock.fromBlock(params, stx.allocator, new_block));
+    try beta_prime.import(try RecentBlock.fromBlock(params, stx.allocator, new_block, accumulate_root));
 }

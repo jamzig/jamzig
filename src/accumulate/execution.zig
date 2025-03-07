@@ -30,7 +30,7 @@ pub fn OuterAccumulationResult(comptime params: @import("../jam_params.zig").Par
         accumulated_count: usize,
         context: AccumulationContext(params),
         transfers: []DeferredTransfer,
-        accumulation_outputs: std.AutoHashMap(types.ServiceId, types.AccumulateRoot),
+        accumulation_outputs: std.AutoHashMap(types.ServiceId, types.AccumulateOutput),
 
         pub fn takeTransfers(self: *@This()) []DeferredTransfer {
             const result = self.transfers;

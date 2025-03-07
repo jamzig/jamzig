@@ -31,6 +31,7 @@ pub const WorkReportHash = OpaqueHash;
 pub const ExportsRoot = OpaqueHash;
 pub const ErasureRoot = OpaqueHash;
 pub const AccumulateRoot = OpaqueHash;
+pub const AccumulateOutput = OpaqueHash;
 
 pub const Entropy = OpaqueHash;
 pub const EntropyBuffer = [4]Entropy;

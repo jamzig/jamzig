@@ -488,6 +488,61 @@ pub fn processAccumulateReports(
         }
     }
 
+    // Calculate the AccumulateRoot here
+    const root_span = span.child(.calculate_accumulate_root);
+    defer root_span.deinit();
+
+    root_span.debug("Calculating AccumulateRoot from {d} accumulation outputs", .{result.accumulation_outputs.count()});
+
+    // Collect and sort service IDs
+    var keys = try std.ArrayList(types.ServiceId).initCapacity(allocator, result.accumulation_outputs.count());
+    defer keys.deinit();
+
+    root_span.trace("Collecting service IDs from accumulation outputs", .{});
+    var key_iter = result.accumulation_outputs.keyIterator();
+    while (key_iter.next()) |key| {
+        try keys.append(key.*);
+        root_span.trace("Added service ID: {d}", .{key.*});
+    }
+
+    root_span.debug("Sorting {d} service IDs in ascending order", .{keys.items.len});
+    std.mem.sort(u32, keys.items, {}, std.sort.asc(u32));
+
+    // Prepare blobs for Merkle tree
+    var blobs = try std.ArrayList([]u8).initCapacity(allocator, result.accumulation_outputs.count());
+    defer {
+        for (blobs.items) |b| {
+            allocator.free(b);
+        }
+        blobs.deinit();
+    }
+
+    root_span.debug("Creating blobs for Merkle tree calculation", .{});
+    for (keys.items, 0..) |key, i| {
+        const blob_span = root_span.child(.create_blob);
+        defer blob_span.deinit();
+
+        blob_span.trace("Processing service ID {d} at index {d}", .{ key, i });
+
+        // Convert service ID to bytes
+        var service_id: [4]u8 = undefined;
+        std.mem.writeInt(u32, &service_id, key, .little);
+        blob_span.trace("Service ID bytes: {s}", .{std.fmt.fmtSliceHexLower(&service_id)});
+
+        // Get accumulation output for this service
+        const output = result.accumulation_outputs.get(key).?;
+        blob_span.trace("Accumulation output: {s}", .{std.fmt.fmtSliceHexLower(&output)});
+
+        // Concatenate service ID and output
+        const blob = try allocator.dupe(u8, &(service_id ++ output));
+        try blobs.append(blob);
+        blob_span.debug("Created blob of length {d}: {s}", .{ blob.len, std.fmt.fmtSliceHexLower(blob) });
+    }
+
+    root_span.debug("Computing Merkle root from {d} blobs", .{blobs.items.len});
+    const accumulate_root = @import("merkle_binary.zig").M_b(blobs.items, std.crypto.hash.sha3.Keccak256);
+    root_span.debug("AccumulateRoot calculated: {s}", .{std.fmt.fmtSliceHexLower(&accumulate_root)});
+
     span.debug("Process accumulate reports completed successfully", .{});
-    return [_]u8{0} ** 32;
+    return accumulate_root;
 }

@@ -17,7 +17,7 @@ pub fn transition(
     _: std.mem.Allocator,
     stx: *StateTransition(params),
     reports: []types.WorkReport,
-) !void {
+) !types.AccumulateRoot {
     const span = trace.span(.accumulate);
     defer span.deinit();
 
@@ -28,5 +28,5 @@ pub fn transition(
         reports,
     );
 
-    _ = accumulate_root;
+    return accumulate_root;
 }

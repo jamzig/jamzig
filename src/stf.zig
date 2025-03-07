@@ -60,12 +60,6 @@ pub fn stateTransition(
         try new_block.header.getEntropy(),
     );
 
-    try recent_history.transition(
-        params,
-        state_transition,
-        new_block,
-    );
-
     // => rho_dagger
     _ = try disputes.transition(
         params,
@@ -100,11 +94,18 @@ pub fn stateTransition(
         }
         allocator.free(work_reports);
     }
-    try accumulate.transition(
+    const accumulate_root = try accumulate.transition(
         params,
         allocator,
         state_transition,
         work_reports,
+    );
+
+    try recent_history.transition(
+        params,
+        state_transition,
+        new_block,
+        accumulate_root,
     );
 
     // Process authorizations using guarantees extrinsic data
