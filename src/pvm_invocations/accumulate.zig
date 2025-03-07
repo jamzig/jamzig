@@ -68,7 +68,7 @@ pub fn invoke(
     try codec.serialize(AccumulateArgs, .{}, args_buffer.writer(), arguments);
 
     span.debug("Setting up host call functions", .{});
-    const host_call_map = try HostCallMap.buildOrGetCached(params, allocator);
+    const host_call_map = try HostCallMap.buildOrGetCached(params);
 
     // Initialize host call context B.6
     span.debug("Initializing host call context", .{});
@@ -243,8 +243,15 @@ pub fn AccumulationResult(params: Params) type {
         /// Amount of gas consumed during accumulation
         gas_used: types.Gas,
 
+        pub fn takeTransfers(self: *@This()) []DeferredTransfer {
+            const result = self.transfers;
+            self.transfers = &[_]DeferredTransfer{};
+            return result;
+        }
+
         pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
             alloc.free(self.transfers);
+            self.* = undefined;
         }
     };
 }

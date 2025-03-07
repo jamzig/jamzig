@@ -32,6 +32,12 @@ pub fn OuterAccumulationResult(comptime params: @import("../jam_params.zig").Par
         transfers: []DeferredTransfer,
         accumulation_outputs: std.AutoHashMap(types.ServiceId, types.AccumulateRoot),
 
+        pub fn takeTransfers(self: *@This()) []DeferredTransfer {
+            const result = self.transfers;
+            self.transfers = &[_]DeferredTransfer{};
+            return result;
+        }
+
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             allocator.free(self.transfers);
             self.accumulation_outputs.deinit();
@@ -66,6 +72,7 @@ pub fn outerAccumulation(
     defer transfers.deinit();
 
     var accumulation_outputs = std.AutoHashMap(types.ServiceId, types.AccumulateRoot).init(allocator);
+    errdefer accumulation_outputs.deinit();
 
     // If no work reports, return early
     if (work_reports.len == 0) {
@@ -129,7 +136,7 @@ pub fn outerAccumulation(
     }
 
     // Process reports in parallel using parallelizedAccumulation
-    const parallelized_result = try parallelizedAccumulation(
+    var parallelized_result = try parallelizedAccumulation(
         params,
         allocator,
         context,
@@ -138,6 +145,7 @@ pub fn outerAccumulation(
         tau,
         entropy,
     );
+    defer parallelized_result.deinit(allocator);
 
     // Gather all transfers
     try transfers.appendSlice(parallelized_result.transfers);
@@ -172,7 +180,7 @@ pub fn outerAccumulation(
         work_reports.len - reports_to_process, remaining_gas,
     });
 
-    const recursive_result = try outerAccumulation(
+    var recursive_result = try outerAccumulation(
         params,
         allocator,
         remaining_gas,
@@ -182,6 +190,7 @@ pub fn outerAccumulation(
         tau,
         entropy,
     );
+    defer recursive_result.deinit(allocator);
 
     // Combine results from recursive call
     try transfers.appendSlice(recursive_result.transfers);
@@ -207,6 +216,29 @@ pub fn ParallelizedAccumulationResult(comptime params: jam_params.Params) type {
         gas_used: types.Gas,
         transfers: []DeferredTransfer,
         service_results: std.AutoHashMap(types.ServiceId, ServiceAccumulationResult),
+
+        /// Takes ownership of the transfers slice, setting internal transfers to empty
+        pub fn takeTransfers(self: *@This()) []DeferredTransfer {
+            const result = self.transfers;
+            self.transfers = &[_]DeferredTransfer{};
+            return result;
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            // Free the transfers array
+            allocator.free(self.transfers);
+
+            // Clean up service results
+            var it = self.service_results.iterator();
+            while (it.next()) |entry| {
+                // _ = entry;
+                entry.value_ptr.deinit(allocator);
+            }
+            self.service_results.deinit();
+
+            // Mark as undefined to prevent use-after-free
+            self.* = undefined;
+        }
     };
 }
 
@@ -310,7 +342,7 @@ pub fn parallelizedAccumulation(
 
     // Store results for each service
     var service_results = std.AutoHashMap(types.ServiceId, ServiceAccumulationResult).init(allocator);
-    defer {
+    errdefer {
         var it = service_results.iterator();
         while (it.next()) |entry| {
             entry.value_ptr.deinit(allocator);
@@ -377,7 +409,7 @@ pub fn parallelizedAccumulation(
         }
 
         // Process this service
-        const result = try singleServiceAccumulation(
+        var result = try singleServiceAccumulation(
             params,
             allocator,
             context,
@@ -387,11 +419,12 @@ pub fn parallelizedAccumulation(
             gas_limit,
             if (operands_opt) |operands| operands.items.ptr[0..operands.items.len] else &[_]AccumulationOperand{},
         );
+        defer result.deinit(allocator);
 
         // Store results
         try service_results.put(service_id, .{
             .gas_used = result.gas_used,
-            .transfers = result.transfers,
+            .transfers = try allocator.dupe(DeferredTransfer, result.transfers),
             .accumulation_output = result.accumulation_output,
         });
 

@@ -12,13 +12,17 @@ const trace = @import("../../tracing.zig").scoped(.accumulate);
 
 threadlocal var cached_map: ?std.AutoHashMapUnmanaged(u32, PVM.HostCallFn) = null;
 
-pub fn buildOrGetCached(comptime params: Params, allocator: std.mem.Allocator) !*const std.AutoHashMapUnmanaged(u32, PVM.HostCallFn) {
+pub fn buildOrGetCached(comptime params: Params) !*const std.AutoHashMapUnmanaged(u32, PVM.HostCallFn) {
     const span = trace.span(.build_host_call_fn_map);
     defer span.deinit();
 
     if (cached_map) |m| {
         return &m;
     }
+
+    // we use the untracked heap allocator, since this data will be available for the whole length
+    // of the program it will be reclaimed at program exit
+    const allocator = std.heap.page_allocator;
 
     var host_call_map = std.AutoHashMapUnmanaged(u32, PVM.HostCallFn){};
     const HostCalls = AccumulateHostCalls(params);
@@ -45,10 +49,4 @@ pub fn buildOrGetCached(comptime params: Params, allocator: std.mem.Allocator) !
     cached_map = host_call_map;
 
     return &cached_map.?;
-}
-
-pub fn deinitCachedMap(allocator: std.mem.Allocator) void {
-    if (cached_map) |*m| {
-        m.deinit(allocator);
-    }
 }

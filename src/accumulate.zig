@@ -355,7 +355,7 @@ pub fn processAccumulateReports(
         .authorizer_queue = try stx.ensure(.phi_prime),
         .privileges = try stx.ensure(.chi_prime),
     };
-    const result = try @import("accumulate/execution.zig").outerAccumulation(
+    var result = try @import("accumulate/execution.zig").outerAccumulation(
         params,
         allocator,
         gas_limit,
@@ -365,6 +365,7 @@ pub fn processAccumulateReports(
         stx.time.current_slot,
         (try stx.ensure(.eta_prime))[0],
     );
+    defer result.deinit(allocator);
 
     // Apply deferred transfers as per 12.23 and 12.24
     const transfer_span = execute_span.child(.apply_deferred_transfers);

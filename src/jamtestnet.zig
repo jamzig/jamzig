@@ -57,6 +57,7 @@ test "jamduna:safrole" {
 
 test "jamduna:assurances" {
     const allocator = std.testing.allocator;
+
     const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
     try runStateTransitionTests(
         JAMDUNA_PARAMS,
@@ -117,7 +118,7 @@ pub fn runStateTransitionTests(
         defer pre_state_mdict.deinit();
 
         // std.debug.print("{}", .{types.fmt.format(pre_state_mdict)});
-        std.debug.print("{}", .{types.fmt.format(state_transition.block())});
+        // std.debug.print("{}", .{types.fmt.format(state_transition.block())});
 
         // Validator Root Calculations
         try state_transition.validateRoots(allocator);
