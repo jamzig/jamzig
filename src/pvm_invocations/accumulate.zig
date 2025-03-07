@@ -78,7 +78,6 @@ pub fn invoke(
         .context = context,
         .new_service_id = service_util.generateServiceId(context.service_accounts, service_id, entropy, tau),
         .deferred_transfers = std.ArrayList(DeferredTransfer).init(allocator),
-        .accumulation_output = null,
     };
     defer host_call_context.deinit();
     span.debug("Generated new service ID: {d}", .{host_call_context.new_service_id});
@@ -120,7 +119,19 @@ pub fn invoke(
         });
     }
 
-    if (host_call_context.accumulation_output) |output| {
+    // See: B.12
+    const accumulation_output: ?[32]u8 = outer: switch (result.result) {
+        .halt => |output| {
+            // we do not include an empty accumulation output see 12.17 b
+            if (output.len == 32) {
+                break :outer output[0..32].*;
+            }
+            break :outer null;
+        },
+        else => null,
+    };
+
+    if (accumulation_output) |output| {
         span.debug("Accumulation output present: {s}", .{std.fmt.fmtSliceHexLower(&output)});
     } else {
         span.debug("No accumulation output produced", .{});
@@ -130,7 +141,7 @@ pub fn invoke(
     return AccumulationResult(params){
         .state_context = context,
         .transfers = transfers,
-        .accumulation_output = host_call_context.accumulation_output,
+        .accumulation_output = accumulation_output,
         .gas_used = gas_used,
     };
 }
@@ -238,7 +249,7 @@ pub fn AccumulationResult(params: Params) type {
         transfers: []DeferredTransfer,
 
         /// Optional accumulation output hash (null if no output was produced)
-        accumulation_output: ?types.AccumulateRoot,
+        accumulation_output: ?types.AccumulateOutput,
 
         /// Amount of gas consumed during accumulation
         gas_used: types.Gas,

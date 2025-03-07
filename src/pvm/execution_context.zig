@@ -185,15 +185,22 @@ pub const ExecutionContext = struct {
         const span = trace.span(.return_value_as_slice);
         defer span.deinit();
 
-        if (self.registers[7] < self.registers[8]) {
-            const reg7 = @as(u32, @truncate(self.registers[7]));
-            const reg8 = @as(u32, @truncate(self.registers[8]));
-            return self.memory.readSlice(reg7, reg8 - reg7) catch {
-                return &[_]u8{};
-            };
-        }
+        span.debug("Reading return value registers r7={d} (0x{x:0>16}) len r8={d} (0x{x:0>16})", .{ self.registers[7], self.registers[7], self.registers[8], self.registers[8] });
 
-        return &[_]u8{};
+        const reg7 = @as(u32, @truncate(self.registers[7]));
+        const reg8 = @as(u32, @truncate(self.registers[8]));
+        const size = reg8;
+
+        span.debug("Truncated addresses: r7=0x{x:0>8}, r8=0x{x:0>8}, size={d} bytes", .{ reg7, reg8, size });
+
+        return self.memory.readSlice(reg7, size) catch |err| {
+            span.err("Failed to read memory slice: {s}", .{@errorName(err)});
+            if (self.memory.last_violation) |violation| {
+                span.err("Memory violation at address 0x{x:0>8}: {s}", .{ violation.address, @tagName(violation.violation_type) });
+            }
+            span.debug("Returning empty slice due to memory read error", .{});
+            return &[_]u8{};
+        };
     }
 
     pub fn deinit(self: *ExecutionContext, allocator: Allocator) void {

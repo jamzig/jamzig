@@ -101,7 +101,7 @@ pub const RecentHistory = struct {
         // Create a new BlockStateInformation
         var block_info = types.BlockInfo{
             .header_hash = input.header_hash,
-            .state_root = std.mem.zeroes(types.Hash), // This will be updated in the next block
+            .state_root = std.mem.zeroes(types.StateRoot), // This will be updated in the next block
             .beefy_mmr = undefined,
             .work_reports = input.work_reports,
         };

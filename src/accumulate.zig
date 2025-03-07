@@ -536,7 +536,6 @@ pub fn processAccumulateReports(
         // Concatenate service ID and output
         const blob = try allocator.dupe(u8, &(service_id ++ output));
         try blobs.append(blob);
-        blob_span.debug("Created blob of length {d}: {s}", .{ blob.len, std.fmt.fmtSliceHexLower(blob) });
     }
 
     root_span.debug("Computing Merkle root from {d} blobs", .{blobs.items.len});
