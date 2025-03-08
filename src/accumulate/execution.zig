@@ -302,16 +302,11 @@ pub fn parallelizedAccumulation(
     // Process all work reports
     for (work_reports) |report| {
         // Convert work report to accumulation operands
-        const operands = try AccumulationOperand.fromWorkReport(allocator, report);
-        defer {
-            for (operands) |*operand| {
-                operand.deinit(allocator);
-            }
-            allocator.free(operands);
-        }
+        var operands = try AccumulationOperand.fromWorkReport(allocator, report);
+        defer operands.deinit(allocator);
 
         // Group by service ID
-        for (report.results, operands) |result, operand| {
+        for (report.results, operands.items) |result, *operand| {
             const service_id = result.service_id;
 
             if (!service_work_items.contains(service_id)) {
@@ -320,23 +315,7 @@ pub fn parallelizedAccumulation(
 
             var service_operands = service_work_items.getPtr(service_id).?;
 
-            // Create a duplicate of the operand for the service
-            var operand_copy = operand;
-            var output_copy: AccumulationOperand.Output = undefined;
-
-            switch (operand.output) {
-                .success => |data| {
-                    output_copy = .{ .success = try allocator.dupe(u8, data) };
-                },
-                .err => |err| {
-                    output_copy = .{ .err = err };
-                },
-            }
-
-            operand_copy.output = output_copy;
-            operand_copy.authorization_output = try allocator.dupe(u8, operand.authorization_output);
-
-            try service_operands.append(operand_copy);
+            try service_operands.append(try operand.take());
         }
     }
 

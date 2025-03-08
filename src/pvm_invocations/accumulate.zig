@@ -146,6 +146,43 @@ pub fn invoke(
     };
 }
 
+pub const AccumulationOperands = struct {
+    const MaybeNull = struct {
+        item: ?AccumulationOperand,
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            if (self.item) |*operand| {
+                operand.deinit(allocator);
+                self.item = null;
+                self.* = undefined;
+            }
+        }
+
+        pub fn take(self: *@This()) !AccumulationOperand {
+            if (self.item == null) {
+                return error.AlreadyTookOperand;
+            }
+            const item = self.item.?;
+            self.item = null;
+            return item;
+        }
+    };
+    items: []MaybeNull,
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        // Clean up each AccumulationOperand in the items array
+        for (self.items) |*operand| {
+            operand.deinit(allocator);
+        }
+
+        // Free the items array itself
+        allocator.free(self.items);
+
+        // Mark as undefined to prevent use-after-free
+        self.* = undefined;
+    }
+};
+
 /// 12.18 AccumulationOperand represents a wrangled tuple of operands used by the PVM Accumulation function.
 /// It contains the rephrased work items for a specific service within work reports.
 pub const AccumulationOperand = struct {
@@ -170,14 +207,36 @@ pub const AccumulationOperand = struct {
     /// The authorization output blob for the work item
     authorization_output: []const u8,
 
-    pub fn fromWorkReport(allocator: std.mem.Allocator, report: types.WorkReport) ![]AccumulationOperand {
+    pub fn deepClone(self: @This(), alloc: std.mem.Allocator) !@This() {
+        // Create a new operand with deep copies of all dynamic data
+        var cloned = @This(){
+            .payload_hash = self.payload_hash,
+            .work_package_hash = self.work_package_hash,
+            .authorization_output = try alloc.dupe(u8, self.authorization_output),
+            .output = undefined, // Will be set below
+        };
+
+        // Deep copy the output based on its type
+        switch (self.output) {
+            .success => |data| {
+                cloned.output = .{ .success = try alloc.dupe(u8, data) };
+            },
+            .err => |err_code| {
+                cloned.output = .{ .err = err_code };
+            },
+        }
+
+        return cloned;
+    }
+
+    pub fn fromWorkReport(allocator: std.mem.Allocator, report: types.WorkReport) !AccumulationOperands {
         // Ensure there are results in the report
         if (report.results.len == 0) {
             return error.NoResults;
         }
 
         // Allocate an array of AccumulationOperand with the same length as report.results
-        var operands = try allocator.alloc(AccumulationOperand, report.results.len);
+        var operands = try allocator.alloc(AccumulationOperands.MaybeNull, report.results.len);
         errdefer {
             // Clean up any already initialized operands
             for (operands) |*operand| {
@@ -208,15 +267,15 @@ pub const AccumulationOperand = struct {
             };
 
             // Set up the operand
-            operands[i] = .{
+            operands[i] = .{ .item = .{
                 .output = output,
                 .payload_hash = result.payload_hash,
                 .work_package_hash = report.package_spec.hash,
                 .authorization_output = try allocator.dupe(u8, report.auth_output),
-            };
+            } };
         }
 
-        return operands;
+        return .{ .items = operands };
     }
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
