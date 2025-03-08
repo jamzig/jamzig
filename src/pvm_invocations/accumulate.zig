@@ -78,6 +78,7 @@ pub fn invoke(
         .context = context,
         .new_service_id = service_util.generateServiceId(context.service_accounts, service_id, entropy, tau),
         .deferred_transfers = std.ArrayList(DeferredTransfer).init(allocator),
+        .accumulation_output = null,
     };
     defer host_call_context.deinit();
     span.debug("Generated new service ID: {d}", .{host_call_context.new_service_id});
@@ -126,9 +127,11 @@ pub fn invoke(
             if (output.len == 32) {
                 break :outer output[0..32].*;
             }
-            break :outer null;
+            // else we use the accumulation_output of the context potentially set by the yield
+            // host call
+            break :outer host_call_context.accumulation_output;
         },
-        else => null,
+        else => null, // FIXME: exceptional domain
     };
 
     if (accumulation_output) |output| {

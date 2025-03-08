@@ -322,9 +322,9 @@ pub fn parallelizedAccumulation(
     // Store results for each service
     var service_results = std.AutoHashMap(types.ServiceId, ServiceAccumulationResult).init(allocator);
     errdefer {
-        var it = service_results.iterator();
+        var it = service_results.valueIterator();
         while (it.next()) |entry| {
-            entry.value_ptr.deinit(allocator);
+            entry.deinit(allocator);
         }
     }
 

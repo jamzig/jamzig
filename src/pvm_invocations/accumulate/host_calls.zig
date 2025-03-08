@@ -56,6 +56,7 @@ pub fn HostCalls(params: Params) type {
             service_id: types.ServiceId,
             new_service_id: types.ServiceId,
             deferred_transfers: std.ArrayList(DeferredTransfer),
+            accumulation_output: ?types.AccumulateRoot,
 
             pub fn deinit(self: *@This()) void {
                 self.deferred_transfers.deinit();
