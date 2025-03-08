@@ -94,6 +94,21 @@ pub fn invoke(
     const pvm_span = span.child(.pvm_invocation);
     defer pvm_span.deinit();
 
+    // Accumulation Host Function Context Domains
+    //
+    // The accumulation process uses a dual-domain context:
+    // - Regular domain (x): Used by most host functions for normal operations
+    // - Exceptional domain (y): Used as a fallback state in case of errors
+    //
+    // Only the checkpoint function (Ω_C, function ID 8) explicitly manipulates
+    // the exceptional domain, setting it equal to the current regular domain.
+    //
+    // If execution ends with an error (out-of-gas or panic), the system will
+    // use the exceptional domain state instead of the regular domain state,
+    // effectively restoring to the last checkpoint.
+    //
+    // All other accumulation host functions operate solely on the regular domain.
+
     const result = try pvm_invocation.machineInvocation(
         allocator,
         code,
