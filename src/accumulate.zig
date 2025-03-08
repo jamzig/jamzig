@@ -175,8 +175,8 @@ pub fn processAccumulateReports(
     span.debug("Initialized xi state component", .{});
 
     // Initialize lists for various report categories
-    var accumulatable = Accumulatable(types.WorkReport).init(allocator);
-    defer deinitEntriesAndObject(allocator, accumulatable);
+    var accumulatable_buffer = Accumulatable(types.WorkReport).init(allocator);
+    defer deinitEntriesAndObject(allocator, accumulatable_buffer);
     var queued = Queued(WorkReportAndDeps).init(allocator);
     defer deinitEntriesAndObject(allocator, queued);
 
@@ -200,7 +200,7 @@ pub fn processAccumulateReports(
             report.segment_root_lookup.len == 0)
         {
             partition_span.debug("Report {d} is immediately accumulatable", .{i});
-            try accumulatable.append(try report.deepClone(allocator));
+            try accumulatable_buffer.append(try report.deepClone(allocator));
             immediate_count += 1;
         } else {
             partition_span.debug("Report {d} has dependencies (prereqs: {d}, lookups: {d})", .{ i, report.context.prerequisites.len, report.segment_root_lookup.len });
@@ -305,7 +305,7 @@ pub fn processAccumulateReports(
     pending_span.debug("Resolving dependencies using queue editing function", .{});
     queueEditingFunction(
         &pending_reports_queue,
-        try mapWorkPackageHash(&map_buffer, accumulatable.items), // accumulatable contains immediate
+        try mapWorkPackageHash(&map_buffer, accumulatable_buffer.items), // accumulatable contains immediate
     );
 
     // 12.11 Process reports that are ready from the queue and add to accumulatable
@@ -313,7 +313,7 @@ pub fn processAccumulateReports(
     try processAccumulationQueue(
         allocator,
         &pending_reports_queue,
-        &accumulatable,
+        &accumulatable_buffer,
     );
 
     const execute_span = span.child(.execute_accumulatable);
@@ -345,27 +345,36 @@ pub fn processAccumulateReports(
 
     execute_span.debug("Gas limit calculated: {d} (G_T: {d}, core gas: {d}, free services gas: {d})", .{ gas_limit, params.total_gas_alloc_accumulation, core_gas, free_services_gas });
 
-    const accumulated = accumulatable.items[0..@min(accumulatable.items.len, params.core_count)];
-    execute_span.debug("Executing outer accumulation with {d} reports and gas limit {d}", .{ accumulated.len, gas_limit });
+    const accumulatable = accumulatable_buffer.items[0..@min(accumulatable_buffer.items.len, params.core_count)];
+    execute_span.debug("Executing outer accumulation with {d} reports and gas limit {d}", .{ accumulatable.len, gas_limit });
 
     // Build accumulation context
-    const accumulation_context = @import("pvm_invocations/accumulate.zig").AccumulationContext(params).build(allocator, .{
-        .service_accounts = try stx.ensure(.delta_prime),
-        .validator_keys = try stx.ensure(.iota_prime),
-        .authorizer_queue = try stx.ensure(.phi_prime),
-        .privileges = try stx.ensure(.chi_prime),
-    });
+    var accumulation_context = @import("pvm_invocations/accumulate.zig")
+        .AccumulationContext(params).build(
+        allocator,
+        .{
+            .service_accounts = try stx.ensure(.delta_prime),
+            .validator_keys = try stx.ensure(.iota_prime),
+            .authorizer_queue = try stx.ensure(.phi_prime),
+            .privileges = try stx.ensure(.chi_prime),
+        },
+    );
+    defer accumulation_context.deinit();
+
+    // Execute work reports scheduled for accumulation
     var result = try @import("accumulate/execution.zig").outerAccumulation(
         params,
         allocator,
         gas_limit,
-        accumulated,
+        accumulatable,
         &accumulation_context,
         &chi.always_accumulate,
         stx.time.current_slot,
         (try stx.ensure(.eta_prime))[0],
     );
     defer result.deinit(allocator);
+
+    const accumulated = accumulatable[0..result.accumulated_count];
 
     // Apply deferred transfers as per 12.23 and 12.24
     const transfer_span = execute_span.child(.apply_deferred_transfers);
@@ -435,7 +444,7 @@ pub fn processAccumulateReports(
     execute_span.debug("Shifting down xi, make place for new entry", .{});
     try xi.shiftDown();
 
-    execute_span.debug("Adding {d} reports to accumulation history", .{accumulated.len});
+    execute_span.debug("Adding {d} reports to accumulation history", .{result.accumulated_count});
     for (accumulated, 0..) |report, i| {
         const work_package_hash = report.package_spec.hash;
         execute_span.trace("Adding report {d} to history, hash: {s}", .{ i, std.fmt.fmtSliceHexLower(&work_package_hash) });
