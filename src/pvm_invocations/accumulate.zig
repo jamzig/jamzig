@@ -68,7 +68,8 @@ pub fn invoke(
     try codec.serialize(AccumulateArgs, .{}, args_buffer.writer(), arguments);
 
     span.debug("Setting up host call functions", .{});
-    const host_call_map = try HostCallMap.buildOrGetCached(params);
+    var host_call_map = try HostCallMap.buildOrGetCached(params, allocator);
+    defer host_call_map.deinit(allocator);
 
     // Initialize host call context B.6
     span.debug("Initializing host call context", .{});
@@ -115,7 +116,7 @@ pub fn invoke(
         5, // Accumulation entry point index per section 9.1
         @intCast(gas_limit),
         args_buffer.items,
-        host_call_map,
+        &host_call_map,
         @ptrCast(&host_call_context),
     );
     defer result.deinit(allocator);
@@ -136,6 +137,7 @@ pub fn invoke(
     const transfers = try collapsed_dimension.deferred_transfers.toOwnedSlice();
     span.debug("Number of deferred transfers created: {d}", .{transfers.len});
 
+    // TODO: add debugging condition
     for (transfers, 0..) |transfer, i| {
         span.debug("Transfer {d}: {d} -> {d}, amount: {d}", .{
             i, transfer.sender, transfer.destination, transfer.amount,

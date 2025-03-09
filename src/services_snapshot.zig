@@ -6,6 +6,9 @@ const ServiceAccount = services.ServiceAccount;
 const ServiceId = services.ServiceId;
 const Allocator = std.mem.Allocator;
 
+// Import the tracing module
+const trace = @import("tracing.zig").scoped(.delta_snapshot);
+
 /// DeltaSnapshot provides a copy-on-write wrapper around the Delta state.
 /// It allows modifications to services without affecting the original state until commit.
 ///
@@ -26,19 +29,33 @@ pub const DeltaSnapshot = struct {
 
     /// Initialize a new DeltaSnapshot from an existing Delta state
     pub fn init(original: *const Delta) DeltaSnapshot {
-        return .{
+        const span = trace.span(.init);
+        defer span.deinit();
+        span.debug("Initializing DeltaSnapshot from original Delta", .{});
+
+        const result = DeltaSnapshot{
             .original = original,
             .modified_services = std.AutoHashMap(ServiceId, ServiceAccount).init(original.allocator),
             .deleted_services = std.AutoHashMap(ServiceId, void).init(original.allocator),
             .allocator = original.allocator,
         };
+
+        span.debug("DeltaSnapshot initialized successfully", .{});
+        return result;
     }
 
     /// Free all resources used by the snapshot
     pub fn deinit(self: *DeltaSnapshot) void {
+        const span = trace.span(.deinit);
+        defer span.deinit();
+        span.debug("Deinitializing DeltaSnapshot", .{});
+        span.trace("Modified services count: {d}", .{self.modified_services.count()});
+        span.trace("Deleted services count: {d}", .{self.deleted_services.count()});
+
         // Clean up modified services
         var it = self.modified_services.iterator();
         while (it.next()) |entry| {
+            span.trace("Deinitializing modified service ID: {d}", .{entry.key_ptr.*});
             entry.value_ptr.deinit();
         }
         self.modified_services.deinit();
@@ -47,98 +64,163 @@ pub const DeltaSnapshot = struct {
         self.deleted_services.deinit();
 
         self.* = undefined;
+        span.debug("DeltaSnapshot deinitialized", .{});
     }
 
     /// Get a read-only reference to a service
     /// Returns null if the service doesn't exist or has been deleted
     pub fn getReadOnly(self: *const DeltaSnapshot, id: ServiceId) ?*const ServiceAccount {
+        const span = trace.span(.get_read_only);
+        defer span.deinit();
+        span.debug("Getting read-only reference for service ID: {d}", .{id});
+
         // Check if the service is marked for deletion
         if (self.deleted_services.contains(id)) {
+            span.debug("Service marked for deletion, returning null", .{});
             return null;
         }
 
         // Check if we have a modified copy
         if (self.modified_services.getPtr(id)) |account| {
+            span.debug("Found in modified services", .{});
+            span.trace("Account balance: {d}", .{account.balance});
             return account;
         }
 
         // Fall back to the original state
-        return if (self.original.getAccount(id)) |account| account else null;
+        const result = if (self.original.getAccount(id)) |account| account else null;
+        if (result) |account| {
+            span.debug("Found in original Delta", .{});
+            span.trace("Account balance: {d}", .{account.balance});
+        } else {
+            span.debug("Service not found", .{});
+        }
+
+        return result;
     }
 
     /// Check if a service exists in this snapshot
     pub fn contains(self: *const DeltaSnapshot, id: ServiceId) bool {
+        const span = trace.span(.contains);
+        defer span.deinit();
+        span.debug("Checking if service ID: {d} exists", .{id});
+
         if (self.deleted_services.contains(id)) {
+            span.debug("Service is marked for deletion, returning false", .{});
             return false;
         }
 
-        return self.modified_services.contains(id) or
+        const result = self.modified_services.contains(id) or
             self.original.accounts.contains(id);
+
+        span.debug("Service exists: {}", .{result});
+        return result;
     }
 
     /// Get a mutable reference to a service
     /// This will create a copy of the service if it exists in the original state
     /// Returns null if the service doesn't exist
     pub fn getMutable(self: *DeltaSnapshot, id: ServiceId) !?*ServiceAccount {
+        const span = trace.span(.get_mutable);
+        defer span.deinit();
+        span.debug("Getting mutable reference for service ID: {d}", .{id});
+
         // Check if service is marked for deletion
         if (self.deleted_services.contains(id)) {
+            span.debug("Service marked for deletion, returning null", .{});
             return null;
         }
 
         // Check if we already have a modified copy
         if (self.modified_services.getPtr(id)) |account| {
+            span.debug("Found in modified services", .{});
+            span.trace("Account balance: {d}", .{account.balance});
             return account;
         }
 
         // Check if it exists in the original state
         if (self.original.getAccount(id)) |account| {
+            const clone_span = span.child(.clone_service);
+            defer clone_span.deinit();
+
+            clone_span.debug("Creating copy from original state", .{});
             // Add to modified services
-            try self.modified_services.put(id, try account.deepClone(self.allocator));
+            var cloned = try account.deepClone(self.allocator);
+            errdefer cloned.deinit();
+
+            clone_span.trace("Original balance: {d}, cloned balance: {d}", .{ account.balance, cloned.balance });
+
+            try self.modified_services.put(id, cloned);
+            clone_span.debug("Added to modified services", .{});
+
             return self.modified_services.getPtr(id).?;
         }
 
+        span.debug("Service not found", .{});
         return null;
     }
 
     /// Create a new service in this snapshot
     pub fn createService(self: *DeltaSnapshot, id: ServiceId) !*ServiceAccount {
+        const span = trace.span(.create_service);
+        defer span.deinit();
+        span.debug("Creating new service with ID: {d}", .{id});
+
         // Check if service already exists
         if (self.contains(id)) {
+            span.err("Service already exists", .{});
             return error.ServiceAlreadyExists;
         }
 
         // Remove from deleted if it was there
-        _ = self.deleted_services.remove(id);
+        if (self.deleted_services.remove(id)) {
+            span.debug("Removed from deleted services", .{});
+        }
 
         // Create a new service
         var new_account = ServiceAccount.init(self.allocator);
         errdefer new_account.deinit();
+        span.debug("Initialized new service account", .{});
 
         // Add to modified services
         try self.modified_services.put(id, new_account);
+        span.debug("Added to modified services", .{});
+
         return self.modified_services.getPtr(id).?;
     }
 
     /// Mark a service for deletion
     pub fn removeService(self: *DeltaSnapshot, id: ServiceId) !bool {
+        const span = trace.span(.remove_service);
+        defer span.deinit();
+        span.debug("Marking service for deletion, ID: {d}", .{id});
+
         // Check if service exists
         if (!self.contains(id)) {
+            span.debug("Service does not exist, nothing to remove", .{});
             return false;
         }
 
         // Remove from modified services if it's there
         if (self.modified_services.fetchRemove(id)) |entry| {
+            span.debug("Removing from modified services", .{});
             @constCast(&entry.value).deinit();
         }
 
         // Mark for deletion
         try self.deleted_services.put(id, {});
+        span.debug("Service marked for deletion", .{});
         return true;
     }
 
     /// Get the set of all service IDs that have been modified or deleted
     pub fn getChangedServiceIds(self: *const DeltaSnapshot) ![]ServiceId {
+        const span = trace.span(.get_changed_service_ids);
+        defer span.deinit();
+        span.debug("Getting list of changed service IDs", .{});
+
         const total_changes = self.modified_services.count() + self.deleted_services.count();
+        span.trace("Total changes: {d} (modified: {d}, deleted: {d})", .{ total_changes, self.modified_services.count(), self.deleted_services.count() });
 
         var result = try self.allocator.alloc(ServiceId, total_changes);
         errdefer self.allocator.free(result);
@@ -149,6 +231,7 @@ pub const DeltaSnapshot = struct {
         var modified_it = self.modified_services.keyIterator();
         while (modified_it.next()) |id| {
             result[index] = id.*;
+            span.trace("Added modified service ID: {d}", .{id.*});
             index += 1;
         }
 
@@ -156,71 +239,132 @@ pub const DeltaSnapshot = struct {
         var deleted_it = self.deleted_services.keyIterator();
         while (deleted_it.next()) |id| {
             result[index] = id.*;
+            span.trace("Added deleted service ID: {d}", .{id.*});
             index += 1;
         }
 
+        span.debug("Returning {d} changed service IDs", .{total_changes});
         return result;
     }
 
     /// Check if the snapshot has any changes
     pub fn hasChanges(self: *const DeltaSnapshot) bool {
-        return self.modified_services.count() > 0 or self.deleted_services.count() > 0;
+        const span = trace.span(.has_changes);
+        defer span.deinit();
+
+        const has_modified = self.modified_services.count() > 0;
+        const has_deleted = self.deleted_services.count() > 0;
+        const result = has_modified or has_deleted;
+
+        span.debug("Checking for changes: {}", .{result});
+        span.trace("Modified count: {d}, deleted count: {d}", .{ self.modified_services.count(), self.deleted_services.count() });
+
+        return result;
     }
 
     /// Apply all changes from this snapshot to the destination Delta
     pub fn commit(self: *DeltaSnapshot) !void {
-        var destination = @constCast(self.original);
+        const span = trace.span(.commit);
+        defer span.deinit();
+        span.debug("Committing changes to original Delta", .{});
+        span.trace("Modified services: {d}, deleted services: {d}", .{ self.modified_services.count(), self.deleted_services.count() });
+
+        var destination: *Delta = @constCast(self.original);
+
         // First handle deleted services
-        var deleted_it = self.deleted_services.keyIterator();
-        while (deleted_it.next()) |id| {
-            if (destination.getAccount(id.*)) |account| {
-                account.deinit();
-                _ = destination.accounts.remove(id.*);
+        {
+            const delete_span = span.child(.handle_deletions);
+            defer delete_span.deinit();
+            delete_span.debug("Processing {d} service deletions", .{self.deleted_services.count()});
+
+            var deleted_it = self.deleted_services.keyIterator();
+            while (deleted_it.next()) |id| {
+                delete_span.trace("Removing service ID: {d}", .{id.*});
+                if (destination.accounts.fetchRemove(id.*)) |entry| {
+                    delete_span.trace("Service found and removed", .{});
+                    @constCast(&entry.value).deinit();
+                } else {
+                    delete_span.trace("Service not found in destination", .{});
+                }
             }
         }
 
         // Then apply modified services
-        var modified_it = self.modified_services.iterator();
-        while (modified_it.next()) |entry| {
-            const id = entry.key_ptr.*;
+        {
+            const modify_span = span.child(.handle_modifications);
+            defer modify_span.deinit();
+            modify_span.debug("Processing {d} service modifications", .{self.modified_services.count()});
 
-            // If the service already exists in the destination, remove it first
-            if (destination.getAccount(id)) |account| {
-                account.deinit();
-                _ = destination.accounts.remove(id);
+            var modified_it = self.modified_services.iterator();
+            while (modified_it.next()) |modified_entry| {
+                const id = modified_entry.key_ptr.*;
+                modify_span.trace("Applying changes for service ID: {d}", .{id});
+
+                // If the service already exists in the destination, remove it first
+                if (destination.accounts.fetchRemove(id)) |removed| {
+                    modify_span.trace("Removing existing service from destination", .{});
+                    @constCast(&removed.value).deinit();
+                } else {
+                    modify_span.trace("Not yet in destination, creating", .{});
+                }
+
+                // Move the service to the destination
+                // TODO: when error occurs here, we have this value both in destination
+                // and in modified_services
+                modify_span.trace("Adding modified service to destination", .{});
+                try destination.accounts.put(id, modified_entry.value_ptr.*);
             }
-
-            // Move the service to the destination
-            // Note: We're transferring ownership of the ServiceAccount to the destination
-            try destination.accounts.put(id, entry.value_ptr.*);
         }
 
         // Clear our tracking (without deinit-ing the services that were moved)
+        span.debug("Clearing tracking structures", .{});
         self.modified_services.clearRetainingCapacity();
         self.deleted_services.clearRetainingCapacity();
+
+        span.debug("Commit completed successfully", .{});
     }
 
     /// Create a new DeltaSnapshot from this DeltaSnapshot (used for checkpoints)
     pub fn checkpoint(self: *const DeltaSnapshot) !DeltaSnapshot {
+        const span = trace.span(.checkpoint);
+        defer span.deinit();
+        span.debug("Creating checkpoint from DeltaSnapshot", .{});
+
         var result = DeltaSnapshot.init(self.original);
         errdefer result.deinit();
 
         // Copy all modified services
-        var modified_it = self.modified_services.iterator();
-        while (modified_it.next()) |entry| {
-            const id = entry.key_ptr.*;
-            const account = entry.value_ptr;
+        {
+            const copy_span = span.child(.copy_modified);
+            defer copy_span.deinit();
+            copy_span.debug("Copying {d} modified services", .{self.modified_services.count()});
 
-            // Add to result's modified services
-            try result.modified_services.put(id, try account.deepClone(self.allocator));
+            var modified_it = self.modified_services.iterator();
+            while (modified_it.next()) |entry| {
+                const id = entry.key_ptr.*;
+                const account = entry.value_ptr;
+
+                copy_span.trace("Cloning service ID: {d}", .{id});
+
+                // Add to result's modified services
+                try result.modified_services.put(id, try account.deepClone(self.allocator));
+            }
         }
 
         // Copy all deleted services
-        var deleted_it = self.deleted_services.keyIterator();
-        while (deleted_it.next()) |id| {
-            try result.deleted_services.put(id.*, {});
+        {
+            const copy_span = span.child(.copy_deleted);
+            defer copy_span.deinit();
+            copy_span.debug("Copying {d} deleted services", .{self.deleted_services.count()});
+
+            var deleted_it = self.deleted_services.keyIterator();
+            while (deleted_it.next()) |id| {
+                copy_span.trace("Adding deleted service ID: {d}", .{id.*});
+                try result.deleted_services.put(id.*, {});
+            }
         }
 
+        span.debug("Checkpoint created successfully", .{});
         return result;
     }
 

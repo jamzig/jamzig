@@ -107,15 +107,15 @@ pub const ServiceAccount = struct {
         // Clone storage map
         var storage_it = self.storage.iterator();
         while (storage_it.next()) |entry| {
-            const new_value = try allocator.dupe(u8, entry.value_ptr.*);
-            try clone.storage.put(entry.key_ptr.*, new_value);
+            const cloned_value = try allocator.dupe(u8, entry.value_ptr.*);
+            try clone.storage.put(entry.key_ptr.*, cloned_value);
         }
 
         // Clone preimages map
         var preimage_it = self.preimages.iterator();
         while (preimage_it.next()) |entry| {
-            const new_value = try allocator.dupe(u8, entry.value_ptr.*);
-            try clone.preimages.put(entry.key_ptr.*, new_value);
+            const cloned_value = try allocator.dupe(u8, entry.value_ptr.*);
+            try clone.preimages.put(entry.key_ptr.*, cloned_value);
         }
 
         // Clone preimage lookups
@@ -155,7 +155,26 @@ pub const ServiceAccount = struct {
         return self.storage.get(key);
     }
 
+    pub fn resetStorage(self: *ServiceAccount, key: Hash) void {
+        if (self.storage.getPtr(key)) |old_value_ptr| {
+            self.storage.allocator.free(old_value_ptr.*);
+            self.storage.put(key, &[_]u8{});
+        }
+    }
+
+    pub fn removeStorage(self: *ServiceAccount, key: Hash) void {
+        if (self.storage.getPtr(key)) |old_value_ptr| {
+            self.storage.allocator.free(old_value_ptr.*);
+            _ = self.storage.remove(key);
+        }
+    }
+
     pub fn writeStorage(self: *ServiceAccount, key: Hash, value: []const u8) !void {
+        // Clear the old, otherwise we are leaking
+        if (self.storage.getPtr(key)) |old_value_ptr| {
+            self.storage.allocator.free(old_value_ptr.*);
+        }
+
         const new_value = try self.storage.allocator.dupe(u8, value);
         try self.storage.put(key, new_value);
     }
@@ -286,43 +305,7 @@ pub const Delta = struct {
         var it = self.accounts.iterator();
         while (it.next()) |entry| {
             const account = entry.value_ptr;
-            // Create a new ServiceAccount instance for each account
-            // using the same allocator as the parent Delta
-            var new_account = ServiceAccount.init(self.allocator);
-            errdefer new_account.deinit();
-
-            // Clone the storage map - each value in storage needs its own
-            // memory allocation since we're doing a deep copy
-            var storage_it = account.storage.iterator();
-            while (storage_it.next()) |storage_entry| {
-                const new_value = try clone.allocator.dupe(u8, storage_entry.value_ptr.*);
-                try new_account.storage.put(storage_entry.key_ptr.*, new_value);
-            }
-
-            // Clone the preimages map - similar to storage, each preimage
-            // needs its own memory allocation
-            var preimage_it = account.preimages.iterator();
-            while (preimage_it.next()) |preimage_entry| {
-                const new_value = try clone.allocator.dupe(u8, preimage_entry.value_ptr.*);
-                try new_account.preimages.put(preimage_entry.key_ptr.*, new_value);
-            }
-
-            // Clone preimage lookups - since PreimageLookup contains only
-            // simple types (fixed-size arrays of optionals), we can copy directly
-            var lookup_it = account.preimage_lookups.iterator();
-            while (lookup_it.next()) |lookup_entry| {
-                try new_account.preimage_lookups.put(lookup_entry.key_ptr.*, lookup_entry.value_ptr.*);
-            }
-
-            // Copy simple fields that don't require allocation
-            new_account.code_hash = account.code_hash;
-            new_account.balance = account.balance;
-            new_account.min_gas_accumulate = account.min_gas_accumulate;
-            new_account.min_gas_on_transfer = account.min_gas_on_transfer;
-
-            // Store the fully constructed account in our new Delta
-            // using the same ServiceId (key) as the original
-            try clone.putAccount(entry.key_ptr.*, new_account);
+            try clone.putAccount(entry.key_ptr.*, try account.deepClone(self.allocator));
         }
 
         return clone;
@@ -368,32 +351,10 @@ pub const Delta = struct {
         }
     }
 
-    pub fn postAccumulation(self: *Delta, updates: []const AccountUpdate) !void {
-        for (updates) |update| {
-            if (self.getAccount(update.index)) |account| {
-                account.balance = update.new_balance;
-                account.setMinGasAccumulate(update.new_gas_limit);
-            } else {
-                return error.AccountNotFound;
-            }
-        }
-    }
-    pub fn finalStateAfterTransfers(self: *Delta, transfers: []const Transfer) !void {
-        for (transfers) |transfer| {
-            const from_account = self.getAccount(transfer.from) orelse return error.AccountNotFound;
-            const to_account = self.getAccount(transfer.to) orelse return error.AccountNotFound;
-
-            if (from_account.balance < transfer.amount) return error.InsufficientBalance;
-
-            from_account.balance -= transfer.amount;
-            to_account.balance += transfer.amount;
-        }
-    }
-
     pub fn deinit(self: *Delta) void {
-        var it = self.accounts.iterator();
-        while (it.next()) |entry| {
-            entry.value_ptr.deinit();
+        var it = self.accounts.valueIterator();
+        while (it.next()) |account| {
+            account.deinit();
         }
         self.accounts.deinit();
         self.* = undefined;

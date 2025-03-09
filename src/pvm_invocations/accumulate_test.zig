@@ -90,8 +90,6 @@ test "accumulate_invocation" {
 
     // Invoke accumulation
     //
-    // ensure we free the possiblity allocated Cached HostFn map
-    defer @import("accumulate/host_calls_map.zig").deinitCachedMap(allocator);
     var result = try accumulate.invoke(
         JAMDUNA_PARAMS,
         allocator,
