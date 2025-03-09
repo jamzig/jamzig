@@ -109,6 +109,8 @@ test "accumulate_invocation" {
     );
     defer result.deinit(allocator);
 
+    try accumulation_context.commit();
+
     // Check basic results
     std.debug.print("Accumulation completed with gas used: {d}\n", .{result.gas_used});
     std.debug.print("Transfers count: {d}\n", .{result.transfers.len});
@@ -174,7 +176,7 @@ fn removeUnusedStateComponents(comptime params: jam_params.Params, jam_state: *s
             // Check if the field is not null (initialized)
             if (@field(jam_state, field.name)) |*value| {
                 // Use the existing deinitField helper
-                if (comptime isComplexType(@TypeOf(value)))
+                if (comptime isComplexType(std.meta.Child(@TypeOf(value))))
                     callDeinit(value, std.testing.allocator);
 
                 // Set the field to null (deinitField doesn't do this for us)
