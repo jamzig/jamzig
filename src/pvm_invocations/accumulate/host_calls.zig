@@ -318,6 +318,98 @@ pub fn HostCalls(params: Params) type {
             return .play;
         }
 
+        /// Represents account information from a service
+        pub const ServiceInfo = struct {
+            /// Code hash of the service (tc)
+            code_hash: [32]u8,
+            /// Current balance of the service (tb)
+            balance: types.Balance,
+            /// Threshold balance required for the service (tt)
+            threshold_balance: types.Balance,
+            /// Gas limit for accumulator operations (tg)
+            min_item_gas: types.Gas,
+            /// Gas limit for on_transfer operations (tm)
+            min_memo_gas: types.Gas,
+            /// Total storage size in bytes (tl)
+            total_storage_size: u64,
+            /// Total number of items in storage (ti)
+            total_items: u64,
+        };
+
+        /// Host call implementation for info service (Ω_I)
+        pub fn infoService(
+            exec_ctx: *PVM.ExecutionContext,
+            call_ctx: ?*anyopaque,
+        ) PVM.HostCallResult {
+            const span = trace.span(.host_call_info);
+            defer span.deinit();
+
+            const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
+            const ctx_regular: *Dimension = &host_ctx.regular;
+
+            // Get registers per graypaper B.7: service ID and output pointer
+            const service_id = exec_ctx.registers[7];
+            const output_ptr = exec_ctx.registers[8];
+
+            span.debug("Host call: info for service {d}", .{service_id});
+            span.debug("Output pointer: 0x{x}", .{output_ptr});
+
+            // Get service account based on special cases as per graypaper
+            const service_account = if (service_id == 0xFFFFFFFFFFFFFFFF) blk: {
+                span.debug("Using current service ID: {d}", .{ctx_regular.service_id});
+                break :blk ctx_regular.context.service_accounts.getReadOnly(ctx_regular.service_id);
+            } else blk: {
+                span.debug("Looking up service ID: {d}", .{service_id});
+                break :blk ctx_regular.context.service_accounts.getReadOnly(@intCast(service_id));
+            };
+
+            if (service_account == null) {
+                span.debug("Service not found, returning NONE", .{});
+                // Service not found, return error status
+                exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.NONE);
+                return .play;
+            }
+
+            // Serialize service account info according to the graypaper
+            span.debug("Service found, assembling info", .{});
+            const fprint = service_account.?.storageFootprint();
+            const service_info = ServiceInfo{
+                .code_hash = service_account.?.code_hash,
+                .balance = service_account.?.balance,
+                .threshold_balance = fprint.a_t,
+                .min_item_gas = service_account.?.min_gas_accumulate,
+                .min_memo_gas = service_account.?.min_gas_on_transfer,
+                .total_storage_size = fprint.a_l,
+                .total_items = fprint.a_l,
+            };
+
+            var service_info_buffer: [@sizeOf(ServiceInfo)]u8 = undefined;
+            var fb = std.io.fixedBufferStream(&service_info_buffer);
+
+            // Serialize
+            @import("../../codec.zig").serialize(
+                ServiceInfo,
+                .{},
+                fb.writer(),
+                service_info,
+            ) catch {
+                span.err("Problem serializing ServiceInfo", .{});
+                return .{ .terminal = .panic };
+            };
+
+            // Write the info to memory
+            span.debug("Writing info to memory at 0x{x}", .{output_ptr});
+            exec_ctx.memory.writeSlice(@truncate(output_ptr), fb.getWritten()) catch {
+                span.err("Memory access failed while writing info data", .{});
+                return .{ .terminal = .panic };
+            };
+
+            // Return success
+            span.debug("Info request successful", .{});
+            exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.OK);
+            return .play;
+        }
+
         /// Host call implementation for transfer (Ω_T)
         pub fn transfer(
             exec_ctx: *PVM.ExecutionContext,
