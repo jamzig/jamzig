@@ -97,6 +97,20 @@ pub const PVM = struct {
         const instruction = try context.decoder.decodeInstruction(context.pc);
         span.debug("Executing instruction at PC: 0x{d:0>8}: {}", .{ context.pc, instruction });
         span.trace("Decoded instruction: {}", .{instruction.instruction});
+        span.trace("Registers before: {any}", .{context.registers});
+        span.trace("Registers before: [0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}]", .{
+            context.registers[0],  context.registers[1], context.registers[2],  context.registers[3],
+            context.registers[4],  context.registers[5], context.registers[6],  context.registers[7],
+            context.registers[8],  context.registers[9], context.registers[10], context.registers[11],
+            context.registers[12],
+        });
+        defer span.trace("Registers after: [0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}]", .{
+            context.registers[0],  context.registers[1], context.registers[2],  context.registers[3],
+            context.registers[4],  context.registers[5], context.registers[6],  context.registers[7],
+            context.registers[8],  context.registers[9], context.registers[10], context.registers[11],
+            context.registers[12],
+        });
+        defer span.trace("Registers after: {any}", .{context.registers});
 
         // Check gas
         const gas_cost = getInstructionGasCost(instruction);

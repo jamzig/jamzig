@@ -245,6 +245,76 @@ pub const Memory = struct {
         MemoryLimitExceeded,
     };
 
+    pub fn deepClone(self: *const Memory, allocator: Allocator) !Memory {
+        const span = trace.span(.memory_deep_clone);
+        defer span.deinit();
+        span.debug("Creating deep clone of memory system", .{});
+
+        // Initialize a new empty memory system
+        var new_memory = try Memory.initEmpty(allocator);
+        errdefer new_memory.deinit();
+
+        // Clone all pages
+        const clone_span = span.child(.clone_pages);
+        defer clone_span.deinit();
+        clone_span.debug("Cloning {d} pages", .{self.page_table.pages.items.len});
+
+        try new_memory.page_table.pages.ensureTotalCapacityPrecise(self.page_table.pages.items.len);
+
+        for (self.page_table.pages.items) |page| {
+            clone_span.trace("Cloning page at 0x{X:0>8} with flags {s}", .{ page.address, @tagName(page.flags) });
+
+            // Allocate new page data
+            const new_data = try allocator.alloc(u8, Memory.Z_P);
+            errdefer allocator.free(new_data);
+
+            // Copy page data
+            @memcpy(new_data, page.data);
+
+            // Create new page and add to page table
+            const new_page = Page{
+                .data = new_data,
+                .address = page.address,
+                .flags = page.flags,
+            };
+            try new_memory.page_table.pages.append(new_page);
+        }
+
+        // Copy memory properties
+        new_memory.input_size_in_bytes = self.input_size_in_bytes;
+        new_memory.read_only_size_in_pages = self.read_only_size_in_pages;
+        new_memory.stack_size_in_pages = self.stack_size_in_pages;
+        new_memory.heap_size_in_pages = self.heap_size_in_pages;
+        new_memory.heap_allocation_limit = self.heap_allocation_limit;
+
+        // Clone last violation if present
+        if (self.last_violation) |violation| {
+            // Create a new violation info
+            var new_violation = ViolationInfo{
+                .violation_type = violation.violation_type,
+                .address = violation.address,
+                .attempted_size = violation.attempted_size,
+                .page = null,
+            };
+
+            // If the violation had a page reference, find the corresponding page in the new memory
+            if (violation.page) |old_page| {
+                // Find the corresponding page in the new memory by address
+                for (new_memory.page_table.pages.items) |*new_page| {
+                    if (new_page.address == old_page.address) {
+                        new_violation.page = new_page;
+                        break;
+                    }
+                }
+            }
+
+            new_memory.last_violation = new_violation;
+        }
+
+        span.debug("Memory deep clone complete with {d} pages", .{new_memory.page_table.pages.items.len});
+        return new_memory;
+    }
+
     /// Aligns size to the next page boundary (Z_P = 4096)
     fn alignToPageSize(size_in_bytes: usize) !u32 {
         const span = trace.span(.align_to_page);

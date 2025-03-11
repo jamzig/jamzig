@@ -6,4 +6,5 @@ const polkavm = @import("pvm_fuzz_test/polkavm.zig");
 // Reference tests
 comptime {
     _ = @import("pvm_fuzz_test/polkavm.zig");
+    _ = @import("pvm_fuzz_test/pvm.zig");
 }

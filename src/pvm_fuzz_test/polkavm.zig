@@ -111,7 +111,12 @@ pub const TestEnvironment = struct {
         defer self.allocator.free(raw_program);
 
         // Initialize executor with our memory and registers
-        var executor = try polkavm.Executor.init(raw_program, self.memory_pages, &self.initial_registers, self.gas_limit);
+        var executor = try polkavm.Executor.init(
+            raw_program,
+            self.memory_pages,
+            &self.initial_registers,
+            self.gas_limit,
+        );
         defer executor.deinit();
 
         // Execute a single step, this is the first jump
