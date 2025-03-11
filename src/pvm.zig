@@ -128,8 +128,11 @@ pub const PVM = struct {
     pub fn basicInvocation(
         context: *ExecutionContext,
     ) Error!BasicInvocationResult {
+        const span = trace.span(.basic_invocation);
+        defer span.deinit();
         while (true) {
             const step_result = try singleStepInvocation(context);
+            span.trace("Registers: {any}", .{context.registers});
             switch (step_result) {
                 .cont => continue,
                 .host_call => |invocation| {
