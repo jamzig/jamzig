@@ -120,6 +120,9 @@ test "instruction_fuzzer_with_config" {
             reg_value.* = fzzr.seed_gen.randomRegisterValue();
         }
 
+        // Load the initial memory with random values
+        fzzr.seed_gen.randomBytes(ccheck.initial_memory);
+
         // Not yet implemented
         if (instruction.instruction == .sbrk) {
             continue;
