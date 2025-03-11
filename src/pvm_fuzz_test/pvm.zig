@@ -185,14 +185,14 @@ test "pvm:fuzz:execute_instruction" {
     defer env.deinit();
 
     // Set up register r1 with an initial value
-    env.setRegister(1, 1000);
+    env.setRegister(1, 4278059008);
 
     // Create a simple add_imm_64 instruction that adds 42 to register r1
     const instruction = InstructionWithArgs{ .instruction = .add_imm_64, .args = .{
         .TwoRegOneImm = .{
             .first_register_index = 1,
             .second_register_index = 1,
-            .immediate = 42,
+            .immediate = 0xfffffffffffff808,
             .no_of_bytes_to_skip = 3,
         },
     } };
@@ -205,7 +205,7 @@ test "pvm:fuzz:execute_instruction" {
     try testing.expectEqual(true, result.status == .success);
 
     // Verify register r1 now contains 1000 + 42 = 1042
-    try testing.expectEqual(@as(u64, 1042), result.registers[1]);
+    try testing.expectEqual(@as(u64, 4278056968), result.registers[1]);
 }
 
 test "pvm:fuzz:memory_operations" {
