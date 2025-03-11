@@ -330,10 +330,15 @@ pub fn HostCalls(params: Params) type {
             }
 
             // Return the previous length per graypaper
-            exec_ctx.registers[7] = if (maybe_prior_value) |_|
-                maybe_prior_value.?.len
-            else
-                @intFromEnum(HostCallReturnCode.NONE);
+            // FIXME: (JAMDUNA) returns here 12
+
+            exec_ctx.registers[7] = value.len;
+
+            // This is GP
+            // exec_ctx.registers[7] = if (maybe_prior_value) |_|
+            //     maybe_prior_value.?.len
+            // else
+            //     @intFromEnum(HostCallReturnCode.NONE);
 
             return .play;
         }

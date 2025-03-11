@@ -217,8 +217,8 @@ pub const Memory = struct {
     pub fn HEAP_BASE_ADDRESS(read_only_size_in_bytes: usize) !u32 {
         return 2 * Z_Z + @as(u32, @intCast(try alignToSectionSize(read_only_size_in_bytes)));
     }
-    pub const INPUT_ADDRESS: u32 = 0xFFFFFFFF - Z_Z - Z_I;
-    pub const STACK_BASE_ADDRESS: u32 = 0xFFFFFFFF - (2 * Z_Z) - Z_I;
+    pub const INPUT_ADDRESS: u32 = 0xFFFFFFFF - Z_Z - Z_I + 1;
+    pub const STACK_BASE_ADDRESS: u32 = 0xFFFFFFFF - (2 * Z_Z) - Z_I + 1;
     pub fn STACK_BOTTOM_ADDRESS(stack_size_in_pages: u16) !u32 {
         return STACK_BASE_ADDRESS - @as(u32, @intCast(try alignToPageSize(stack_size_in_pages)));
     }
