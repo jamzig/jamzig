@@ -141,17 +141,24 @@ pub const TestEnvironment = struct {
 
         // For instruction that access memory, we need to capture the changes
         if (instruction.getMemoryAccess()) |access| {
-            // Calculate the offset in our memory array
-            const page_offset = access.address - self.memory_base_address;
+            var capture_address: u64 = access.address;
+            if (access.isIndirect) {
+                const ind_access = try instruction.getMemoryAccessInd(&self.initial_registers);
+                capture_address = ind_access.address;
+            }
+
+            if (capture_address < self.memory_base_address or capture_address > self.memory_base_address + self.memory_size) {
+                return error.InvalidCaptureAddress;
+            }
 
             // Only capture memory if it's a write operation
-            if (access.isWrite and page_offset < self.memory_size) {
-                const capture_start = page_offset;
-                const capture_size = @min(access.size, self.memory_size - capture_start);
+            if (access.isWrite) {
+                const page_offset = capture_address - self.memory_base_address;
+                const size = access.size;
 
                 // Make a copy of the affected memory region
-                result_memory = try self.allocator.dupe(u8, execution_result.raw.pages.?[0].data[capture_start..][0..capture_size]);
-                memory_address = @intCast(access.address);
+                result_memory = try self.allocator.dupe(u8, execution_result.raw.pages.?[0].data[page_offset..][0..size]);
+                memory_address = @intCast(capture_address);
             }
         }
 

@@ -103,12 +103,22 @@ test "instruction_fuzzer_with_config" {
 
     var iter = fzzr.iterator(config.num_cases);
     var counter: usize = 0;
-    while (iter.next()) |instruction| {
+    while (iter.next()) |inst| {
+        var instruction = inst;
+
         if (counter % 10_000 == 0) {
             std.debug.print("\nCase: {d}", .{counter});
         }
         counter += 1;
-        // std.debug.print("Instruction: {}\r", .{instruction});
+
+        var ccheck = try crosscheck.CrossCheck.init(allocator);
+        defer ccheck.deinit();
+
+        // Load up with large register values so
+        // we will wrap around
+        for (&ccheck.initial_registers) |*reg_value| {
+            reg_value.* = fzzr.seed_gen.randomRegisterValue();
+        }
 
         // Not yet implemented
         if (instruction.instruction == .sbrk) {
@@ -120,20 +130,68 @@ test "instruction_fuzzer_with_config" {
             continue;
         }
 
-        // Ignore for now
+        // Handle memory access instructions
         if (instruction.getMemoryAccess()) |access| {
-            _ = access;
-            continue;
+            // easy solution is to set all registers to a low value
+            if (access.isIndirect) {
+                const ind_access = try instruction.getMemoryAccessInd(&ccheck.initial_registers);
+                if (ind_access.address > ccheck.memory_base_address and
+                    ind_access.address < ccheck.memory_base_address + ccheck.memory_size)
+                {
+                    // all good nothing to do
+
+                } else {
+                    // choose a target address
+                    const target = ccheck.memory_base_address;
+                    const register_part = ccheck.memory_base_address / 2;
+                    const immediate_part = target - register_part;
+
+                    switch (instruction.instruction) {
+
+                        // Indirect load operations
+                        .load_ind_u8,
+                        .load_ind_i8,
+                        .load_ind_u16,
+                        .load_ind_i16,
+                        .load_ind_u32,
+                        .load_ind_i32,
+                        .load_ind_u64,
+                        => {
+                            instruction.args.TwoRegOneImm.immediate = immediate_part;
+                            ccheck.initial_registers[instruction.args.TwoRegOneImm.second_register_index] = register_part;
+                        },
+
+                        // Indirect store operations
+                        .store_ind_u8,
+                        .store_ind_u16,
+                        .store_ind_u32,
+                        .store_ind_u64,
+                        => {
+                            instruction.args.TwoRegOneImm.immediate = immediate_part;
+                            ccheck.initial_registers[instruction.args.TwoRegOneImm.second_register_index] = register_part;
+                        },
+
+                        // Indirect immediate store operations
+                        .store_imm_ind_u8,
+                        .store_imm_ind_u16,
+                        .store_imm_ind_u32,
+                        .store_imm_ind_u64,
+                        => {
+                            instruction.args.OneRegTwoImm.first_immediate = immediate_part;
+                            ccheck.initial_registers[instruction.args.OneRegTwoImm.register_index] = register_part;
+                        },
+
+                        // Non indirect memory instructions
+                        else => return error.NotInMemoryAccess,
+                    }
+                }
+            } else {
+                // Just set te immediate part
+                try instruction.setMemoryAddress(ccheck.memory_base_address);
+            }
         }
 
-        var ccheck = try crosscheck.CrossCheck.init(allocator);
-        defer ccheck.deinit();
-
-        // Load up with large register values so
-        // we will wrap around
-        for (&ccheck.initial_registers) |*reg_value| {
-            reg_value.* = fzzr.seed_gen.randomRegisterValue();
-        }
+        // std.debug.print("\nInstruction: {}\n", .{instruction});
 
         var result = try ccheck.compareInstruction(instruction);
         defer result.deinit(allocator);

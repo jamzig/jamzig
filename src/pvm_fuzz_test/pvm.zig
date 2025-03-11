@@ -157,7 +157,13 @@ pub const TestEnvironment = struct {
             // Only capture memory if it's a write operation
             if (access.isWrite) {
                 // Calculate offset from memory base address
-                const capture_address = access.address;
+                var capture_address = access.address;
+
+                // If this was indirect access we have a different capture address
+                if (access.isIndirect) {
+                    const ind_memory_access = try instruction.getMemoryAccessInd(&execution_context.registers);
+                    capture_address = ind_memory_access.address;
+                }
 
                 // Make a copy of the affected memory region
                 const mem_data = execution_context.memory.readSlice(

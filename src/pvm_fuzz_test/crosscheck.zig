@@ -224,6 +224,13 @@ pub const CrossCheck = struct {
                 .Identical => try writer.writeAll("Memory changes identical in both VMs.\n"),
             }
 
+            if (self.pvm_result.memory_address) |addr| {
+                try writer.print("PVM memory address: {x}\n", .{addr});
+            }
+            if (self.polkavm_result.memory_address) |addr| {
+                try writer.print("PolkaVM memory address: {x}\n", .{addr});
+            }
+
             // Status comparison
             const status_compare = self.compareStatus();
             if (!status_compare.matches) {
