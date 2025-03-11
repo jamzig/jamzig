@@ -5,11 +5,13 @@ const polkavm = @import("../pvm_test/fuzzer/polkavm_ffi.zig");
 const testing = std.testing;
 const InstructionWithArgs = pvmlib.PVM.InstructionWithArgs;
 
+pub const ExecutionStatus = polkavm.ExecutionStatus;
+
 pub const InstructionExecutionResult = struct {
     registers: [13]u64,
     memory: ?[]const u8 = null,
     memory_address: ?u32 = null,
-    status: polkavm.ExecutionStatus,
+    status: ExecutionStatus,
     gas_used: u64 = 0,
     final_pc: u32 = 0,
 
