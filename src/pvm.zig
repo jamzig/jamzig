@@ -95,22 +95,9 @@ pub const PVM = struct {
 
         // Decode instruction
         const instruction = try context.decoder.decodeInstruction(context.pc);
+        span.trace("JAMDUNA PC {d} {s} g={d} reg={any}", .{ context.pc, instruction, context.gas, context.registers });
+        //  PC 2512 STORE_IMM_IND_U8            g=9071 pvmHash=b4dc..84ac reg="[8 4278056032 0 256 0 2953942612 4278058975 9071 1 4278056408 8 4278056408 0]"
         span.debug("Executing instruction at PC: 0x{d:0>8}: {}", .{ context.pc, instruction });
-        span.trace("Decoded instruction: {}", .{instruction.instruction});
-        span.trace("Registers before: {any}", .{context.registers});
-        span.trace("Registers before: [0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}]", .{
-            context.registers[0],  context.registers[1], context.registers[2],  context.registers[3],
-            context.registers[4],  context.registers[5], context.registers[6],  context.registers[7],
-            context.registers[8],  context.registers[9], context.registers[10], context.registers[11],
-            context.registers[12],
-        });
-        defer span.trace("Registers after: [0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}, 0x{x}]", .{
-            context.registers[0],  context.registers[1], context.registers[2],  context.registers[3],
-            context.registers[4],  context.registers[5], context.registers[6],  context.registers[7],
-            context.registers[8],  context.registers[9], context.registers[10], context.registers[11],
-            context.registers[12],
-        });
-        defer span.trace("Registers after: {any}", .{context.registers});
 
         // Check gas
         const gas_cost = getInstructionGasCost(instruction);
@@ -146,7 +133,7 @@ pub const PVM = struct {
         defer span.deinit();
         while (true) {
             const step_result = try singleStepInvocation(context);
-            span.trace("Registers: {any}", .{context.registers});
+
             switch (step_result) {
                 .cont => continue,
                 .host_call => |invocation| {
@@ -155,7 +142,7 @@ pub const PVM = struct {
                 .terminal => |result| switch (result) {
                     .page_fault => |addr| {
                         // FIXME: this to make gas accounting work against test vectors
-                        context.gas -= 1;
+                        // context.gas -= 1;
                         return .{ .terminal = .{ .page_fault = addr } };
                     },
                     else => {
@@ -249,11 +236,12 @@ pub const PVM = struct {
         }
     }
 
-    fn getInstructionGasCost(inst: InstructionWithArgs) u32 {
-        return switch (inst.instruction) {
-            // .jump => 3,
-            else => 1,
-        };
+    fn getInstructionGasCost(_: InstructionWithArgs) u32 {
+        // return switch (inst.instruction) {
+        //     // .jump => 3,
+        //     else => 1,
+        // };
+        return 0;
     }
 
     const PcOffset = i32;

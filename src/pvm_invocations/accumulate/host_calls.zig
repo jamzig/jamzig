@@ -110,7 +110,9 @@ pub fn HostCalls(params: Params) type {
             span.debug("Host call: gas remaining", .{});
 
             _ = call_ctx;
-            const remaining_gas = exec_ctx.gas - 10;
+
+            exec_ctx.gas -= 10;
+            const remaining_gas = exec_ctx.gas;
             exec_ctx.registers[7] = @intCast(remaining_gas);
 
             span.debug("Remaining gas: {d}", .{remaining_gas});
@@ -124,6 +126,9 @@ pub fn HostCalls(params: Params) type {
         ) PVM.HostCallResult {
             const span = trace.span(.host_call_lookup);
             defer span.deinit();
+
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10;
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular = host_ctx.regular;
@@ -201,6 +206,9 @@ pub fn HostCalls(params: Params) type {
         ) PVM.HostCallResult {
             const span = trace.span(.host_call_write);
             defer span.deinit();
+
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10;
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
@@ -369,6 +377,9 @@ pub fn HostCalls(params: Params) type {
             const span = trace.span(.host_call_info);
             defer span.deinit();
 
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10;
+
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
@@ -457,6 +468,9 @@ pub fn HostCalls(params: Params) type {
             const amount = exec_ctx.registers[8]; // Amount to transfer
             const gas_limit = exec_ctx.registers[9]; // Gas limit for on_transfer
             const memo_ptr = exec_ctx.registers[10]; // Pointer to memo data
+
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10 + @as(i64, @intCast(gas_limit));
 
             span.debug("Host call: transfer from service {d} to {d}", .{
                 ctx_regular.service_id, destination_id,
@@ -553,10 +567,8 @@ pub fn HostCalls(params: Params) type {
             const span = trace.span(.host_call_new_service);
             defer span.deinit();
 
-            if (call_ctx == null) {
-                span.err("Call context is null, this should never happen", .{});
-                return .{ .terminal = .panic };
-            }
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10;
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
@@ -646,6 +658,9 @@ pub fn HostCalls(params: Params) type {
         ) PVM.HostCallResult {
             const span = trace.span(.host_call_yield);
             defer span.deinit();
+
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10;
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
