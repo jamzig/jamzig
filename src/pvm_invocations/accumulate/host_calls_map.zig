@@ -21,7 +21,7 @@ pub fn buildOrGetCached(comptime params: Params, allocator: std.mem.Allocator) !
     span.debug("Registering host call functions", .{});
     try host_call_map.put(allocator, @intFromEnum(HostCallId.gas), HostCalls.gasRemaining);
     try host_call_map.put(allocator, @intFromEnum(HostCallId.lookup), HostCalls.lookupPreimage);
-    // try host_call_map.put(allocator, @intFromEnum(HostCallId.read), host_calls.readStorage);
+    try host_call_map.put(allocator, @intFromEnum(HostCallId.read), HostCalls.readStorage);
     try host_call_map.put(allocator, @intFromEnum(HostCallId.write), HostCalls.writeStorage);
     try host_call_map.put(allocator, @intFromEnum(HostCallId.info), HostCalls.infoService);
     // try host_call_map.put(allocator, @intFromEnum(HostCallId.bless), host_calls.blessService);
