@@ -225,6 +225,10 @@ pub const ServiceAccount = struct {
 
     //  PreImageLookups assume correct state, that is when you sollicit a
     //  preimage. It should not be available already.
+    pub fn getPreimageLookup(self: *const ServiceAccount, hash: Hash, length: u32) ?PreimageLookup {
+        const key = PreimageLookupKey{ .hash = hash, .length = length };
+        return self.preimage_lookups.get(key);
+    }
 
     /// Created an entry in preimages_lookups indicating we need a preimage
     pub fn solicitPreimage(

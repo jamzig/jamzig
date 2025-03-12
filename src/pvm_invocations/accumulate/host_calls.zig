@@ -757,6 +757,105 @@ pub fn HostCalls(params: Params) type {
             return .play;
         }
 
+        /// Host call implementation for query preimage (Ω_Q)
+        pub fn queryPreimage(
+            exec_ctx: *PVM.ExecutionContext,
+            call_ctx: ?*anyopaque,
+        ) PVM.HostCallResult {
+            const span = trace.span(.host_call_query);
+            defer span.deinit();
+
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10;
+
+            const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
+            const ctx_regular = host_ctx.regular;
+
+            // Get registers per graypaper B.7: [o, z]
+            const hash_ptr = exec_ctx.registers[7]; // Hash pointer (o)
+            const preimage_size = exec_ctx.registers[8]; // Preimage size (z)
+
+            span.debug("Host call: query preimage for service {d}", .{ctx_regular.service_id});
+            span.debug("Hash ptr: 0x{x}, Preimage size: {d}", .{ hash_ptr, preimage_size });
+
+            // Read hash from memory
+            span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
+            const hash_slice = exec_ctx.memory.readSlice(@truncate(hash_ptr), 32) catch {
+                span.err("Memory access failed while reading hash", .{});
+                return .{ .terminal = .panic };
+            };
+
+            const hash: [32]u8 = hash_slice[0..32].*;
+            span.trace("Hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
+
+            // Get service account
+            span.debug("Getting service account ID: {d}", .{ctx_regular.service_id});
+            const service_account = ctx_regular.context.service_accounts.getReadOnly(ctx_regular.service_id) orelse {
+                span.err("Service account not found", .{});
+                return .{ .terminal = .panic };
+            };
+
+            // Query preimage status
+            span.debug("Querying preimage status", .{});
+            const lookup_status = service_account.getPreimageLookup(hash, @intCast(preimage_size)) orelse {
+                exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.NONE);
+                return .play;
+            };
+
+            // Encode result according to graypaper section B.7
+            var result: u64 = 0;
+            var result_high: u64 = 0;
+
+            // Per graypaper the encoding is:
+            // - 0,0 if empty entry: a = []
+            // - 1 + 2^32 * x,0 if available since time x: a = [x]
+            // - 2 + 2^32 * x,y if unavailable since time y, was available from x: a = [x,y]
+            // - 3 + 2^32 * x,y + 2^32 * z if available since z, was available from x until y: a = [x,y,z]
+
+            span.debug("Preimage status found", .{});
+
+            const status = lookup_status.asSlice();
+
+            switch (status.len) {
+                0 => {
+                    // Preimage is requested but not supplied
+                    span.debug("Status: requested but not supplied", .{});
+                    result = 0;
+                    result_high = 0;
+                },
+                1 => {
+                    // Preimage is available since time status[0]
+                    span.debug("Status: available since time {d}", .{status[0].?});
+                    result = 1 + ((@as(u64, status[0].?) << 32));
+                    result_high = 0;
+                },
+                2 => {
+                    // Preimage was available from time status[0] until status[1]
+                    span.debug("Status: unavailable, was available from {d} until {d}", .{ status[0].?, status[1].? });
+                    result = 2 + ((@as(u64, status[0].?) << 32));
+                    result_high = status[1].?;
+                },
+                3 => {
+                    // Preimage is available since time status[2], was available from status[0] until status[1]
+                    span.debug("Status: available since {d}, previously from {d} until {d}", .{ status[2].?, status[0].?, status[1].? });
+                    result = 3 + ((@as(u64, status[0].?) << 32));
+                    result_high = status[1].? + ((@as(u64, status[2].?) << 32));
+                },
+                else => {
+                    // Invalid status length, should never happen
+                    span.err("Invalid preimage status length: {d}", .{status.len});
+                    return .{ .terminal = .panic };
+                },
+            }
+
+            // Set result registers
+            exec_ctx.registers[7] = result;
+            exec_ctx.registers[8] = result_high;
+
+            span.debug("Query completed. Result: 0x{x}, High: 0x{x}", .{ result, result_high });
+            return .play;
+        }
+
         /// Host call implementation for solicit preimage (Ω_S)
         pub fn solicitPreimage(
             exec_ctx: *PVM.ExecutionContext,
