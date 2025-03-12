@@ -1,17 +1,23 @@
 const std = @import("std");
+
+const types = @import("../types.zig");
+
 const sort = std.sort;
 const decoder = @import("../codec/decoder.zig");
 const state = @import("../state.zig");
 
+const GlobalIndex = std.AutoHashMapUnmanaged(types.WorkPackageHash, void);
+
 pub fn decode(comptime epoch_size: usize, allocator: std.mem.Allocator, reader: anytype) !state.Xi(epoch_size) {
+    var global_index: GlobalIndex = .{};
     var result: [epoch_size]std.AutoHashMapUnmanaged([32]u8, void) = undefined;
     for (&result) |*epoch| {
-        epoch.* = try decodeTimeslotEntry(allocator, reader);
+        epoch.* = try decodeTimeslotEntryAndFillGlobalIndex(allocator, reader, &global_index);
     }
-    return .{ .entries = result, .allocator = allocator, .global_index = .{} };
+    return .{ .entries = result, .allocator = allocator, .global_index = global_index };
 }
 
-pub fn decodeTimeslotEntry(allocator: std.mem.Allocator, reader: anytype) !std.AutoHashMapUnmanaged([32]u8, void) {
+pub fn decodeTimeslotEntryAndFillGlobalIndex(allocator: std.mem.Allocator, reader: anytype, global_index: *GlobalIndex) !std.AutoHashMapUnmanaged([32]u8, void) {
     var result = std.AutoHashMapUnmanaged([32]u8, void){};
     errdefer result.deinit(allocator);
 
@@ -30,6 +36,7 @@ pub fn decodeTimeslotEntry(allocator: std.mem.Allocator, reader: anytype) !std.A
         // _ = try reader.readAll(&value);
 
         try result.put(allocator, key, {});
+        try global_index.put(allocator, key, {});
     }
 
     return result;
@@ -52,7 +59,7 @@ test "Xi decode" {
     try buffer.appendSlice(&key1);
 
     var stream = std.io.fixedBufferStream(buffer.items);
-    var xi = try decodeTimeslotEntry(allocator, stream.reader());
+    var xi = try decodeTimeslotEntryAndFillGlobalIndex(allocator, stream.reader());
     defer xi.deinit(allocator);
 
     // Validate decoded data

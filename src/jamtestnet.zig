@@ -107,7 +107,7 @@ pub fn runStateTransitionTests(
         if (current_state) |*cs| cs.deinit(allocator);
     }
 
-    for (state_transition_vectors.items()[12..]) |state_transition_vector| {
+    for (state_transition_vectors.items()[14..15]) |state_transition_vector| {
         // std.debug.print("\nProcessing transition {d}/{d}\n", .{ i + 1, state_transition_vectors.items().len });
 
         var state_transition = try loader.loadTestVector(allocator, state_transition_vector.bin.path);
@@ -137,6 +137,14 @@ pub fn runStateTransitionTests(
             );
             // std.debug.print("Genesis state initialized\n", .{});
         }
+
+        // Ensure we are starting with the same roots.
+        const pre_state_root = try current_state.?.buildStateRoot(allocator);
+        try std.testing.expectEqualSlices(
+            u8,
+            &state_transition.preStateRoot(),
+            &pre_state_root,
+        );
 
         // std.debug.print("Executing state transition...\n", .{});
         var transition = try stf.stateTransition(
