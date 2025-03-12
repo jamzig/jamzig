@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("../../types.zig");
+const state = @import("../../state.zig");
 
 const service_util = @import("service_util.zig");
 const DeferredTransfer = @import("types.zig").DeferredTransfer;
@@ -661,6 +662,68 @@ pub fn HostCalls(params: Params) type {
 
             // Return success
             span.debug("Transfer scheduled successfully", .{});
+            exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.OK);
+            return .play;
+        }
+
+        /// Host call implementation for assign core (Ω_A)
+        pub fn assignCore(
+            exec_ctx: *PVM.ExecutionContext,
+            call_ctx: ?*anyopaque,
+        ) PVM.HostCallResult {
+            const span = trace.span(.host_call_assign);
+            defer span.deinit();
+
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10;
+
+            const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
+            const ctx_regular: *Dimension = &host_ctx.regular;
+
+            // Get registers per graypaper B.7
+            const core_index = exec_ctx.registers[7]; // Core index to assign
+            const output_ptr = exec_ctx.registers[8]; // Pointer to authorizer hashes array
+
+            span.debug("Host call: assign core {d}", .{core_index});
+            span.debug("Output pointer: 0x{x}", .{output_ptr});
+
+            // Check if core index is valid
+            if (core_index >= params.core_count) {
+                span.debug("Invalid core index {d}, returning CORE error", .{core_index});
+                exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.CORE);
+                return .play;
+            }
+
+            // Read authorizer hashes from memory - each hash is 32 bytes, and we need to read params.max_authorizations_queue_items of them
+            span.debug("Reading authorizer hashes from memory at 0x{x}", .{output_ptr});
+
+            // Calculate the total size of all authorizer hashes
+            const total_size: u32 = 32 * @as(u32, params.max_authorizations_queue_items);
+
+            // Read all hashes at once
+            const hashes_data = exec_ctx.memory.readSlice(@truncate(output_ptr), total_size) catch {
+                span.err("Memory access failed while reading authorizer hashes", .{});
+                return .{ .terminal = .panic };
+            };
+
+            // Create a sequence of authorizer hashes
+            const authorizer_hashes = std.mem.bytesAsSlice(types.AuthorizerHash, hashes_data);
+
+            // Get mutable access to the authorizer queue
+            span.debug("Updating authorizer queue for core {d}", .{core_index});
+            const auth_queue: *state.Phi(params.core_count, params.max_authorizations_queue_items) = ctx_regular.context.authorizer_queue.getMutable() catch {
+                span.err("Problem getting mutable authorizer queue", .{});
+                return .{ .terminal = .panic };
+            };
+
+            auth_queue.queue[core_index].clearRetainingCapacity();
+            auth_queue.queue[core_index].appendSlice(authorizer_hashes) catch {
+                span.err("Failed to set authorizations for core {d}", .{core_index});
+                return .{ .terminal = .panic };
+            };
+
+            // Return success
+            span.debug("Core assigned successfully", .{});
             exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.OK);
             return .play;
         }

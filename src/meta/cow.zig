@@ -38,7 +38,7 @@ pub fn CopyOnWrite(comptime T: type) type {
             if (self.mutable == null) {
                 self.mutable = try meta.callDeepClone(self.source, self.allocator);
             }
-            return self.mutable.?;
+            return &self.mutable.?;
         }
 
         pub fn getReadOnly(self: *Self) *const T {
