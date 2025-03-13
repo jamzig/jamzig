@@ -681,6 +681,61 @@ pub fn HostCalls(params: Params) type {
             return .play;
         }
 
+        /// Host call implementation for upgrade service (Ω_U)
+        pub fn upgradeService(
+            exec_ctx: *PVM.ExecutionContext,
+            call_ctx: ?*anyopaque,
+        ) PVM.HostCallResult {
+            const span = trace.span(.host_call_upgrade);
+            defer span.deinit();
+
+            span.debug("charging 10 gas", .{});
+            exec_ctx.gas -= 10;
+
+            const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
+            const ctx_regular: *Dimension = &host_ctx.regular;
+
+            // Get registers per graypaper B.7: [o, g, m]
+            const code_hash_ptr = exec_ctx.registers[7]; // Pointer to new code hash (o)
+            const min_gas_limit = exec_ctx.registers[8]; // New gas limit for accumulate (g)
+            const min_memo_gas = exec_ctx.registers[9]; // New gas limit for on_transfer (m)
+
+            span.debug("Host call: upgrade service {d}", .{ctx_regular.service_id});
+            span.debug("Code hash ptr: 0x{x}, Min gas: {d}, Min memo gas: {d}", .{
+                code_hash_ptr, min_gas_limit, min_memo_gas,
+            });
+
+            // Read code hash from memory
+            span.debug("Reading code hash from memory at 0x{x}", .{code_hash_ptr});
+            const code_hash_slice = exec_ctx.memory.readSlice(@truncate(code_hash_ptr), 32) catch {
+                span.err("Memory access failed while reading code hash", .{});
+                return .{ .terminal = .panic };
+            };
+            const code_hash: [32]u8 = code_hash_slice[0..32].*;
+            span.trace("Code hash: {s}", .{std.fmt.fmtSliceHexLower(&code_hash)});
+
+            // Get mutable service account - this is always the current service
+            span.debug("Getting mutable service account ID: {d}", .{ctx_regular.service_id});
+            const service_account = ctx_regular.context.service_accounts.getMutable(ctx_regular.service_id) catch {
+                span.err("Could not get mutable instance of service account", .{});
+                return .{ .terminal = .panic };
+            } orelse {
+                span.err("Service account not found, this should never happen", .{});
+                return .{ .terminal = .panic };
+            };
+
+            // Update the service account code hash and gas limits
+            span.debug("Updating service account properties", .{});
+            service_account.code_hash = code_hash;
+            service_account.min_gas_accumulate = min_gas_limit;
+            service_account.min_gas_on_transfer = min_memo_gas;
+
+            // Success result
+            span.debug("Service upgraded successfully", .{});
+            exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.OK);
+            return .play;
+        }
+
         /// Host call implementation for transfer (Ω_T)
         pub fn transfer(
             exec_ctx: *PVM.ExecutionContext,
@@ -809,17 +864,17 @@ pub fn HostCalls(params: Params) type {
             span.debug("Host call: assign core {d}", .{core_index});
             span.debug("Output pointer: 0x{x}", .{output_ptr});
 
-            // Make sure this is the assign service calling
-            const privileges: *const state.Chi = ctx_regular.context.privileges.getReadOnly();
-            if (privileges.assign != ctx_regular.service_id) {
-                span.debug("This service does not have the assign privilege. Ignoring", .{});
-                return .play;
-            }
-
             // Check if core index is valid
             if (core_index >= params.core_count) {
                 span.debug("Invalid core index {d}, returning CORE error", .{core_index});
                 exec_ctx.registers[7] = @intFromEnum(HostCallReturnCode.CORE);
+                return .play;
+            }
+
+            // Make sure this is the assign service calling
+            const privileges: *const state.Chi = ctx_regular.context.privileges.getReadOnly();
+            if (privileges.assign != ctx_regular.service_id) {
+                span.debug("This service does not have the assign privilege. Ignoring", .{});
                 return .play;
             }
 
