@@ -809,6 +809,13 @@ pub fn HostCalls(params: Params) type {
             span.debug("Host call: assign core {d}", .{core_index});
             span.debug("Output pointer: 0x{x}", .{output_ptr});
 
+            // Make sure this is the assign service calling
+            const privileges: *const state.Chi = ctx_regular.context.privileges.getReadOnly();
+            if (privileges.assign != ctx_regular.service_id) {
+                span.debug("This service does not have the assign privilege. Ignoring", .{});
+                return .play;
+            }
+
             // Check if core index is valid
             if (core_index >= params.core_count) {
                 span.debug("Invalid core index {d}, returning CORE error", .{core_index});
