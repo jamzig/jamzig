@@ -60,6 +60,8 @@ test "accumulate_invocation" {
     );
     defer post_state.deinit(allocator);
 
+    const time = JAMDUNA_PARAMS.Time().init(pre_state.tau.?, block.header.slot);
+
     // Build accumulation context
     var accumulation_context = accumulate.AccumulationContext(JAMDUNA_PARAMS).build(
         allocator,
@@ -68,6 +70,7 @@ test "accumulate_invocation" {
             .validator_keys = &pre_state.iota.?,
             .authorizer_queue = &pre_state.phi.?,
             .privileges = &pre_state.chi.?,
+            .time = &time,
         },
     );
     defer accumulation_context.deinit();

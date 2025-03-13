@@ -51,7 +51,7 @@ pub fn processPreimagesExtrinsic(
         preimage_span.debug("Added preimage to service {d}", .{service_id});
 
         // Update the lookup metadata
-        try service_account.registerPreImageAvailable(
+        try service_account.registerPreimageAvailable(
             preimage_hash,
             @intCast(preimage.blob.len),
             stx.time.current_slot,

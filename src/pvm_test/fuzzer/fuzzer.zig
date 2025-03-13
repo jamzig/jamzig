@@ -435,7 +435,18 @@ pub const PVMFuzzer = struct {
 
         // Main execution loop
         const initial_gas = exec_ctx.gas;
-        while (true) {
+        // FIXME: for now gas is 0 so we need to limit with max_iteration when gas is introduced again we can remove
+        var max_iterations = initial_gas;
+        while (true) : (max_iterations -= 1) {
+            if (max_iterations == 0) {
+                return FuzzResult{
+                    .seed = seed,
+                    .status = .{ .terminal = .out_of_gas },
+                    .gas_used = initial_gas -| exec_ctx.gas,
+                    .was_mutated = will_mutate,
+                    .init_failed = false,
+                };
+            }
             // Execute one step in our PVM
             const current_pc = exec_ctx.pc;
             const current_instruction = try exec_ctx.decoder.decodeInstruction(current_pc);

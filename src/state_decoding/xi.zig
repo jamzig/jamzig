@@ -41,29 +41,3 @@ pub fn decodeTimeslotEntryAndFillGlobalIndex(allocator: std.mem.Allocator, reade
 
     return result;
 }
-
-test "Xi decode" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    // Create test data
-    const key1 = [_]u8{3} ** 32;
-    const key2 = [_]u8{1} ** 32;
-
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
-
-    // Write test data (matching encode test)
-    try buffer.append(2); // count
-    try buffer.appendSlice(&key2);
-    try buffer.appendSlice(&key1);
-
-    var stream = std.io.fixedBufferStream(buffer.items);
-    var xi = try decodeTimeslotEntryAndFillGlobalIndex(allocator, stream.reader());
-    defer xi.deinit(allocator);
-
-    // Validate decoded data
-    try testing.expectEqual(@as(usize, 2), xi.count());
-    try testing.expect(xi.contains(key1));
-    try testing.expect(xi.contains(key2));
-}

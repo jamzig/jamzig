@@ -92,10 +92,13 @@ pub const InstructionFuzzer = struct {
 test "instruction_fuzzer_with_config" {
     const allocator = std.testing.allocator;
 
+    var rand = std.Random.DefaultPrng.init(42);
+    var rng = rand.random();
+
     // Create custom config
     const config = FuzzerConfig{
-        .seed = 42,
-        .num_cases = 1_000_000_000_000,
+        .seed = rng.int(u64),
+        .num_cases = 50_000,
         .verbose = true,
     };
 

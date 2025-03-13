@@ -325,7 +325,7 @@ pub const ServiceAccount = struct {
     }
 
     // method to always set the pre-image lookup value
-    pub fn registerPreImageAvailable(
+    pub fn registerPreimageAvailable(
         self: *ServiceAccount,
         hash: Hash,
         length: u32,

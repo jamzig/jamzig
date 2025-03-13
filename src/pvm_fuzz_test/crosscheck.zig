@@ -354,9 +354,7 @@ test "crosscheck:instructions" {
     defer comparison.deinit(allocator);
 
     // Generate and print difference report
-    const report = try comparison.getDifferenceReport(allocator);
-    defer allocator.free(report);
-    std.debug.print("\n{s}\n", .{report});
+    try comparison.getDifferenceReport(std.io.getStdErr().writer());
 
     // Verify that results match
     try std.testing.expect(comparison.matchesExactly());
