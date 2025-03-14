@@ -28,11 +28,11 @@ pub const RecentBlock = struct {
         allocator.free(self.work_reports);
     }
 
-    pub fn fromBlock(comptime params: jam_params.Params, allocator: std.mem.Allocator, block: *const types.Block) !@This() {
+    pub fn fromBlock(comptime params: jam_params.Params, allocator: std.mem.Allocator, block: *const types.Block, accumulate_root: types.AccumulateRoot) !@This() {
         return RecentBlock{
             .header_hash = try block.header.header_hash(params, allocator),
             .parent_state_root = block.header.parent_state_root,
-            .accumulate_root = std.mem.zeroes(types.OpaqueHash),
+            .accumulate_root = accumulate_root,
             .work_reports = blk: {
                 // Extract work report hashes from guarantees
                 // TODO: move this to block level, more clean
@@ -101,7 +101,7 @@ pub const RecentHistory = struct {
         // Create a new BlockStateInformation
         var block_info = types.BlockInfo{
             .header_hash = input.header_hash,
-            .state_root = std.mem.zeroes(types.Hash), // This will be updated in the next block
+            .state_root = std.mem.zeroes(types.StateRoot), // This will be updated in the next block
             .beefy_mmr = undefined,
             .work_reports = input.work_reports,
         };

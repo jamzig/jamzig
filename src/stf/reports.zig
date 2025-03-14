@@ -22,34 +22,32 @@ pub fn transition(
     comptime params: Params,
     allocator: std.mem.Allocator,
     stx: *StateTransition(params),
-    guarantees: types.GuaranteesExtrinsic,
+    block: *const types.Block,
 ) !void {
-    // Ensure we have our primes
-    const rho: *state.Rho(params.core_count) = try stx.ensure(.rho_prime);
-
     // NOTE: disable to make test passing, track pi based on result?
     // const pi: *state.Pi = try stx.ensure(.pi_prime);
-
-    // Build our state view for validation
-    const state_view = stx.buildBaseView();
 
     const validated = try reports.ValidatedGuaranteeExtrinsic.validate(
         params,
         allocator,
-        guarantees,
-        stx.time.current_slot,
-        &state_view,
+        stx,
+        block.extrinsic.guarantees,
     );
 
     // Process
     var result = try reports.processGuaranteeExtrinsic(
         params,
         allocator,
+        stx,
         validated,
-        stx.time.current_slot,
-        &state_view,
-        rho,
-        // pi,
     );
     defer result.deinit(allocator);
+
+    const pi: *state.Pi = try stx.ensure(.pi_prime);
+    const kappa: *const types.ValidatorSet = try stx.ensure(.kappa);
+    for (result.reporters) |validator_key| {
+        const validator_index = try kappa.findValidatorIndex(.Ed25519Public, validator_key);
+        var stats = try pi.getValidatorStats(validator_index);
+        stats.updateReportsGuaranteed(1);
+    }
 }

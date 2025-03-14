@@ -95,8 +95,14 @@ pub const PVM = struct {
 
         // Decode instruction
         const instruction = try context.decoder.decodeInstruction(context.pc);
+        const pc_before = context.pc;
+        defer span.trace("JAMDUNA PC {d} {s} g={d} reg={any}", .{ pc_before, instruction, context.gas, context.registers });
+        defer {
+            const memvalue = context.memory.readInt(i32, 0xFEFF000B) catch 42;
+            defer span.trace("JAMDUNA MEM {d} ", .{memvalue});
+        }
+        //  PC 2512 STORE_IMM_IND_U8            g=9071 pvmHash=b4dc..84ac reg="[8 4278056032 0 256 0 2953942612 4278058975 9071 1 4278056408 8 4278056408 0]"
         span.debug("Executing instruction at PC: 0x{d:0>8}: {}", .{ context.pc, instruction });
-        span.trace("Decoded instruction: {}", .{instruction.instruction});
 
         // Check gas
         const gas_cost = getInstructionGasCost(instruction);
@@ -128,8 +134,11 @@ pub const PVM = struct {
     pub fn basicInvocation(
         context: *ExecutionContext,
     ) Error!BasicInvocationResult {
+        const span = trace.span(.basic_invocation);
+        defer span.deinit();
         while (true) {
             const step_result = try singleStepInvocation(context);
+
             switch (step_result) {
                 .cont => continue,
                 .host_call => |invocation| {
@@ -138,7 +147,7 @@ pub const PVM = struct {
                 .terminal => |result| switch (result) {
                     .page_fault => |addr| {
                         // FIXME: this to make gas accounting work against test vectors
-                        context.gas -= 1;
+                        // context.gas -= 1;
                         return .{ .terminal = .{ .page_fault = addr } };
                     },
                     else => {
@@ -159,24 +168,26 @@ pub const PVM = struct {
 
     // Host call invocation invocation
     // Calls basicInvocation until we against
-    pub fn hostcallInvocation(context: *ExecutionContext) Error!HostCallInvocationResult {
+    pub fn hostcallInvocation(context: *ExecutionContext, call_ctx: *anyopaque) Error!HostCallInvocationResult {
         switch (try basicInvocation(context)) {
             .host_call => |params| {
-                if (context.host_calls.get(params.idx)) |host_call_fn| {
-                    switch (host_call_fn(context)) {
-                        .play => {
-                            context.pc = params.next_pc;
-                            return try hostcallInvocation(context);
-                        },
-                        .page_fault => |addr| {
-                            return .{
-                                .terminal = .{ .page_fault = addr },
-                            };
-                        },
+                if (context.host_calls) |host_calls| {
+                    if (host_calls.get(params.idx)) |host_call_fn| {
+                        switch (host_call_fn(context, call_ctx)) {
+                            .play => {
+                                context.pc = params.next_pc;
+                                return try hostcallInvocation(context, call_ctx);
+                            },
+                            .terminal => |result| {
+                                return .{
+                                    .terminal = result,
+                                };
+                            },
+                        }
                     }
-                } else {
-                    return Error.NonExistentHostCall;
                 }
+
+                return Error.NonExistentHostCall;
             },
             .terminal => |terminal| {
                 return .{ .terminal = terminal };
@@ -192,6 +203,10 @@ pub const PVM = struct {
             out_of_gas,
         },
 
+        pub fn isSuccess(self: @This()) bool {
+            return self == .halt;
+        }
+
         pub fn isError(self: @This()) bool {
             return self == .terminal;
         }
@@ -205,14 +220,14 @@ pub const PVM = struct {
         }
     };
 
-    pub fn machineInvocation(allocator: std.mem.Allocator, context: *ExecutionContext) Error!MachineInvocationResult {
-        switch (try hostcallInvocation(context)) {
+    pub fn machineInvocation(allocator: std.mem.Allocator, exec_ctx: *ExecutionContext, call_ctx: *anyopaque) Error!MachineInvocationResult {
+        switch (try hostcallInvocation(exec_ctx, call_ctx)) {
             .terminal => |terminal| {
                 switch (terminal) {
                     .halt => {
                         // if memory range in valid memory
                         // read the memory range and return it
-                        const return_value = context.readSliceBetweenRegister7AndRegister8();
+                        const return_value = exec_ctx.readSliceBetweenRegister7AndRegister8();
                         return .{ .halt = try allocator.dupe(u8, return_value) };
                     },
                     .out_of_gas => {
@@ -226,11 +241,12 @@ pub const PVM = struct {
         }
     }
 
-    fn getInstructionGasCost(inst: InstructionWithArgs) u32 {
-        return switch (inst.instruction) {
-            // .jump => 3,
-            else => 1,
-        };
+    fn getInstructionGasCost(_: InstructionWithArgs) u32 {
+        // return switch (inst.instruction) {
+        //     // .jump => 3,
+        //     else => 1,
+        // };
+        return 0;
     }
 
     const PcOffset = i32;

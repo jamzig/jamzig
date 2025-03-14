@@ -8,8 +8,15 @@ pub const DiffResult = union(enum) {
     EmptyDiff,
     Diff: []u8,
 
-    pub fn debugPrint(self: @This()) void {
-        switch (self) {
+    pub fn hasChanges(self: *const @This()) bool {
+        return switch (self.*) {
+            .EmptyDiff => false,
+            else => true,
+        };
+    }
+
+    pub fn debugPrint(self: *const @This()) void {
+        switch (self.*) {
             .EmptyDiff => {
                 // std.debug.print("<empty diff>\n", .{});
             },
@@ -22,7 +29,7 @@ pub const DiffResult = union(enum) {
         }
     }
 
-    pub fn debugPrintAndDeinit(self: @This(), allocator: std.mem.Allocator) void {
+    pub fn debugPrintAndDeinit(self: *const @This(), allocator: std.mem.Allocator) void {
         defer self.deinit(allocator);
         self.debugPrint();
     }
@@ -97,10 +104,13 @@ pub fn diffBasedOnStrings(allocator: std.mem.Allocator, before_str: []const u8, 
         .allocator = allocator,
         .argv = &[_][]const u8{
             "diff",
+            "-U",
+            "10",
             "-u",
             before_file.abs_path,
             after_file.abs_path,
         },
+        .max_output_bytes = 400 * 1024,
     });
     defer allocator.free(result.stderr);
 

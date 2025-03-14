@@ -2,7 +2,7 @@ const std = @import("std");
 
 const GeneratedProgram = @import("program_generator.zig").GeneratedProgram;
 const ProgramGenerator = @import("program_generator.zig").ProgramGenerator;
-const ProgramBuilder = @import("polkavm_ffi/program_builder.zig").ProgramBuilder;
+pub const ProgramBuilder = @import("polkavm_ffi/program_builder.zig").ProgramBuilder;
 const SeedGenerator = @import("seed.zig").SeedGenerator;
 
 pub const MemoryPage = extern struct {

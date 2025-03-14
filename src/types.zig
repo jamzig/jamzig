@@ -30,6 +30,9 @@ pub const WorkPackageHash = OpaqueHash;
 pub const WorkReportHash = OpaqueHash;
 pub const ExportsRoot = OpaqueHash;
 pub const ErasureRoot = OpaqueHash;
+pub const AccumulateRoot = OpaqueHash;
+pub const AccumulateOutput = OpaqueHash;
+pub const AuthorizerHash = OpaqueHash;
 
 pub const Entropy = OpaqueHash;
 pub const EntropyBuffer = [4]Entropy;
@@ -67,7 +70,7 @@ pub const RefineContext = struct {
     beefy_root: BeefyRoot,
     lookup_anchor: HeaderHash,
     lookup_anchor_slot: TimeSlot,
-    prerequisites: []OpaqueHash,
+    prerequisites: []WorkPackageHash,
 
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){
@@ -466,7 +469,7 @@ pub const ValidatorSet = struct {
         const field_name = comptime switch (key_type) {
             .BlsPublic => "bls",
             .BandersnatchPublic => "bandersnatch",
-            .Ed25519Public => "edwards",
+            .Ed25519Public => "ed25519",
         };
 
         for (self.validators, 0..) |validator, i| {
@@ -535,7 +538,7 @@ pub const ValidatorSet = struct {
         return self.validators;
     }
 
-    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
+    pub fn deepClone(self: *const @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){
             .validators = try allocator.dupe(ValidatorData, self.validators),
         };
@@ -845,6 +848,20 @@ pub const Preimage = struct {
 
 pub const PreimagesExtrinsic = struct {
     data: []Preimage,
+
+    /// Number of preimages
+    pub fn count(self: *const @This()) u32 {
+        return @intCast(self.data.len);
+    }
+
+    /// Calculates the total number of bytes (octets) across all preimages in this extrinsic
+    pub fn calcOctetsAcrossPreimages(self: *const @This()) u32 {
+        var total_bytes: u32 = 0;
+        for (self.data) |preimage| {
+            total_bytes += @intCast(preimage.blob.len);
+        }
+        return total_bytes;
+    }
 
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         var cloned_data = try allocator.alloc(Preimage, self.data.len);

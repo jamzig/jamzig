@@ -7,53 +7,59 @@ const types = @import("../types.zig");
 const helpers = @import("../tests/helpers.zig");
 const diff = @import("../tests/diff.zig");
 const Params = @import("../jam_params.zig").Params;
+const StateTransition = @import("../state_delta.zig").StateTransition;
 
 pub fn validateAndProcessGuaranteeExtrinsic(
     comptime params: Params,
     allocator: std.mem.Allocator,
     test_case: *const tvector.TestCase,
-    jam_state: *const state.JamStateView(params),
-    rho: *state.Rho(params.core_count),
+    jam_state: *const state.JamState(params),
 ) !reports.Result {
+    // Create a StateTransition for validation
+    const time = params.Time().init(
+        test_case.input.slot - 1, // NOTE: made this up
+        test_case.input.slot, // Use the same slot
+    );
+
+    var stx = try StateTransition(params).init(allocator, jam_state, time);
+    defer stx.deinit();
+
     // First validate the guarantee extrinsic
     const validated_extrinsic = try reports.ValidatedGuaranteeExtrinsic.validate(
         params,
         allocator,
+        &stx,
         test_case.input.guarantees,
-        test_case.input.slot,
-        jam_state,
     );
 
     // Process the validated extrinsic
     const result = try reports.processGuaranteeExtrinsic(
         params,
         allocator,
+        &stx,
         validated_extrinsic,
-        test_case.input.slot,
-        jam_state,
-        rho,
     );
+
+    // Merge the prime onto base
+    try stx.mergePrimeOntoBase();
 
     return result;
 }
 
 pub fn runReportTest(comptime params: Params, allocator: std.mem.Allocator, test_case: tvector.TestCase) !void {
     // Convert pre-state from test vector format to native format
-    var pre_state = try converters.convertState(params, allocator, test_case.pre_state);
-    defer pre_state.deinit(allocator);
+    var current_state = try converters.convertState(params, allocator, test_case.pre_state);
+    defer current_state.deinit(allocator);
 
     // Convert post-state for later comparison
     var expected_state = try converters.convertState(params, allocator, test_case.post_state);
     defer expected_state.deinit(allocator);
 
-    const pre_state_view = state.JamStateView(params).fromJamState(&pre_state);
-
     var process_result = validateAndProcessGuaranteeExtrinsic(
         params,
         allocator,
         &test_case,
-        &pre_state_view,
-        &pre_state.rho.?,
+        &current_state,
     );
     defer {
         if (process_result) |*result| {
@@ -136,7 +142,7 @@ pub fn runReportTest(comptime params: Params, allocator: std.mem.Allocator, test
                 };
 
                 // Verify state matches expected state
-                diff.expectFormattedEqual(*state.JamState(params), allocator, &pre_state, &expected_state) catch {
+                diff.expectFormattedEqual(*state.JamState(params), allocator, &current_state, &expected_state) catch {
                     std.debug.print("Mismatch: actual state != expected state\n", .{});
                     return error.StateMismatch;
                 };

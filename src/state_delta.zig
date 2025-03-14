@@ -82,9 +82,9 @@ pub fn StateTransition(comptime params: Params) type {
             if (is_prime) {
                 if (prime_field.* == null) {
                     const base_field = &@field(self.base, base_name);
-                    if (comptime builtin.mode == .Debug) {
+                    if (comptime builtin.mode == .Debug) { // TODO: this should always panic right?
                         if (base_field.* == null) {
-                            return Error.UninitializedBaseField;
+                            @panic("UninitializedBaseField: " ++ name);
                         }
                     }
                     prime_field.* = try self.cloneField(base_field.*);
@@ -92,9 +92,9 @@ pub fn StateTransition(comptime params: Params) type {
                 return &prime_field.*.?;
             } else {
                 const base_field = &@field(self.base, base_name);
-                if (comptime builtin.mode == .Debug) {
+                if (comptime builtin.mode == .Debug) { // TODO: same here
                     if (base_field.* == null) {
-                        return Error.UninitializedBaseField;
+                        @panic("UninitializedBaseField: " ++ name);
                     }
                 }
                 return &base_field.*.?;
@@ -292,7 +292,7 @@ pub fn STBaseType(comptime T: anytype, comptime field: anytype) type {
 
     // Get the type of the base field
     // Convert string to field enum
-    @setEvalBranchQuota(4000);
+    @setEvalBranchQuota(8000);
     const field_enum = std.meta.stringToEnum(std.meta.FieldEnum(T), base_name) //
     orelse @compileError("Invalid field name: " ++ base_name);
 

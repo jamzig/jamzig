@@ -217,8 +217,8 @@ pub const Memory = struct {
     pub fn HEAP_BASE_ADDRESS(read_only_size_in_bytes: usize) !u32 {
         return 2 * Z_Z + @as(u32, @intCast(try alignToSectionSize(read_only_size_in_bytes)));
     }
-    pub const INPUT_ADDRESS: u32 = 0xFFFFFFFF - Z_Z - Z_I;
-    pub const STACK_BASE_ADDRESS: u32 = 0xFFFFFFFF - (2 * Z_Z) - Z_I;
+    pub const INPUT_ADDRESS: u32 = 0xFFFFFFFF - Z_Z - Z_I + 1;
+    pub const STACK_BASE_ADDRESS: u32 = 0xFFFFFFFF - (2 * Z_Z) - Z_I + 1;
     pub fn STACK_BOTTOM_ADDRESS(stack_size_in_pages: u16) !u32 {
         return STACK_BASE_ADDRESS - @as(u32, @intCast(try alignToPageSize(stack_size_in_pages)));
     }
@@ -244,6 +244,76 @@ pub const Memory = struct {
         CouldNotFindRwPage,
         MemoryLimitExceeded,
     };
+
+    pub fn deepClone(self: *const Memory, allocator: Allocator) !Memory {
+        const span = trace.span(.memory_deep_clone);
+        defer span.deinit();
+        span.debug("Creating deep clone of memory system", .{});
+
+        // Initialize a new empty memory system
+        var new_memory = try Memory.initEmpty(allocator);
+        errdefer new_memory.deinit();
+
+        // Clone all pages
+        const clone_span = span.child(.clone_pages);
+        defer clone_span.deinit();
+        clone_span.debug("Cloning {d} pages", .{self.page_table.pages.items.len});
+
+        try new_memory.page_table.pages.ensureTotalCapacityPrecise(self.page_table.pages.items.len);
+
+        for (self.page_table.pages.items) |page| {
+            clone_span.trace("Cloning page at 0x{X:0>8} with flags {s}", .{ page.address, @tagName(page.flags) });
+
+            // Allocate new page data
+            const new_data = try allocator.alloc(u8, Memory.Z_P);
+            errdefer allocator.free(new_data);
+
+            // Copy page data
+            @memcpy(new_data, page.data);
+
+            // Create new page and add to page table
+            const new_page = Page{
+                .data = new_data,
+                .address = page.address,
+                .flags = page.flags,
+            };
+            try new_memory.page_table.pages.append(new_page);
+        }
+
+        // Copy memory properties
+        new_memory.input_size_in_bytes = self.input_size_in_bytes;
+        new_memory.read_only_size_in_pages = self.read_only_size_in_pages;
+        new_memory.stack_size_in_pages = self.stack_size_in_pages;
+        new_memory.heap_size_in_pages = self.heap_size_in_pages;
+        new_memory.heap_allocation_limit = self.heap_allocation_limit;
+
+        // Clone last violation if present
+        if (self.last_violation) |violation| {
+            // Create a new violation info
+            var new_violation = ViolationInfo{
+                .violation_type = violation.violation_type,
+                .address = violation.address,
+                .attempted_size = violation.attempted_size,
+                .page = null,
+            };
+
+            // If the violation had a page reference, find the corresponding page in the new memory
+            if (violation.page) |old_page| {
+                // Find the corresponding page in the new memory by address
+                for (new_memory.page_table.pages.items) |*new_page| {
+                    if (new_page.address == old_page.address) {
+                        new_violation.page = new_page;
+                        break;
+                    }
+                }
+            }
+
+            new_memory.last_violation = new_violation;
+        }
+
+        span.debug("Memory deep clone complete with {d} pages", .{new_memory.page_table.pages.items.len});
+        return new_memory;
+    }
 
     /// Aligns size to the next page boundary (Z_P = 4096)
     fn alignToPageSize(size_in_bytes: usize) !u32 {
@@ -677,6 +747,7 @@ pub const Memory = struct {
     }
 
     /// Read a slice from memory, not allowing cross-page reads
+    /// FIXME: this should be able to cross pages
     pub fn readSlice(self: *Memory, address: u32, size: usize) ![]const u8 {
         const span = trace.span(.memory_read_slice);
         defer span.deinit();
@@ -715,6 +786,65 @@ pub const Memory = struct {
         span.debug("Successfully read {d} bytes", .{size});
 
         return result;
+    }
+
+    pub fn readSliceOwned(self: *Memory, address: u32, size: usize) ![]const u8 {
+        const slice = try self.readSlice(address, size);
+        return self.allocator.dupe(u8, slice);
+    }
+
+    /// Write a slice to memory, not allowing cross-page writes
+    /// FIXME: this should be able to cross pages
+    pub fn writeSlice(self: *Memory, address: u32, slice: []const u8) !void {
+        const span = trace.span(.memory_write_slice);
+        defer span.deinit();
+        span.debug("Writing slice of {d} bytes to address 0x{X:0>8}", .{ slice.len, address });
+
+        // Find the page containing the address
+        const page = self.page_table.findPageOfAddresss(address) orelse {
+            const aligned_addr = @divTrunc(address, Z_P) * Z_P;
+            span.err("Page fault - non-allocated memory at 0x{X:0>8} (aligned: 0x{X:0>8})", .{ address, aligned_addr });
+            self.last_violation = ViolationInfo{
+                .violation_type = .NonAllocated,
+                .address = aligned_addr,
+                .attempted_size = slice.len,
+                .page = null,
+            };
+            return Error.PageFault;
+        };
+        span.trace("Found page at 0x{X:0>8} with flags {s}", .{ page.page.address, @tagName(page.page.flags) });
+
+        // Check write permissions
+        if (page.page.flags == .ReadOnly) {
+            span.err("Write protection violation at 0x{X:0>8} - page is ReadOnly", .{address});
+            self.last_violation = ViolationInfo{
+                .violation_type = .WriteProtection,
+                .address = page.page.address,
+                .attempted_size = slice.len,
+                .page = page.page,
+            };
+            return Error.PageFault;
+        }
+
+        // Check if write would cross page boundary
+        const offset = address - page.page.address;
+        const end_offset = offset + slice.len;
+        span.trace("Write range: offset 0x{X} to 0x{X} (page size: 0x{X})", .{ offset, end_offset, Z_P });
+
+        if (end_offset > Z_P) {
+            span.err("Cross-page write detected - write would span page boundary", .{});
+            return Error.CrossPageWrite;
+        }
+
+        // Write slice to page data
+        @memcpy(page.page.data[offset..][0..slice.len], slice);
+
+        if (slice.len <= 64) {
+            span.trace("Written data: {any}", .{std.fmt.fmtSliceHexLower(slice)});
+        } else {
+            span.trace("First 64 bytes: {any}", .{std.fmt.fmtSliceHexLower(slice[0..@min(64, slice.len)])});
+        }
+        span.debug("Successfully wrote {d} bytes", .{slice.len});
     }
 
     /// Initilialize a slice to memory not cross-page, will err on cross page

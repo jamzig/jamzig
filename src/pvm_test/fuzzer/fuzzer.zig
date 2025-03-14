@@ -353,12 +353,15 @@ pub const PVMFuzzer = struct {
         defer exec_ctx.deinit(self.allocator);
 
         // Register host call handler
-        try exec_ctx.registerHostCall(self.allocator, 0, struct {
-            pub fn func(ctx: *PVM.ExecutionContext) PVM.HostCallResult {
+        var host_calls_map = std.AutoHashMapUnmanaged(u32, PVM.HostCallFn){};
+        defer host_calls_map.deinit(self.allocator);
+        try host_calls_map.put(self.allocator, 0, struct {
+            pub fn func(ctx: *PVM.ExecutionContext, _: *anyopaque) PVM.HostCallResult {
                 _ = ctx;
                 return .play;
             }
         }.func);
+        exec_ctx.setHostCalls(&host_calls_map);
 
         // Limit PVM allocations
         exec_ctx.memory.heap_allocation_limit = 8;
@@ -432,7 +435,18 @@ pub const PVMFuzzer = struct {
 
         // Main execution loop
         const initial_gas = exec_ctx.gas;
-        while (true) {
+        // FIXME: for now gas is 0 so we need to limit with max_iteration when gas is introduced again we can remove
+        var max_iterations = initial_gas;
+        while (true) : (max_iterations -= 1) {
+            if (max_iterations == 0) {
+                return FuzzResult{
+                    .seed = seed,
+                    .status = .{ .terminal = .out_of_gas },
+                    .gas_used = initial_gas -| exec_ctx.gas,
+                    .was_mutated = will_mutate,
+                    .init_failed = false,
+                };
+            }
             // Execute one step in our PVM
             const current_pc = exec_ctx.pc;
             const current_instruction = try exec_ctx.decoder.decodeInstruction(current_pc);
@@ -490,7 +504,7 @@ pub const PVMFuzzer = struct {
             switch (step_result) {
                 .cont => continue,
                 .host_call => |host| {
-                    const handler = exec_ctx.host_calls.get(host.idx) orelse
+                    const handler = exec_ctx.host_calls.?.get(host.idx) orelse
                         return FuzzResult{
                         .seed = seed,
                         .status = .{ .terminal = .panic },
@@ -500,20 +514,27 @@ pub const PVMFuzzer = struct {
                     };
 
                     // Execute host call
-                    const result = handler(&exec_ctx);
+                    const dummy_ctx = struct {};
+                    const result = handler(&exec_ctx, @ptrCast(@constCast(&dummy_ctx)));
                     switch (result) {
                         .play => {
                             exec_ctx.pc = host.next_pc;
                             continue;
                         },
-                        .page_fault => |addr| {
-                            return FuzzResult{
-                                .seed = seed,
-                                .status = .{ .terminal = .{ .page_fault = addr } },
-                                .gas_used = initial_gas - exec_ctx.gas,
-                                .was_mutated = will_mutate,
-                                .init_failed = false,
-                            };
+                        .terminal => |term| switch (term) {
+                            .page_fault => |addr| {
+                                return FuzzResult{
+                                    .seed = seed,
+                                    .status = .{ .terminal = .{ .page_fault = addr } },
+                                    .gas_used = initial_gas - exec_ctx.gas,
+                                    .was_mutated = will_mutate,
+                                    .init_failed = false,
+                                };
+                            },
+                            else => {
+                                // FIXME: we can track more errors on hostcalls
+
+                            },
                         },
                     }
                 },

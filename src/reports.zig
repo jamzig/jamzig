@@ -9,6 +9,8 @@ const tracing = @import("tracing.zig");
 const trace = tracing.scoped(.reports);
 const guarantor_validation = @import("guarantor_validation.zig");
 
+const StateTransition = @import("state_delta.zig").StateTransition;
+
 /// Error types for report validation and processing
 pub const Error = error{
     BadCoreIndex,
@@ -49,9 +51,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
     pub fn validate(
         comptime params: @import("jam_params.zig").Params,
         allocator: std.mem.Allocator,
+        stx: *StateTransition(params),
         guarantees: types.GuaranteesExtrinsic,
-        slot: types.TimeSlot,
-        jam_state: *const state.JamStateView(params),
     ) !@This() {
         const span = trace.span(.validate_guarantees);
         defer span.deinit();
@@ -204,13 +205,13 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             defer slot_span.deinit();
             slot_span.debug("Validating report slot {d} against current slot {d} for core {d}", .{
                 guarantee.slot,
-                slot,
+                stx.time.current_slot,
                 guarantee.report.core_index,
             });
 
             // Validate report slot is not in future
-            if (guarantee.slot > slot) {
-                slot_span.err("Report slot {d} is in the future (current: {d})", .{ guarantee.slot, slot });
+            if (guarantee.slot > stx.time.current_slot) {
+                slot_span.err("Report slot {d} is in the future (current: {d})", .{ guarantee.slot, stx.time.current_slot });
                 return Error.FutureReportSlot;
             }
 
@@ -218,7 +219,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             defer rotation_span.deinit();
 
             // Check rotation period according to graypaper 11.27
-            const current_rotation = @divFloor(slot, params.validator_rotation_period);
+            const current_rotation = @divFloor(stx.time.current_slot, params.validator_rotation_period);
             const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
             const is_current_rotation = (current_rotation == report_rotation);
 
@@ -244,7 +245,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             const anchor_span = span.child(.validate_anchor);
             defer anchor_span.deinit();
 
-            if (jam_state.beta.?.getBlockInfoByHash(guarantee.report.context.anchor)) |binfo| {
+            const beta: *const state.Beta = try stx.ensure(.beta);
+            if (beta.getBlockInfoByHash(guarantee.report.context.anchor)) |binfo| {
                 anchor_span.debug("Found anchor block, validating roots", .{});
                 anchor_span.trace("Block info - hash: {s}, state root: {s}", .{
                     std.fmt.fmtSliceHexLower(&binfo.header_hash),
@@ -307,20 +309,55 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             }
 
             // Check service ID exists
-            for (guarantee.report.results) |result| {
-                if (jam_state.delta.?.getAccount(result.service_id)) |service| {
-                    // Validate code hash matches
-                    if (!std.mem.eql(u8, &service.code_hash, &result.code_hash)) {
-                        return Error.BadCodeHash;
-                    }
+            {
+                const service_span = span.child(.validate_services);
+                defer service_span.deinit();
+                service_span.debug("Validating {d} service results", .{guarantee.report.results.len});
 
-                    // Check gas limits
-                    if (result.accumulate_gas < service.min_gas_accumulate) {
-                        return Error.ServiceItemGasTooLow;
+                const delta: *const state.Delta = try stx.ensure(.delta);
+                for (guarantee.report.results, 0..) |result, i| {
+                    const result_span = service_span.child(.validate_service_result);
+                    defer result_span.deinit();
+
+                    result_span.debug("Validating service ID {d} for result {d}", .{ result.service_id, i });
+                    result_span.trace("Code hash: {s}, gas: {d}", .{
+                        std.fmt.fmtSliceHexLower(&result.code_hash),
+                        result.accumulate_gas,
+                    });
+
+                    if (delta.getAccount(result.service_id)) |service| {
+                        result_span.debug("Found service account, validating code hash and gas", .{});
+                        result_span.trace("Service code hash: {s}, min gas: {d}", .{
+                            std.fmt.fmtSliceHexLower(&service.code_hash),
+                            service.min_gas_accumulate,
+                        });
+
+                        // Validate code hash matches
+                        if (!std.mem.eql(u8, &service.code_hash, &result.code_hash)) {
+                            result_span.err("Code hash mismatch - expected: {s}, got: {s}", .{
+                                std.fmt.fmtSliceHexLower(&service.code_hash),
+                                std.fmt.fmtSliceHexLower(&result.code_hash),
+                            });
+                            return Error.BadCodeHash;
+                        }
+
+                        // Check gas limits
+                        if (result.accumulate_gas < service.min_gas_accumulate) {
+                            result_span.err("Insufficient gas: {d} < minimum {d}", .{
+                                result.accumulate_gas,
+                                service.min_gas_accumulate,
+                            });
+                            return Error.ServiceItemGasTooLow;
+                        }
+
+                        result_span.debug("Service validation successful", .{});
+                    } else {
+                        result_span.err("Service ID {d} not found", .{result.service_id});
+                        return Error.BadServiceId;
                     }
-                } else {
-                    return Error.BadServiceId;
                 }
+
+                service_span.debug("All service validations passed", .{});
             }
 
             // Check core is not engaged
@@ -330,81 +367,215 @@ pub const ValidatedGuaranteeExtrinsic = struct {
 
             // Validate report prerequisites exist
             // TODO: move this to recent_blocks
-            for (guarantee.report.context.prerequisites) |prereq| {
-                var found_prereq = false;
-                outer: for (jam_state.beta.?.blocks.items) |block| {
-                    for (block.work_reports) |report| {
-                        if (std.mem.eql(u8, &report.hash, &prereq)) {
-                            found_prereq = true;
-                            break :outer;
+            {
+                const prereq_span = span.child(.validate_prerequisites);
+                defer prereq_span.deinit();
+
+                prereq_span.debug("Validating {d} prerequisites", .{guarantee.report.context.prerequisites.len});
+
+                for (guarantee.report.context.prerequisites, 0..) |prereq, i| {
+                    const single_prereq_span = prereq_span.child(.validate_prerequisite);
+                    defer single_prereq_span.deinit();
+
+                    single_prereq_span.debug("Checking prerequisite {d}: {s}", .{ i, std.fmt.fmtSliceHexLower(&prereq) });
+
+                    var found_prereq = false;
+
+                    // First check in recent blocks
+                    {
+                        const blocks_span = single_prereq_span.child(.check_recent_blocks);
+                        defer blocks_span.deinit();
+
+                        blocks_span.debug("Searching in {d} recent blocks", .{beta.blocks.items.len});
+
+                        outer: for (beta.blocks.items, 0..) |block, block_idx| {
+                            blocks_span.trace("Checking block {d} with {d} reports", .{ block_idx, block.work_reports.len });
+
+                            for (block.work_reports, 0..) |report, report_idx| {
+                                blocks_span.trace("Comparing with report {d}: {s}", .{ report_idx, std.fmt.fmtSliceHexLower(&report.hash) });
+
+                                if (std.mem.eql(u8, &report.hash, &prereq)) {
+                                    blocks_span.debug("Found prerequisite in block {d}, report {d}", .{ block_idx, report_idx });
+                                    found_prereq = true;
+                                    break :outer;
+                                }
+                            }
+                        }
+
+                        if (!found_prereq) {
+                            blocks_span.debug("Prerequisite not found in recent blocks", .{});
                         }
                     }
-                }
 
-                // walk the guarantees to see if the prereq is there
-                for (guarantees.data) |g| {
-                    if (std.mem.eql(u8, &g.report.package_spec.hash, &prereq)) {
-                        found_prereq = true;
-                        break;
+                    // If not found in blocks, check current guarantees
+                    if (!found_prereq) {
+                        const guarantees_span = single_prereq_span.child(.check_current_guarantees);
+                        defer guarantees_span.deinit();
+
+                        guarantees_span.debug("Searching in {d} current guarantees", .{guarantees.data.len});
+
+                        for (guarantees.data, 0..) |g, g_idx| {
+                            guarantees_span.trace("Comparing with guarantee {d}: {s}", .{ g_idx, std.fmt.fmtSliceHexLower(&g.report.package_spec.hash) });
+
+                            if (std.mem.eql(u8, &g.report.package_spec.hash, &prereq)) {
+                                guarantees_span.debug("Found prerequisite in current guarantee {d}", .{g_idx});
+                                found_prereq = true;
+                                break;
+                            }
+                        }
+
+                        if (!found_prereq) {
+                            guarantees_span.debug("Prerequisite not found in current guarantees", .{});
+                        }
                     }
+
+                    if (!found_prereq) {
+                        single_prereq_span.err("Prerequisite {d} not found: {s}", .{ i, std.fmt.fmtSliceHexLower(&prereq) });
+                        return Error.DependencyMissing;
+                    }
+
+                    single_prereq_span.debug("Prerequisite {d} validated successfully", .{i});
                 }
 
-                if (!found_prereq) {
-                    return Error.DependencyMissing;
-                }
+                prereq_span.debug("All prerequisites validated successfully", .{});
             }
 
             // Verify segment root lookup is valid
             // TODO: move this to recent_blocks
-            for (guarantee.report.segment_root_lookup) |segment| {
-                var found_package = false;
-                var matching_segment_root = false;
+            {
+                const segment_span = span.child(.validate_segment_roots);
+                defer segment_span.deinit();
 
-                // First check recent blocks
-                outer: for (jam_state.beta.?.blocks.items) |block| {
-                    for (block.work_reports) |report| {
-                        if (std.mem.eql(u8, &report.hash, &segment.work_package_hash)) {
-                            found_package = true;
-                            // TODO: Validate segment root matches
-                            // We would need access to the actual segment root from history
+                segment_span.debug("Validating {d} segment root lookups", .{guarantee.report.segment_root_lookup.len});
 
-                            for (block.work_reports) |reported_work_package| {
-                                if (std.mem.eql(u8, &reported_work_package.exports_root, &segment.segment_tree_root)) {
+                for (guarantee.report.segment_root_lookup, 0..) |segment, i| {
+                    const lookup_span = segment_span.child(.validate_segment_lookup);
+                    defer lookup_span.deinit();
+
+                    lookup_span.debug("Validating segment lookup {d}: package hash {s}", .{
+                        i,
+                        std.fmt.fmtSliceHexLower(&segment.work_package_hash),
+                    });
+                    lookup_span.trace("Segment tree root: {s}", .{
+                        std.fmt.fmtSliceHexLower(&segment.segment_tree_root),
+                    });
+
+                    var found_package = false;
+                    var matching_segment_root = false;
+
+                    // First check recent blocks
+                    {
+                        const blocks_span = lookup_span.child(.check_recent_blocks);
+                        defer blocks_span.deinit();
+
+                        blocks_span.debug("Searching in {d} recent blocks", .{beta.blocks.items.len});
+
+                        outer: for (beta.blocks.items, 0..) |block, block_idx| {
+                            blocks_span.trace("Checking block {d} with {d} reports", .{
+                                block_idx,
+                                block.work_reports.len,
+                            });
+
+                            for (block.work_reports, 0..) |report, report_idx| {
+                                blocks_span.trace("Comparing with report {d}: {s}", .{
+                                    report_idx,
+                                    std.fmt.fmtSliceHexLower(&report.hash),
+                                });
+
+                                if (std.mem.eql(u8, &report.hash, &segment.work_package_hash)) {
+                                    blocks_span.debug("Found matching package in block {d}, report {d}", .{
+                                        block_idx,
+                                        report_idx,
+                                    });
+                                    found_package = true;
+
+                                    // Check segment root
+                                    blocks_span.trace("Checking segment root against exports root: {s}", .{
+                                        std.fmt.fmtSliceHexLower(&report.exports_root),
+                                    });
+
+                                    for (block.work_reports) |reported_work_package| {
+                                        if (std.mem.eql(u8, &reported_work_package.exports_root, &segment.segment_tree_root)) {
+                                            blocks_span.debug("Found matching segment root", .{});
+                                            matching_segment_root = true;
+                                        }
+                                        break;
+                                    }
+                                    break :outer;
+                                }
+                            }
+                        }
+
+                        if (found_package) {
+                            blocks_span.debug("Package found in recent blocks, segment root match: {}", .{matching_segment_root});
+                        } else {
+                            blocks_span.debug("Package not found in recent blocks", .{});
+                        }
+                    }
+
+                    // If not found in blocks, check current guarantees
+                    if (!found_package) {
+                        const guarantees_span = lookup_span.child(.check_current_guarantees);
+                        defer guarantees_span.deinit();
+
+                        guarantees_span.debug("Searching in {d} current guarantees", .{guarantees.data.len});
+
+                        for (guarantees.data, 0..) |g, g_idx| {
+                            guarantees_span.trace("Comparing with guarantee {d}: {s}", .{
+                                g_idx,
+                                std.fmt.fmtSliceHexLower(&g.report.package_spec.hash),
+                            });
+
+                            if (std.mem.eql(u8, &g.report.package_spec.hash, &segment.work_package_hash)) {
+                                guarantees_span.debug("Found matching package in current guarantee {d}", .{g_idx});
+                                found_package = true;
+
+                                guarantees_span.trace("Checking segment root against exports root: {s}", .{
+                                    std.fmt.fmtSliceHexLower(&g.report.package_spec.exports_root),
+                                });
+
+                                if (std.mem.eql(u8, &g.report.package_spec.exports_root, &segment.segment_tree_root)) {
+                                    guarantees_span.debug("Found matching segment root", .{});
                                     matching_segment_root = true;
                                 }
                                 break;
                             }
-                            break :outer;
+                        }
+
+                        if (found_package) {
+                            guarantees_span.debug("Package found in current guarantees, segment root match: {}", .{matching_segment_root});
+                        } else {
+                            guarantees_span.debug("Package not found in current guarantees", .{});
                         }
                     }
-                }
 
-                // Then check current block's guarantees
-                for (guarantees.data) |g| {
-                    if (std.mem.eql(u8, &g.report.package_spec.hash, &segment.work_package_hash)) {
-                        found_package = true;
-                        if (std.mem.eql(u8, &g.report.package_spec.exports_root, &segment.segment_tree_root)) {
-                            matching_segment_root = true;
-                        }
-                        break;
+                    if (!found_package) {
+                        lookup_span.err("Package not found: {s}", .{
+                            std.fmt.fmtSliceHexLower(&segment.work_package_hash),
+                        });
+                        return Error.SegmentRootLookupInvalid;
                     }
+
+                    if (found_package and !matching_segment_root) {
+                        lookup_span.err("Segment root mismatch for package: {s}", .{
+                            std.fmt.fmtSliceHexLower(&segment.work_package_hash),
+                        });
+                        return Error.SegmentRootLookupInvalid;
+                    }
+
+                    lookup_span.debug("Segment lookup {d} validated successfully", .{i});
                 }
 
-                if (!found_package) {
-                    return Error.SegmentRootLookupInvalid;
-                }
-                if (found_package and !matching_segment_root) {
-                    return Error.SegmentRootLookupInvalid;
-                }
+                segment_span.debug("All segment root lookups validated successfully", .{});
             }
 
             // Check timeslot is within valid range
-            const min_guarantee_slot = (@divFloor(slot, params.validator_rotation_period) -| 1) * params.validator_rotation_period;
-            const max_guarantee_slot = slot;
+            const min_guarantee_slot = (@divFloor(stx.time.current_slot, params.validator_rotation_period) -| 1) * params.validator_rotation_period;
+            const max_guarantee_slot = stx.time.current_slot;
             rotation_span.debug("Validating guarantee time slot {d} is between {d} and {d}", .{ guarantee.slot, min_guarantee_slot, max_guarantee_slot });
 
             // Report must be from current  rotation
-            if (!(guarantee.slot >= min_guarantee_slot and guarantee.slot <= slot)) {
+            if (!(guarantee.slot >= min_guarantee_slot and guarantee.slot <= stx.time.current_slot)) {
                 rotation_span.err(
                     "Guarantee time slot out of range: {d} is NOT between {d} and {d}",
                     .{ guarantee.slot, min_guarantee_slot, max_guarantee_slot },
@@ -455,10 +626,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     guarantor_validation.validateGuarantors(
                         params,
                         allocator,
+                        stx,
                         guarantee,
-                        slot,
-                        jam_state.eta.?[2], // Current epoch entropy
-                        jam_state.eta.?[3], // Previous epoch entropy
                     ) catch |err| switch (err) {
                         error.InvalidGuarantorAssignment => return Error.WrongAssignment,
                         error.InvalidRotationPeriod => return Error.InvalidRotationPeriod,
@@ -470,6 +639,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 }
 
                 // Validate signatures
+                const kappa: *const state.Kappa = try stx.ensure(.kappa);
+                const lambda: *const state.Kappa = try stx.ensure(.lambda);
                 for (guarantee.signatures) |sig| {
                     const sig_detail_span = sig_span.child(.validate_signature);
                     defer sig_detail_span.deinit();
@@ -478,9 +649,9 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     sig_detail_span.trace("Signature: {s}", .{std.fmt.fmtSliceHexLower(&sig.signature)});
 
                     const validator = if (is_current_rotation)
-                        jam_state.kappa.?.validators[sig.validator_index] //
+                        kappa.validators[sig.validator_index] //
                     else
-                        jam_state.lambda.?.validators[sig.validator_index]; //
+                        lambda.validators[sig.validator_index]; //
 
                     const public_key = validator.ed25519;
                     sig_detail_span.trace("Validator public key: {s}", .{std.fmt.fmtSliceHexLower(&public_key)});
@@ -513,7 +684,8 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 const timeout_span = span.child(.validate_timeout);
                 defer timeout_span.deinit();
 
-                if (jam_state.rho.?.getReport(guarantee.report.core_index)) |entry| {
+                const rho: *const state.Rho(params.core_count) = try stx.ensure(.rho);
+                if (rho.getReport(guarantee.report.core_index)) |entry| {
                     timeout_span.debug("Checking core {d} timeout - last: {d}, current: {d}, period: {d}", .{
                         guarantee.report.core_index,
                         entry.assignment.timeout,
@@ -544,7 +716,11 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     std.fmt.fmtSliceHexLower(&guarantee.report.authorizer_hash),
                 });
 
-                if (!jam_state.alpha.?.isAuthorized(guarantee.report.core_index, guarantee.report.authorizer_hash)) {
+                const alpha: *const state.Alpha(
+                    params.core_count,
+                    params.max_authorizations_pool_items,
+                ) = try stx.ensure(.alpha);
+                if (!alpha.isAuthorized(guarantee.report.core_index, guarantee.report.authorizer_hash)) {
                     auth_span.err("Core {d} not authorized for hash {s}", .{
                         guarantee.report.core_index,
                         std.fmt.fmtSliceHexLower(&guarantee.report.authorizer_hash),
@@ -565,7 +741,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     std.fmt.fmtSliceHexLower(&package_hash),
                 });
 
-                const blocks = jam_state.beta.?.blocks;
+                const blocks = beta.blocks;
                 dup_span.debug("Comparing against {d} blocks", .{blocks.items.len});
                 for (blocks.items, 0..) |block, block_idx| {
                     const block_span = dup_span.child(.check_block);
@@ -592,6 +768,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 }
                 dup_span.debug("No duplicates found for package hash", .{});
             }
+            // TODO: should we add this?
             // // Check sufficient guarantors
             // if (guarantee.signatures.len < params.validators_super_majority) {
             //     return Error.InsufficientGuarantees;
@@ -618,14 +795,12 @@ pub const Result = struct {
 pub fn processGuaranteeExtrinsic(
     comptime params: @import("jam_params.zig").Params,
     allocator: std.mem.Allocator,
+    stx: *StateTransition(params),
     validated: ValidatedGuaranteeExtrinsic,
-    slot: types.TimeSlot,
-    jam_state: *const state.JamStateView(params),
-    rho: *state.Rho(params.core_count),
 ) !Result {
     const span = trace.span(.process_guarantees);
     defer span.deinit();
-    span.debug("Processing guarantees - count: {d}, slot: {d}", .{ validated.guarantees.len, slot });
+    span.debug("Processing guarantees - count: {d}, slot: {d}", .{ validated.guarantees.len, stx.time.current_slot });
     // span.trace("Current state root: {s}", .{
     //     std.fmt.fmtSliceHexLower(&jam_state.beta.?.blocks.items[0].state_root),
     // });
@@ -646,12 +821,13 @@ pub fn processGuaranteeExtrinsic(
 
         // Core can be reused, this is checked when validating the guarantee
         // Add report to Rho state
-        process_span.debug("Creating availability assignment with timeout {d}", .{slot});
+        process_span.debug("Creating availability assignment with timeout {d}", .{stx.time.current_slot});
         const assignment = types.AvailabilityAssignment{
             .report = try guarantee.report.deepClone(allocator),
-            .timeout = slot,
+            .timeout = stx.time.current_slot,
         };
 
+        var rho: *state.Rho(params.core_count) = try stx.ensure(.rho_prime);
         rho.setReport(
             core_index,
             assignment,
@@ -673,17 +849,20 @@ pub fn processGuaranteeExtrinsic(
             .exports_root = guarantee.report.package_spec.exports_root,
         });
 
-        const current_rotation = @divFloor(slot, params.validator_rotation_period);
+        const current_rotation = @divFloor(stx.time.current_slot, params.validator_rotation_period);
         const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
 
         const is_current_rotation = (current_rotation == report_rotation);
 
         // Track reporters and update Pi stats
+
+        const kappa: *const types.ValidatorSet = try stx.ensure(.kappa);
+        const lambda: *const types.ValidatorSet = try stx.ensure(.lambda);
         for (guarantee.signatures) |sig| {
             const validator = if (is_current_rotation)
-                jam_state.kappa.?.validators[sig.validator_index]
+                kappa.validators[sig.validator_index]
             else
-                jam_state.lambda.?.validators[sig.validator_index];
+                lambda.validators[sig.validator_index];
 
             try reporters.append(validator.ed25519);
 

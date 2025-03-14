@@ -18,7 +18,7 @@ pub fn transition(
     stx: *StateTransition(params),
     extrinsic: types.AssurancesExtrinsic,
     parent_hash: types.HeaderHash,
-) !void {
+) !assurances.AvailableAssignments {
     const span = trace.span(.assurances);
     defer span.deinit();
 
@@ -31,14 +31,20 @@ pub fn transition(
         kappa.*,
     );
 
+    // Register updated validator stats
+    const pi: *state.Pi = try stx.ensure(.pi_prime);
+    for (validated.items()) |assurance| {
+        var stats = try pi.getValidatorStats(assurance.validator_index);
+        stats.updateAvailabilityAssurances(1);
+    }
+
     const pending_reports = try stx.ensureT(state.Rho(params.core_count), .rho_prime);
 
-    var result = try assurances.processAssuranceExtrinsic(
+    return try assurances.processAssuranceExtrinsic(
         params,
         allocator,
         validated,
         stx.time.current_slot,
         pending_reports,
     );
-    defer result.deinit(allocator);
 }

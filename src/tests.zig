@@ -1,4 +1,6 @@
 comptime {
+    _ = @import("itertools.zig");
+
     _ = @import("jamtestvectors/loader.zig");
     _ = @import("jamtestvectors/safrole.zig");
     _ = @import("jamtestvectors/codec.zig");
@@ -10,6 +12,8 @@ comptime {
     _ = @import("jamtestvectors/assurances.zig");
     _ = @import("jamtestvectors/fisher_yates.zig");
     _ = @import("jamtestvectors/authorizations.zig");
+    _ = @import("jamtestvectors/accumulate.zig");
+    _ = @import("jamtestvectors/preimages.zig");
 
     _ = @import("codec.zig");
     _ = @import("codec_test.zig");
@@ -30,9 +34,13 @@ comptime {
     _ = @import("pvm/decoder.zig");
 
     _ = @import("pvm_test.zig");
+    _ = @import("pvm_fuzz_test.zig");
     _ = @import("pvm_test/fuzzer/test.zig");
     _ = @import("pvm_test/fuzzer/program_generator.zig");
     _ = @import("pvm_test/fuzzer/polkavm_ffi.zig");
+
+    _ = @import("pvm_invocations/accumulate.zig");
+    _ = @import("pvm_invocations/accumulate_test.zig");
 
     _ = @import("merkle.zig");
     _ = @import("merkle_test.zig");
@@ -67,6 +75,7 @@ comptime {
     _ = @import("state_format/safrole_state.zig"); // TODO: rename to gamma
 
     _ = @import("services.zig");
+    _ = @import("services_snapshot.zig");
     _ = @import("services_priviledged.zig");
 
     _ = @import("recent_blocks.zig");
@@ -94,6 +103,12 @@ comptime {
     _ = @import("accumulated_reports.zig");
 
     _ = @import("validator_stats.zig");
+
+    _ = @import("accumulate.zig");
+    _ = @import("accumulate_test.zig");
+
+    _ = @import("preimages.zig");
+    _ = @import("preimages_test.zig");
 
     _ = @import("jamtestnet.zig");
     _ = @import("jamtestnet/parsers/jamduna/state_snapshot.zig");

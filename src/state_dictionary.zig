@@ -442,8 +442,17 @@ pub const DictEntry = struct {
     value: []const u8,
     metadata: ?DictMetadata = null,
 
+    pub fn deepClone(self: *const DictEntry, allocator: std.mem.Allocator) !DictEntry {
+        return DictEntry{
+            .key = self.key,
+            .value = try allocator.dupe(u8, self.value),
+            .metadata = self.metadata,
+        };
+    }
+
     pub fn deinit(self: *DictEntry, allocator: std.mem.Allocator) void {
         allocator.free(self.value);
+        self.* = undefined;
     }
 };
 
@@ -451,7 +460,7 @@ pub const MerklizationDictionary = struct {
     entries: std.AutoHashMap([32]u8, DictEntry),
 
     // FIX: move these entries to a shared type file
-    const MerkleEntry = @import("merkle.zig").Entry;
+    pub const MerkleEntry = @import("merkle.zig").Entry;
 
     pub fn init(allocator: std.mem.Allocator) MerklizationDictionary {
         return .{
@@ -487,6 +496,15 @@ pub const MerklizationDictionary = struct {
         };
         std.mem.sort(MerkleEntry, slice, Context{}, Context.lessThan);
         return slice;
+    }
+
+    /// Puts an DictEntry in the dictionary, deallocates an existing one
+    /// takes ownership of the entry
+    pub fn put(self: *MerklizationDictionary, entry: DictEntry) !void {
+        // Put or replace the entry
+        if (try self.entries.fetchPut(entry.key, entry)) |existing| {
+            @constCast(&existing.value).deinit(self.entries.allocator);
+        }
     }
 
     pub fn deinit(self: *MerklizationDictionary) void {

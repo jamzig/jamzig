@@ -49,17 +49,25 @@ pub const SeedGenerator = struct {
         return self.randomIntRange(u8, 0, 12);
     }
 
-    /// Generate a random u64 immediate value
-    /// Uses a weighted distribution to favor smaller values
+    /// Generate a random u32 immediate value
+    /// favours large values
     pub fn randomImmediate(self: *SeedGenerator) u32 {
-        // 70% chance of small value (0-255)
-        // 20% chance of medium value (256-65535)
-        // 10% chance of large value (65536-u32.max)
         const roll = self.randomIntRange(u8, 0, 99);
         return switch (roll) {
-            0...69 => self.randomIntRange(u32, 0, 255),
-            70...89 => self.randomIntRange(u32, 256, 65535),
-            else => self.randomIntRange(u32, 65536, std.math.maxInt(u32)),
+            0...10 => self.randomIntRange(u32, 0, 255),
+            11...50 => self.randomIntRange(u32, 256, std.math.maxInt(u32) - 0x100000),
+            else => self.randomIntRange(u32, std.math.maxInt(u32) - 0x100000, std.math.maxInt(u32)),
+        };
+    }
+
+    /// Generate a random u64 value
+    /// favours large values
+    pub fn randomRegisterValue(self: *SeedGenerator) u64 {
+        const roll = self.randomIntRange(u8, 0, 99);
+        return switch (roll) {
+            0...10 => self.randomIntRange(u64, 0, 255),
+            11...50 => self.randomIntRange(u64, 256, std.math.maxInt(u32) - 0x100000),
+            else => self.randomIntRange(u64, std.math.maxInt(u32) - 0x100000, std.math.maxInt(u32)),
         };
     }
 

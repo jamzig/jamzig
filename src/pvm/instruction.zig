@@ -484,45 +484,132 @@ pub const InstructionWithArgs = struct {
         address: u64,
         size: u8,
         isWrite: bool,
+        isIndirect: bool,
     };
+
+    pub fn getMemoryAccessInd(self: *const InstructionWithArgs, registers: *[13]u64) !MemoryAccess {
+        return switch (self.instruction) {
+
+            // Indirect load operations
+            .load_ind_u8, .load_ind_i8 => .{
+                .address = self.args.TwoRegOneImm.immediate + registers[self.args.TwoRegOneImm.second_register_index],
+                .size = 1,
+                .isWrite = false,
+                .isIndirect = true,
+            },
+            .load_ind_u16, .load_ind_i16 => .{
+                .address = self.args.TwoRegOneImm.immediate + registers[self.args.TwoRegOneImm.second_register_index],
+                .size = 2,
+                .isWrite = false,
+                .isIndirect = true,
+            },
+            .load_ind_u32, .load_ind_i32 => .{
+                .address = self.args.TwoRegOneImm.immediate + registers[self.args.TwoRegOneImm.second_register_index],
+                .size = 4,
+                .isWrite = false,
+                .isIndirect = true,
+            },
+            .load_ind_u64 => .{
+                .address = self.args.TwoRegOneImm.immediate + registers[self.args.TwoRegOneImm.second_register_index],
+                .size = 8,
+                .isWrite = false,
+                .isIndirect = true,
+            },
+
+            // Indirect store operations
+            .store_ind_u8 => .{
+                .address = self.args.TwoRegOneImm.immediate + registers[self.args.TwoRegOneImm.second_register_index],
+                .size = 1,
+                .isWrite = true,
+                .isIndirect = true,
+            },
+            .store_ind_u16 => .{
+                .address = self.args.TwoRegOneImm.immediate + registers[self.args.TwoRegOneImm.second_register_index],
+                .size = 2,
+                .isWrite = true,
+                .isIndirect = true,
+            },
+            .store_ind_u32 => .{
+                .address = self.args.TwoRegOneImm.immediate + registers[self.args.TwoRegOneImm.second_register_index],
+                .size = 4,
+                .isWrite = true,
+                .isIndirect = true,
+            },
+            .store_ind_u64 => .{
+                .address = self.args.TwoRegOneImm.immediate + registers[self.args.TwoRegOneImm.second_register_index],
+                .size = 8,
+                .isWrite = true,
+                .isIndirect = true,
+            },
+
+            // Indirect immediate store operations
+            .store_imm_ind_u8 => .{
+                .address = self.args.OneRegTwoImm.first_immediate + registers[self.args.OneRegTwoImm.register_index],
+                .size = 1,
+                .isWrite = true,
+                .isIndirect = true,
+            },
+            .store_imm_ind_u16 => .{
+                .address = self.args.OneRegTwoImm.first_immediate + registers[self.args.OneRegTwoImm.register_index],
+                .size = 2,
+                .isWrite = true,
+                .isIndirect = true,
+            },
+            .store_imm_ind_u32 => .{
+                .address = self.args.OneRegTwoImm.first_immediate + registers[self.args.OneRegTwoImm.register_index],
+                .size = 4,
+                .isWrite = true,
+                .isIndirect = true,
+            },
+            .store_imm_ind_u64 => .{
+                .address = self.args.OneRegTwoImm.first_immediate + registers[self.args.OneRegTwoImm.register_index],
+                .size = 8,
+                .isWrite = true,
+                .isIndirect = true,
+            },
+
+            // Non-memory instructions
+            else => return error.NotInAccess,
+        };
+    }
 
     pub fn getMemoryAccess(self: *const InstructionWithArgs) ?MemoryAccess {
         return switch (self.instruction) {
             // Load operations
-            .load_u8, .load_i8 => .{ .address = self.args.OneRegOneImm.immediate, .size = 1, .isWrite = false },
-            .load_u16, .load_i16 => .{ .address = self.args.OneRegOneImm.immediate, .size = 2, .isWrite = false },
-            .load_u32, .load_i32 => .{ .address = self.args.OneRegOneImm.immediate, .size = 4, .isWrite = false },
-            .load_u64 => .{ .address = self.args.OneRegOneImm.immediate, .size = 8, .isWrite = false },
+            .load_u8, .load_i8 => .{ .address = self.args.OneRegOneImm.immediate, .size = 1, .isWrite = false, .isIndirect = false },
+            .load_u16, .load_i16 => .{ .address = self.args.OneRegOneImm.immediate, .size = 2, .isWrite = false, .isIndirect = false },
+            .load_u32, .load_i32 => .{ .address = self.args.OneRegOneImm.immediate, .size = 4, .isWrite = false, .isIndirect = false },
+            .load_u64 => .{ .address = self.args.OneRegOneImm.immediate, .size = 8, .isWrite = false, .isIndirect = false },
 
             // Indirect load operations
-            .load_ind_u8, .load_ind_i8 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 1, .isWrite = false },
-            .load_ind_u16, .load_ind_i16 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 2, .isWrite = false },
-            .load_ind_u32, .load_ind_i32 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 4, .isWrite = false },
-            .load_ind_u64 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 8, .isWrite = false },
+            .load_ind_u8, .load_ind_i8 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 1, .isWrite = false, .isIndirect = true },
+            .load_ind_u16, .load_ind_i16 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 2, .isWrite = false, .isIndirect = true },
+            .load_ind_u32, .load_ind_i32 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 4, .isWrite = false, .isIndirect = true },
+            .load_ind_u64 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 8, .isWrite = false, .isIndirect = true },
 
             // Store operations
-            .store_u8 => .{ .address = self.args.OneRegOneImm.immediate, .size = 1, .isWrite = true },
-            .store_u16 => .{ .address = self.args.OneRegOneImm.immediate, .size = 2, .isWrite = true },
-            .store_u32 => .{ .address = self.args.OneRegOneImm.immediate, .size = 4, .isWrite = true },
-            .store_u64 => .{ .address = self.args.OneRegOneImm.immediate, .size = 8, .isWrite = true },
+            .store_u8 => .{ .address = self.args.OneRegOneImm.immediate, .size = 1, .isWrite = true, .isIndirect = false },
+            .store_u16 => .{ .address = self.args.OneRegOneImm.immediate, .size = 2, .isWrite = true, .isIndirect = false },
+            .store_u32 => .{ .address = self.args.OneRegOneImm.immediate, .size = 4, .isWrite = true, .isIndirect = false },
+            .store_u64 => .{ .address = self.args.OneRegOneImm.immediate, .size = 8, .isWrite = true, .isIndirect = false },
 
             // Immediate store operations
-            .store_imm_u8 => .{ .address = self.args.TwoImm.first_immediate, .size = 1, .isWrite = true },
-            .store_imm_u16 => .{ .address = self.args.TwoImm.first_immediate, .size = 2, .isWrite = true },
-            .store_imm_u32 => .{ .address = self.args.TwoImm.first_immediate, .size = 4, .isWrite = true },
-            .store_imm_u64 => .{ .address = self.args.TwoImm.first_immediate, .size = 8, .isWrite = true },
+            .store_imm_u8 => .{ .address = self.args.TwoImm.first_immediate, .size = 1, .isWrite = true, .isIndirect = false },
+            .store_imm_u16 => .{ .address = self.args.TwoImm.first_immediate, .size = 2, .isWrite = true, .isIndirect = false },
+            .store_imm_u32 => .{ .address = self.args.TwoImm.first_immediate, .size = 4, .isWrite = true, .isIndirect = false },
+            .store_imm_u64 => .{ .address = self.args.TwoImm.first_immediate, .size = 8, .isWrite = true, .isIndirect = false },
 
             // Indirect store operations
-            .store_ind_u8 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 1, .isWrite = true },
-            .store_ind_u16 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 2, .isWrite = true },
-            .store_ind_u32 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 4, .isWrite = true },
-            .store_ind_u64 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 8, .isWrite = true },
+            .store_ind_u8 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 1, .isWrite = true, .isIndirect = true },
+            .store_ind_u16 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 2, .isWrite = true, .isIndirect = true },
+            .store_ind_u32 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 4, .isWrite = true, .isIndirect = true },
+            .store_ind_u64 => .{ .address = self.args.TwoRegOneImm.immediate, .size = 8, .isWrite = true, .isIndirect = true },
 
             // Indirect immediate store operations
-            .store_imm_ind_u8 => .{ .address = self.args.OneRegTwoImm.first_immediate, .size = 1, .isWrite = true },
-            .store_imm_ind_u16 => .{ .address = self.args.OneRegTwoImm.first_immediate, .size = 2, .isWrite = true },
-            .store_imm_ind_u32 => .{ .address = self.args.OneRegTwoImm.first_immediate, .size = 4, .isWrite = true },
-            .store_imm_ind_u64 => .{ .address = self.args.OneRegTwoImm.first_immediate, .size = 8, .isWrite = true },
+            .store_imm_ind_u8 => .{ .address = self.args.OneRegTwoImm.first_immediate, .size = 1, .isWrite = true, .isIndirect = true },
+            .store_imm_ind_u16 => .{ .address = self.args.OneRegTwoImm.first_immediate, .size = 2, .isWrite = true, .isIndirect = true },
+            .store_imm_ind_u32 => .{ .address = self.args.OneRegTwoImm.first_immediate, .size = 4, .isWrite = true, .isIndirect = true },
+            .store_imm_ind_u64 => .{ .address = self.args.OneRegTwoImm.first_immediate, .size = 8, .isWrite = true, .isIndirect = true },
 
             // Non-memory instructions
             else => null,
