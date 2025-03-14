@@ -380,6 +380,7 @@ pub fn parallelizedAccumulation(
         }
 
         // Process this service
+        // TODO: https://github.com/zig-gamedev/zjobs maybe of interest
         var result = try singleServiceAccumulation(
             params,
             allocator,
