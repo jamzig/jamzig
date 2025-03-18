@@ -4,7 +4,7 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const state_delta = @import("state_delta.zig");
 
-const WorkReportAndDeps = state.available_reports.WorkReportAndDeps;
+const WorkReportAndDeps = state.reports_ready.WorkReportAndDeps;
 const Params = @import("jam_params.zig").Params;
 
 // Add tracing import
