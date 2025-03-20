@@ -183,7 +183,7 @@ test "Xi - simulation across multiple epochs" {
     }
 }
 
-test "Xi - deep clone with active packages" {
+test "Xi - deep clone with active reports" {
     const test_epoch_size = 4;
     const allocator = testing.allocator;
 

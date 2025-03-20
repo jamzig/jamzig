@@ -303,7 +303,7 @@ pub fn processAccumulateReports(
     const core_gas = @as(u64, params.gas_alloc_accumulation) * @as(u64, params.core_count);
 
     // Get the privileges state to access free services
-    const chi = try stx.ensure(.chi_prime);
+    const chi: *state.Chi = try stx.ensure(.chi_prime);
 
     // Add the sum of gas values for free services
     var free_services_gas: u64 = 0;
@@ -312,7 +312,7 @@ pub fn processAccumulateReports(
         free_services_gas += entry.value_ptr.*;
     }
 
-    // Take the maximum
+    // Take the maximum, to ensure free services can execute
     const calculated_gas = core_gas + free_services_gas;
     if (calculated_gas > gas_limit) {
         gas_limit = calculated_gas;
