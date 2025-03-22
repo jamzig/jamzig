@@ -126,10 +126,10 @@
             ];
             
 
-        # https://github.com/ziglang/zig/issues/18998
-        shellHook = ''
-          unset NIX_CFLAGS_COMPILE
-        '';
+        # # https://github.com/ziglang/zig/issues/18998
+        # shellHook = ''
+        #   unset NIX_CFLAGS_COMPILE
+        # '';
       };
     }));
 }
