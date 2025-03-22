@@ -48,6 +48,7 @@ pub const Error = error{
 pub const ValidatedGuaranteeExtrinsic = struct {
     guarantees: []const types.ReportGuarantee,
 
+    // See: https://graypaper.fluffylabs.dev/#/85129da/146302146302?v=0.6.3
     pub fn validate(
         comptime params: @import("jam_params.zig").Params,
         allocator: std.mem.Allocator,
@@ -360,7 +361,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 service_span.debug("All service validations passed", .{});
             }
 
-            // Check core is not engaged
+            // TODO: Check core is not engaged
             // if (jam_state.rho.?.isEngaged(guarantee.report.core_index)) {
             //     return Error.CoreEngaged;
             // }
@@ -494,12 +495,9 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                                         std.fmt.fmtSliceHexLower(&report.exports_root),
                                     });
 
-                                    for (block.work_reports) |reported_work_package| {
-                                        if (std.mem.eql(u8, &reported_work_package.exports_root, &segment.segment_tree_root)) {
-                                            blocks_span.debug("Found matching segment root", .{});
-                                            matching_segment_root = true;
-                                        }
-                                        break;
+                                    if (std.mem.eql(u8, &report.exports_root, &segment.segment_tree_root)) {
+                                        blocks_span.debug("Found matching segment root", .{});
+                                        matching_segment_root = true;
                                     }
 
                                     break :outer;
@@ -515,7 +513,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     }
 
                     // If not found in blocks, check current guarantees
-                    if (!found_package or true) {
+                    if (!found_package) {
                         const guarantees_span = lookup_span.child(.check_current_guarantees);
                         defer guarantees_span.deinit();
 
@@ -528,22 +526,15 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                             });
 
                             // std.debug.print("{}\n", .{types.fmt.format(g)});
+                            if (std.mem.eql(u8, &segment.work_package_hash, &g.report.package_spec.hash)) {
+                                found_package = true;
 
-                            for (g.report.segment_root_lookup) |srl| {
-                                if (std.mem.eql(u8, &srl.work_package_hash, &segment.work_package_hash)) {
-                                    guarantees_span.debug("Found matching package in current guarantee {d} segment_root_lookup", .{g_idx});
-                                    found_package = true;
-
-                                    guarantees_span.trace("Checking segment root against exports root: {s}", .{
-                                        std.fmt.fmtSliceHexLower(&srl.segment_tree_root),
-                                    });
-
-                                    if (std.mem.eql(u8, &srl.segment_tree_root, &segment.segment_tree_root)) {
-                                        guarantees_span.debug("Found matching segment root", .{});
-                                        matching_segment_root = true;
-                                    }
-                                    break :scan_guarantees;
+                                // if we have this work report in our guarantees lets look if this work_package
+                                // export the correct root
+                                if (std.mem.eql(u8, &g.report.package_spec.exports_root, &segment.segment_tree_root)) {
+                                    matching_segment_root = true;
                                 }
+                                break :scan_guarantees;
                             }
                         }
 
