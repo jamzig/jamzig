@@ -102,10 +102,10 @@
       apps.build = env.app commonDeps "zig build \"$@\"";
 
       # nix run .#test
-      apps.test = env.app commonDeps "zig build test \"$@\"";
+      apps.test = env.app commonDeps "zig build test -fqemu \"$@\"";
 
       # nix run .#test-ffi
-      apps.test-ffi = env.app commonDeps "zig build test-ffi \"$@\"";
+      apps.test-ffi = env.app commonDeps "zig build test-ffi -fqemu \"$@\"";
 
       # nix run .#docs
       apps.docs = env.app commonDeps "zig build docs \"$@\"";
