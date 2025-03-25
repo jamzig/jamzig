@@ -22,13 +22,25 @@
 
       zls-pkg = zls.packages.${system}.default;
 
+      # Define the rust toolchain once so it can be reused
+      rustToolchain = pkgs.rust-bin.beta.latest.default.override {
+        targets = [ 
+          "x86_64-unknown-linux-gnu"
+          "x86_64-unknown-linux-musl"
+          "aarch64-unknown-linux-gnu"
+          "aarch64-unknown-linux-musl"
+          "aarch64-apple-darwin"
+          "x86_64-apple-darwin"
+          "powerpc64-unknown-linux-gnu"
+        ];
+        extensions = ["rust-analyzer" "rust-src"];
+      };
+
       # Zig flake helper
       # Check the flake.nix in zig2nix project for more options:
       # <https://github.com/Cloudef/zig2nix/blob/master/flake.nix>
       env = zig2nix.outputs.zig-env.${system} {
         zig =  zig2nix.outputs.packages.${system}.zig-0_14_0;
-
-
       };
     in with builtins; with env.pkgs.lib; rec {
       # Produces clean binaries meant to be ship'd outside of nix
@@ -39,18 +51,7 @@
         # Packages required for compiling
         nativeBuildInputs =  [
             # Cross compilation tools: Brackets are important here
-            (pkgs.rust-bin.beta.latest.default.override {
-              targets = [ 
-                "x86_64-unknown-linux-gnu"
-                "x86_64-unknown-linux-musl"
-                "aarch64-unknown-linux-gnu"
-                "aarch64-unknown-linux-musl"
-                "aarch64-apple-darwin"
-                "x86_64-apple-darwin"
-                "powerpc64-unknown-linux-gnu"
-              ];
-              extensions = ["rust-analyzer" "rust-src"];
-            })
+            rustToolchain
             pkgs.qemu
           ];
 
@@ -81,6 +82,12 @@
         zigWrapperLibs = attrs.buildInputs or [];
       });
 
+      # Common dependencies for all app environments
+      commonDeps = [
+        rustToolchain
+        pkgs.qemu
+      ];
+
       # For bundling with nix bundle for running outside of nix
       # example: https://github.com/ralismark/nix-appimage
       apps.bundle = {
@@ -89,19 +96,19 @@
       };
 
       # nix run .
-      apps.default = env.app [] "zig build run \"$@\"";
+      apps.default = env.app commonDeps "zig build run \"$@\"";
 
       # nix run .#build
-      apps.build = env.app [] "zig build \"$@\"";
+      apps.build = env.app commonDeps "zig build \"$@\"";
 
       # nix run .#test
-      apps.test = env.app [] "zig build test \"$@\"";
+      apps.test = env.app commonDeps "zig build test \"$@\"";
 
       # nix run .#test-ffi
-      apps.test-ffi = env.app [] "zig build test-ffi \"$@\"";
+      apps.test-ffi = env.app commonDeps "zig build test-ffi \"$@\"";
 
       # nix run .#docs
-      apps.docs = env.app [] "zig build docs \"$@\"";
+      apps.docs = env.app commonDeps "zig build docs \"$@\"";
 
       # nix run .#deps
       apps.deps = env.showExternalDeps;
@@ -118,6 +125,7 @@
           ++ packages.default.buildInputs
           ++ packages.default.zigWrapperBins
           ++ packages.default.zigWrapperLibs
+          ++ commonDeps
           ++ [
               zls-pkg # Zig language server
             ];
