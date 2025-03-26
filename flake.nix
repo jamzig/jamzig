@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
-    zls.url = "github:zigtools/zls?ref=master";
+    zls.url = "github:zigtools/zls/7485feeeda45d1ad09422ae83af73307ab9e6c9e"; # v0.14.0
     zig2nix.url = "github:Cloudef/zig2nix";
 
     rust.url = "github:oxalica/rust-overlay";
@@ -20,7 +20,13 @@
             overlays = [ rust.overlays.default ];
       };
 
-      zls-pkg = zls.packages.${system}.default;
+
+      zig-pkg = zig2nix.outputs.packages.${system}.zig-0_14_0;
+
+      zls-pkg = zls.packages.${system}.zls.overrideAttrs (old: {
+                  nativeBuildInputs = [ zig-pkg ];
+      });
+
 
       # Define the rust toolchain once so it can be reused
       rustToolchain = pkgs.rust-bin.beta.latest.default.override {
@@ -40,7 +46,7 @@
       # Check the flake.nix in zig2nix project for more options:
       # <https://github.com/Cloudef/zig2nix/blob/master/flake.nix>
       env = zig2nix.outputs.zig-env.${system} {
-        zig =  zig2nix.outputs.packages.${system}.zig-0_14_0;
+        zig =  zig-pkg;
       };
     in with builtins; with env.pkgs.lib; rec {
       # Produces clean binaries meant to be ship'd outside of nix
@@ -49,14 +55,14 @@
         src = cleanSource ./.;
 
         # Packages required for compiling
-        nativeBuildInputs =  [
+        nativeBuildInputs = with env.pkgs; [
             # Cross compilation tools: Brackets are important here
             rustToolchain
             pkgs.qemu
           ];
 
         # Packages required for linking
-        buildInputs =  [];
+        buildInputs = with env.pkgs.ForTarget target;  [];
 
         # Smaller binaries and avoids shipping glibc.
         zigPreferMusl = true;
@@ -105,7 +111,7 @@
       apps.test = env.app commonDeps "zig build test -fqemu \"$@\"";
 
       # nix run .#test-ffi
-      apps.test-ffi = env.app commonDeps "zig build test-ffi -fqemu \"$@\"";
+      apps.test-ffi = env.app commonDeps "zig build test-ffi \"$@\"";
 
       # nix run .#docs
       apps.docs = env.app commonDeps "zig build docs \"$@\"";
@@ -120,15 +126,11 @@
       devShells.default = env.mkShell {
         # Packages required for compiling, linking and running
         # Libraries added here will be automatically added to the LD_LIBRARY_PATH and PKG_CONFIG_PATH
-        nativeBuildInputs = []
-          ++ packages.default.nativeBuildInputs
-          ++ packages.default.buildInputs
-          ++ packages.default.zigWrapperBins
-          ++ packages.default.zigWrapperLibs
-          ++ commonDeps
-          ++ [
-              zls-pkg # Zig language server
-            ];
+        nativeBuildInputs = [ 
+            zls-pkg 
+            rustToolchain
+            pkgs.qemu
+          ];
             
 
         # Zig2Nix leaks these variables, for now just unset them
