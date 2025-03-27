@@ -61,7 +61,7 @@ pub fn transition(
 
     // Acummulate tickets when within submission window
     const gamma = try stx.ensure(.gamma);
-    const gamma_prime = try stx.ensure(.gamma_prime);
+    const gamma_prime: *state.Gamma(params.validators_count, params.epoch_length) = try stx.ensure(.gamma_prime);
     if (stx.time.isInTicketSubmissionPeriod()) {
         span.debug("Processing ticket submissions", .{});
         const merged_gamma_a = try mergeTicketsIntoTicketAccumulatorGammaA(
@@ -82,7 +82,7 @@ pub fn transition(
             .entropy = eta_prime[1],
             .tickets_entropy = eta_prime[2],
             .validators = try gamma_prime.k
-                .getBandersnatchPublicKeys(stx.allocator),
+                .getEpochMarkValidatorsKeys(stx.allocator),
         };
     }
 

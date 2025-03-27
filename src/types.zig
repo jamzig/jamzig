@@ -300,6 +300,7 @@ pub const WorkResult = struct {
             .payload_hash = self.payload_hash,
             .accumulate_gas = self.accumulate_gas,
             .result = try self.result.deepClone(allocator),
+            .refine_load = self.refine_load,
         };
     }
 
@@ -416,6 +417,7 @@ pub const WorkReport = struct {
                 }
                 break :blk cloned_results;
             },
+            .stats = self.stats,
         };
     }
 
@@ -590,6 +592,18 @@ pub const ValidatorSet = struct {
         var keys = try allocator.alloc(BandersnatchPublic, self.validators.len);
         for (self.validators, 0..) |validator, i| {
             keys[i] = validator.ed25519;
+        }
+        return keys;
+    }
+
+    /// Returns an allocated slice of EpochMarkValidatorsKeys from all validators
+    pub fn getEpochMarkValidatorsKeys(self: ValidatorSet, allocator: std.mem.Allocator) ![]EpochMarkValidatorsKeys {
+        var keys = try allocator.alloc(EpochMarkValidatorsKeys, self.validators.len);
+        for (self.validators, 0..) |validator, i| {
+            keys[i] = EpochMarkValidatorsKeys{
+                .bandersnatch = validator.bandersnatch,
+                .ed25519 = validator.ed25519,
+            };
         }
         return keys;
     }
