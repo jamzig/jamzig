@@ -188,23 +188,23 @@ pub const Pi = struct {
 
         // Deep clone each ValidatorStats instance from current epoch
         for (self.current_epoch_stats.items) |stats| {
-            try current_stats.append(try stats.deepClone(allocator));
+            try current_stats.append(stats);
         }
 
         // Deep clone each ValidatorStats instance from previous epoch
         for (self.previous_epoch_stats.items) |stats| {
-            try previous_stats.append(try stats.deepClone(allocator));
+            try previous_stats.append(stats);
         }
 
         // Deep clone each CoreActivityRecord
         for (self.core_stats.items) |stats| {
-            try cores.append(try stats.deepClone(allocator));
+            try cores.append(stats);
         }
 
         // Deep clone each ServiceActivityRecord
         var service_iter = self.service_stats.iterator();
         while (service_iter.next()) |entry| {
-            try services.put(entry.key_ptr.*, try entry.value_ptr.*.deepClone(allocator));
+            try services.put(entry.key_ptr.*, entry.value_ptr.*);
         }
 
         // Return new Pi instance with cloned data

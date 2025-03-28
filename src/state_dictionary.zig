@@ -757,7 +757,7 @@ pub fn buildStateMerklizationDictionaryWithConfig(
 
         // Pi (13)
         const pi_key = constructSimpleByteKey(13);
-        var pi_managed = try getOrInitManaged(allocator, &state.pi, .{ allocator, params.validators_count });
+        var pi_managed = try getOrInitManaged(allocator, &state.pi, .{ allocator, params.validators_count, params.core_count });
         defer pi_managed.deinit(allocator);
         const pi_value = try encodeAndOwnSlice(allocator, state_encoder.encodePi, .{pi_managed.ptr});
         try map.put(pi_key, .{

@@ -10,7 +10,7 @@ const Pi = validator_statistics.Pi;
 const ValidatorIndex = types.ValidatorIndex;
 const ValidatorStats = validator_statistics.ValidatorStats;
 const CoreActivityRecord = validator_statistics.CoreActivityRecord;
-const ServiceStatsEntry = validator_statistics.ServiceStatsEntry;
+const ServiceActivityRecord = validator_statistics.ServiceActivityRecord;
 
 pub fn encode(self: *const Pi, writer: anytype) !void {
     const span = trace.span(.encode);
@@ -38,8 +38,8 @@ pub fn encode(self: *const Pi, writer: anytype) !void {
     // Encode service statistics
     const service_span = span.child(.service_stats);
     defer service_span.deinit();
-    service_span.debug("Encoding service stats for {} services", .{self.service_stats.items.len});
-    try encodeServiceStats(self.service_stats.items, writer);
+    service_span.debug("Encoding service stats for {} services", .{self.service_stats.count()});
+    try encodeServiceStats(self.service_stats, writer);
 
     span.debug("Successfully completed Pi encoding", .{});
 }
@@ -114,67 +114,69 @@ fn encodeCoreStats(stats: []CoreActivityRecord, writer: anytype) !void {
     span.debug("Successfully encoded all core stats", .{});
 }
 
-fn encodeServiceStats(stats: []ServiceStatsEntry, writer: anytype) !void {
+fn encodeServiceStats(stats: std.AutoHashMap(types.ServiceId, ServiceActivityRecord), writer: anytype) !void {
     const span = trace.span(.encode_service_stats);
     defer span.deinit();
-    span.debug("Encoding service stats for {} services", .{stats.len});
+    span.debug("Encoding service stats for {} services", .{stats.count()});
 
     // First encode the number of services
-    const count = @as(u32, @truncate(stats.len));
+    const count = @as(u32, @truncate(stats.count()));
     try writer.writeInt(u32, count, .little);
 
-    for (stats, 0..) |entry, i| {
+    // Capture all service ids, and reserve capacity to avoid reallocations
+    var service_ids = try std.ArrayList(types.ServiceId).initCapacity(stats.allocator, stats.count());
+    defer service_ids.deinit();
+
+    var iterator = stats.keyIterator();
+    while (iterator.next()) |key_ptr| {
+        try service_ids.append(key_ptr.*);
+    }
+    std.sort.block(types.ServiceId, service_ids.items, {}, comptime std.sort.asc(types.ServiceId));
+
+    for (service_ids.items, 0..) |service_id, entry_index| {
+        const record = stats.get(service_id).?;
         const entry_span = span.child(.service_entry);
         defer entry_span.deinit();
-        entry_span.debug("Encoding stats for service {} (ID: {})", .{ i, entry.id });
+        entry_span.debug("Encoding stats for service {} (ID: {})", .{ entry_index, service_id });
 
         // Encode service ID
-        entry_span.trace("Service ID: {}", .{entry.id});
-        try writer.writeInt(u32, entry.id, .little);
-
-        const record = entry.record;
+        entry_span.trace("Service ID: {}", .{service_id});
+        try writer.writeInt(u32, service_id, .little);
 
         // Encode preimage stats
         entry_span.trace("Provided count: {}", .{record.provided_count});
         try writer.writeInt(u16, record.provided_count, .little);
-
         entry_span.trace("Provided size: {}", .{record.provided_size});
         try writer.writeInt(u32, record.provided_size, .little);
 
         // Encode refinement stats
         entry_span.trace("Refinement count: {}", .{record.refinement_count});
         try writer.writeInt(u32, record.refinement_count, .little);
-
         entry_span.trace("Refinement gas used: {}", .{record.refinement_gas_used});
         try writer.writeInt(u64, record.refinement_gas_used, .little);
 
         // Encode I/O stats
         entry_span.trace("Imports: {}", .{record.imports});
         try writer.writeInt(u32, record.imports, .little);
-
         entry_span.trace("Extrinsic count: {}", .{record.extrinsic_count});
         try writer.writeInt(u32, record.extrinsic_count, .little);
-
         entry_span.trace("Extrinsic size: {}", .{record.extrinsic_size});
         try writer.writeInt(u32, record.extrinsic_size, .little);
-
         entry_span.trace("Exports: {}", .{record.exports});
         try writer.writeInt(u32, record.exports, .little);
 
         // Encode accumulation stats
         entry_span.trace("Accumulate count: {}", .{record.accumulate_count});
         try writer.writeInt(u32, record.accumulate_count, .little);
-
         entry_span.trace("Accumulate gas used: {}", .{record.accumulate_gas_used});
         try writer.writeInt(u64, record.accumulate_gas_used, .little);
 
         // Encode transfer stats
         entry_span.trace("On transfers count: {}", .{record.on_transfers_count});
         try writer.writeInt(u32, record.on_transfers_count, .little);
-
         entry_span.trace("On transfers gas used: {}", .{record.on_transfers_gas_used});
         try writer.writeInt(u64, record.on_transfers_gas_used, .little);
     }
 
-    span.debug("Successfully encoded all service stats", .{});
+    span.debug("Successfully encoded all service stats in sorted order", .{});
 }

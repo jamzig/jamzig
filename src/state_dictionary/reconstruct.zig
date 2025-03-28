@@ -131,7 +131,7 @@ pub fn reconstructState(
                 13 => {
                     entry_span.debug("Decoding pi component (id={d})", .{key[0]});
                     var f = fbs(dict_entry.value);
-                    jam_state.pi = try state_decoding.pi.decode(params.validators_count, f.reader(), allocator);
+                    jam_state.pi = try state_decoding.pi.decode(params.validators_count, params.core_count, f.reader(), allocator);
                 },
                 14 => {
                     entry_span.debug("Decoding theta component (id={d})", .{key[0]});
