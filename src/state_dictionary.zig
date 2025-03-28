@@ -374,6 +374,7 @@ pub const MerklizationDictionaryDiff = struct {
         self.entries.items;
     }
 
+    // TODO: camelCase
     pub fn has_changes(self: *const MerklizationDictionaryDiff) bool {
         return self.entries.items.len > 0;
     }

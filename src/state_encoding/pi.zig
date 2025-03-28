@@ -3,7 +3,7 @@ const types = @import("../types.zig");
 const encoder = @import("../codec/encoder.zig");
 const codec = @import("../codec.zig");
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("../tracing.zig").scoped(.pi_encoding);
 
 const validator_statistics = @import("../validator_stats.zig");
 const Pi = validator_statistics.Pi;
@@ -81,8 +81,8 @@ fn encodeCoreStats(stats: []CoreActivityRecord, writer: anytype) !void {
     defer span.deinit();
     span.debug("Encoding core stats for {} cores", .{stats.len});
 
-    // First encode the number of cores
-    try codec.writeInteger(stats.len, writer);
+    // // First encode the number of cores
+    // try codec.writeInteger(stats.len, writer);
 
     for (stats, 0..) |entry, i| {
         const entry_span = span.child(.core_entry);

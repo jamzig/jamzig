@@ -11,7 +11,7 @@ const ServiceActivityRecord = validator_statistics.ServiceActivityRecord;
 const ValidatorIndex = @import("../types.zig").ValidatorIndex;
 const ServiceId = @import("../types.zig").ServiceId;
 
-const trace = @import("../tracing.zig").scoped(.state_decoding);
+const trace = @import("../tracing.zig").scoped(.pi_decoding);
 
 pub fn decode(validators_count: u32, core_count: u32, reader: anytype, allocator: std.mem.Allocator) !Pi {
     const span = trace.span(.decode);
@@ -44,6 +44,9 @@ fn decodeEpochStats(validators_count: u32, reader: anytype, stats: *std.ArrayLis
     const span = trace.span(.decode_epoch_stats);
     defer span.deinit();
     span.debug("Decoding stats for {d} validators", .{validators_count});
+
+    // We are building our core stats from scratch
+    stats.clearRetainingCapacity();
 
     for (0..validators_count) |i| {
         const validator_span = span.child(.validator);
@@ -83,6 +86,9 @@ fn decodeCoreStats(core_count: u32, reader: anytype, stats: *std.ArrayList(CoreA
     const span = trace.span(.decode_core_stats);
     defer span.deinit();
     span.debug("Decoding stats for {d} cores", .{core_count});
+
+    // We are building our core stats from scratch
+    stats.clearRetainingCapacity();
 
     for (0..core_count) |i| {
         const core_span = span.child(.core);

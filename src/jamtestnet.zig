@@ -156,7 +156,17 @@ pub fn runStateTransitionTests(
                 allocator,
                 &dict,
             );
-            // std.debug.print("Genesis state initialized\n", .{});
+
+            var current_state_mdict = try current_state.?.buildStateMerklizationDictionary(allocator);
+            defer current_state_mdict.deinit();
+            var genesis_state_diff = try current_state_mdict.diff(&dict);
+            defer genesis_state_diff.deinit();
+
+            if (genesis_state_diff.has_changes()) {
+                std.debug.print("Genesis State Reconstruction Failed. Dict -> Reconstruct -> Dict not symmetrical. Check state encode and decode\n", .{});
+                std.debug.print("{}", .{genesis_state_diff});
+                return error.GenesisStateDiff;
+            }
         }
 
         // Ensure we are starting with the same roots.
