@@ -1054,6 +1054,7 @@ pub const ReportGuarantee = struct {
 };
 
 pub const GuaranteesExtrinsic = struct {
+    // TODO: rename to items
     data: []ReportGuarantee, // SIZE(0..cores_count)
 
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {

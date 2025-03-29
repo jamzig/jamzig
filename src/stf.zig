@@ -61,10 +61,9 @@ pub fn stateTransition(
         try new_block.header.getEntropy(),
     );
 
-    try validator_stats.transition(
+    try validator_stats.transition_epoch(
         params,
         state_transition,
-        new_block,
     );
 
     // => rho_dagger
@@ -135,6 +134,12 @@ pub fn stateTransition(
         new_block.extrinsic.tickets,
     );
     defer markers.deinit(allocator);
+
+    try validator_stats.transition(
+        params,
+        state_transition,
+        new_block,
+    );
 
     return state_transition;
 }
