@@ -50,13 +50,24 @@ pub const ValidatorStats = struct {
 };
 
 pub const CoreActivityRecord = struct {
+    // Total gas consumed by core for reported work. Includes all
+    // refinement and authorizations.
     gas_used: U64,
+    // Number of segments imported from DA made by core for reported work.
     imports: U16,
+    // Total number of extrinsics used by core for reported work.
     extrinsic_count: U16,
+    //  Total size of extrinsics used by core for reported work.
     extrinsic_size: U32,
+    // Number of segments exported into DA made by core for reported work.
     exports: U16,
+    // The work-bundle size. This is the size of data being placed into Audits DA by the core.
     bundle_size: U32,
+    // Amount of bytes which are placed into either Audits or Segments DA.
+    // This includes the work-bundle (including all extrinsics and
+    // imports) as well as all (exported) segments.
     da_load: U32,
+    // Number of validators which formed super-majority for assurance.
     popularity: U16,
 
     pub fn init() CoreActivityRecord {

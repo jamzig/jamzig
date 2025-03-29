@@ -52,9 +52,30 @@ pub fn transition(
     }
 
     // Since we have validated guarantees here lets run through them
-    // and update appropiate core statistics. TODO: put this in it own statistics stf
+    // and update appropiate core statistics.
+    // TODO: put this in it own statistics stf
     for (validated.guarantees) |guarantee| {
         const core_stats = try pi.getCoreStats(guarantee.report.core_index);
-        core_stats.bundle_size += guarantee.report.package_spec.length + (params.segmentSizeInOctets() * try std.math.divCeil(u32, guarantee.report.package_spec.exports_count * 65, 64));
+
+        const report = guarantee.report;
+
+        for (report.results) |r| {
+            core_stats.gas_used += r.refine_load.gas_used;
+            core_stats.imports += r.refine_load.imports;
+            core_stats.extrinsic_count += r.refine_load.extrinsic_count;
+            core_stats.extrinsic_size += r.refine_load.extrinsic_size;
+            core_stats.exports += r.refine_load.exports;
+
+            // This is set when we have an availability assurance
+            // core_stats.popularity += 0;
+        }
+
+        core_stats.bundle_size += report.package_spec.length;
+
+        // FIXME: These should be based on the ready reports, as this
+        // signals they are assured and thus loaded
+        core_stats.da_load += report.package_spec.exports_count +
+            (params.segmentSizeInOctets() *
+                try std.math.divCeil(u32, report.package_spec.exports_count * 65, 64));
     }
 }
