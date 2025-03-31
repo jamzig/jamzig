@@ -10,6 +10,7 @@ const WorkReportAndDeps = state.reports_ready.WorkReportAndDeps;
 const Params = @import("jam_params.zig").Params;
 const meta = @import("meta.zig");
 pub const ProcessAccumulationResult = @import("accumulate/execution.zig").ProcessAccumulationResult;
+pub const DeferredTransfer = @import("pvm_invocations/accumulate.zig").DeferredTransfer;
 
 // Add tracing import
 const trace = @import("tracing.zig").scoped(.accumulate);
@@ -365,51 +366,53 @@ pub fn processAccumulateReports(
 
     transfer_span.debug("Applying {d} deferred transfers", .{result.transfers.len});
 
-    // Get delta for service accounts
-    var delta_prime: *state.Delta = try stx.ensure(.delta_prime);
-
     // 12.24: Apply all deferred transfers to the service accounts
-    // δ‡ = {s ↦ ΨT(δ†, τ′, s, R(t, s)) | (s ↦ a) ∈ δ†}
+    var transfer_stats = std.AutoHashMap(types.ServiceId, @import("accumulate/execution.zig").TransferServiceStats).init(allocator);
+    errdefer transfer_stats.deinit();
     if (result.transfers.len > 0) {
         transfer_span.debug("Processing transfers for destination services", .{});
 
-        // Group transfers by destination service
-        var grouped_transfers = std.AutoHashMap(types.ServiceId, std.ArrayList(types.ServiceId)).init(allocator);
-        defer meta.deinit.deinitHashMapValuesAndMap(stx.allocator, grouped_transfers);
+        var grouped_transfers_by_dest = std.AutoHashMap(types.ServiceId, std.ArrayList(DeferredTransfer)).init(allocator);
+        defer meta.deinit.deinitHashMapValuesAndMap(stx.allocator, grouped_transfers_by_dest);
 
-        // Process transfers for each destination service
         for (result.transfers) |transfer| {
             transfer_span.trace("Transfer: {d} -> {d}, amount: {d}", .{ transfer.sender, transfer.destination, transfer.amount });
 
-            // Get or create the list for this destination
-            var entry = try grouped_transfers.getOrPut(transfer.destination);
+            var entry = try grouped_transfers_by_dest.getOrPut(transfer.destination);
             if (!entry.found_existing) {
-                entry.value_ptr.* = std.ArrayList(types.ServiceId).init(allocator);
+                entry.value_ptr.* = std.ArrayList(DeferredTransfer).init(allocator);
             }
 
-            // Add the sender to the list
-            try entry.value_ptr.append(transfer.sender);
+            try entry.value_ptr.append(transfer);
+        }
 
-            // TODO: call ΨT
-            // For now, we just log the transfers
+        // Get delta for service accounts
+        const delta_prime: *state.Delta = try stx.ensure(.delta_prime);
 
-            // Sender balance is updated in the transfer function
-            // if (delta_prime.getAccount(transfer.sender)) |sender_account| {
-            //     if (sender_account.balance >= transfer.amount) {
-            //         sender_account.balance -= transfer.amount;
-            //         transfer_span.trace("Reduced balance of sender {d} by {d}", .{ transfer.sender, transfer.amount });
-            //     } else {
-            //         transfer_span.err("Sender {d} has insufficient balance {d} for transfer {d}", .{ transfer.sender, sender_account.balance, transfer.amount });
-            //     }
-            // }
+        var iter = grouped_transfers_by_dest.iterator();
+        while (iter.next()) |entry| {
+            const service_id = entry.key_ptr.*;
+            const deferred_transfers = entry.value_ptr.*.items;
 
-            // Update recipient balance
-            if (delta_prime.getAccount(transfer.destination)) |dest_account| {
-                dest_account.balance += transfer.amount;
-                transfer_span.trace("Increased balance of destination {d} by {d}", .{ transfer.destination, transfer.amount });
-            } else {
-                transfer_span.err("Destination account {d} not found", .{transfer.destination});
-            }
+            var context = @import("pvm_invocations/ontransfer.zig").OnTransferContext{
+                .service_id = entry.key_ptr.*,
+                .service_accounts = @import("services_snapshot.zig").DeltaSnapshot.init(delta_prime),
+                .allocator = allocator,
+            };
+            const res = try @import("pvm_invocations/ontransfer.zig").invoke(
+                params,
+                allocator,
+                &context,
+                stx.time.current_slot,
+                service_id,
+                deferred_transfers,
+            );
+
+            // Store transfer stats
+            try transfer_stats.put(service_id, .{
+                .gas_used = res.gas_used,
+                .transfer_count = @intCast(deferred_transfers.len),
+            });
         }
 
         transfer_span.debug("Transfers applied successfully", .{});
@@ -535,8 +538,6 @@ pub fn processAccumulateReports(
     // Initialize stats maps BEFORE deferring their deinit
     var accumulation_stats = std.AutoHashMap(types.ServiceId, @import("accumulate/execution.zig").AccumulationServiceStats).init(allocator);
     errdefer accumulation_stats.deinit();
-    var transfer_stats = std.AutoHashMap(types.ServiceId, @import("accumulate/execution.zig").TransferServiceStats).init(allocator);
-    errdefer transfer_stats.deinit();
 
     // Calculate I stats (Accumulation) - Eq 12.25
     stats_span.debug("Calculating I (Accumulation) statistics for {d} accumulated reports", .{accumulated.len});
@@ -559,21 +560,6 @@ pub fn processAccumulateReports(
             .accumulated_count = count,
         });
         stats_span.trace("Added I stats for service {d}: count={d}, gas={d}", .{ service_id, count, gas_used });
-    }
-
-    // Calculate X stats (Transfers) - Eq 12.30
-    stats_span.debug("Calculating X (Transfer) statistics for {d} transfers", .{result.transfers.len});
-    for (result.transfers) |transfer| {
-        const dest_id = transfer.destination;
-        var entry = try transfer_stats.getOrPut(dest_id);
-        if (!entry.found_existing) {
-            entry.value_ptr.* = .{ .transfer_count = 0, .gas_used = 0 };
-            stats_span.trace("Initializing transfer stats for service {d}", .{dest_id});
-        }
-        entry.value_ptr.transfer_count += 1;
-        // Summing the gas *limit* provided in the deferred transfer, as actual used gas isn't known here.
-        entry.value_ptr.gas_used += transfer.gas_limit;
-        stats_span.trace("Updated transfer stats for service {d}: count={d}, gas_allocated={d}", .{ dest_id, entry.value_ptr.transfer_count, entry.value_ptr.gas_used });
     }
 
     span.debug("Process accumulate reports completed successfully", .{});

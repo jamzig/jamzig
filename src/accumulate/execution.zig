@@ -23,8 +23,8 @@ pub const AccumulationServiceStats = struct {
 
 /// Statistics for transfers targeting a single service within a block (Part of 'X' stats).
 pub const TransferServiceStats = struct {
-    transfer_count: u32,
-    gas_used: u64,
+    transfer_count: u32 = 0,
+    gas_used: u64 = 0,
 };
 
 /// Helper struct to hold service accumulation results

@@ -39,19 +39,11 @@ pub fn invoke(
     span.debug("Starting OnTransfer invocation for service {d}", .{service_id});
     span.debug("Time slot: {d}, Transfers count: {d}", .{ tau, transfers.len });
 
-    // Get the service account to which the transfers should be applied
-    const service_account = try context.service_accounts.getMutable(service_id) orelse {
-        span.err("Service {d} not found", .{service_id});
-        return error.ServiceNotFound;
-    };
-
-    span.debug("Found service account for ID {d}", .{service_id});
-
     // Skip execution if code hash is empty or there are no transfers
-    if (std.mem.eql(u8, &service_account.code_hash, &[_]u8{0} ** 32) or transfers.len == 0) {
+    if (transfers.len == 0) {
         span.debug("No code hash or no transfers, skipping execution", .{});
         return OnTransferResult{
-            .service_account = service_account,
+            .service_id = service_id,
             .gas_used = 0,
         };
     }
@@ -70,15 +62,15 @@ pub fn invoke(
     }
     span.debug("Total transfer amount: {d}", .{total_transfer_amount});
 
-    // Check if any transfer has a gas limit less than the service's minimum required gas (l in graypaper)
-    for (transfers) |transfer| {
-        if (transfer.gas_limit < service_account.min_gas_on_transfer) {
-            span.err("Transfer gas limit {d} is less than service minimum {d}", .{
-                transfer.gas_limit, service_account.min_gas_on_transfer,
-            });
-            return error.InsufficientGas;
-        }
-    }
+    // // Check if any transfer has a gas limit less than the service's minimum required gas (l in graypaper)
+    // for (transfers) |transfer| {
+    //     if (transfer.gas_limit < service_account.min_gas_on_transfer) {
+    //         span.err("Transfer gas limit {d} is less than service minimum {d}", .{
+    //             transfer.gas_limit, service_account.min_gas_on_transfer,
+    //         });
+    //         return error.InsufficientGas;
+    //     }
+    // }
 
     // Prepare on_transfer arguments
     span.debug("Preparing OnTransfer arguments", .{});
@@ -106,13 +98,25 @@ pub fn invoke(
 
     // Apply transfer balance to service before execution (as per the graypaper)
     span.debug("Applying transfer balance to service", .{});
-    var updated_service = try service_account.deepClone(allocator);
-    updated_service.balance += total_transfer_amount;
+
+    // Get the service account to which the transfers should be applied
+    const destination_account = try context.service_accounts.getMutable(service_id) orelse {
+        span.err("Service {d} not found", .{service_id});
+        return error.ServiceNotFound;
+    };
+
+    // Update the balance, and commit to the balance to services
+    span.debug("Found service account for ID {d}", .{service_id});
+    destination_account.balance += total_transfer_amount;
+    try context.service_accounts.commit();
 
     // Execute the PVM invocation
-    const code_preimage = service_account.getPreimage(service_account.code_hash) orelse {
-        span.err("Service code not available for hash: {s}", .{std.fmt.fmtSliceHexLower(&service_account.code_hash)});
-        return error.ServiceCodeNotAvailable;
+    const code_preimage = destination_account.getPreimage(destination_account.code_hash) orelse {
+        span.err("Service code not available for hash: {s}", .{std.fmt.fmtSliceHexLower(&destination_account.code_hash)});
+        return OnTransferResult{
+            .service_id = service_id,
+            .gas_used = 0,
+        };
     };
 
     // Now this has some metadata attached to it
@@ -153,13 +157,16 @@ pub fn invoke(
 
     pvm_span.debug("PVM invocation completed: {s}", .{@tagName(result.result)});
 
+    // Committing changes to service accounts
+    try context.service_accounts.commit();
+
     // Calculate gas used (u in graypaper)
     const gas_used = result.gas_used;
     span.debug("Gas used for invocation: {d}", .{gas_used});
 
     span.debug("OnTransfer invocation completed", .{});
     return OnTransferResult{
-        .service_account = service_account,
+        .service_id = service_id,
         .gas_used = gas_used,
     };
 }
@@ -168,7 +175,7 @@ pub fn invoke(
 pub const OnTransferResult = struct {
     /// Updated service account after applying transfers and executing on_transfer code
     /// we do not own this
-    service_account: *state.services.ServiceAccount,
+    service_id: types.ServiceId,
 
     /// Amount of gas consumed during execution
     gas_used: types.Gas,
