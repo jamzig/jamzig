@@ -177,6 +177,9 @@ pub fn runStateTransitionTests(
             &pre_state_root,
         );
 
+        // Print this
+        // std.debug.print("{s}\n", .{current_state.?});
+
         // std.debug.print("Executing state transition...\n", .{});
         var transition = try stf.stateTransition(
             params,

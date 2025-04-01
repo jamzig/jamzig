@@ -495,7 +495,7 @@ pub const Memory = struct {
 
         var memory = try Memory.initWithCapacity(
             allocator,
-            ro_pages,
+            read_only.len,
             heap_pages,
             input.len,
             stack_size_in_bytes,
