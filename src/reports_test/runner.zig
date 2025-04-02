@@ -164,8 +164,14 @@ pub fn runReportTest(comptime params: Params, allocator: std.mem.Allocator, test
                 };
 
                 // Verify state matches expected state
-                diff.expectFormattedEqual(*state.JamState(params), allocator, &expected_state, &current_state) catch {
+                diff.expectFormattedEqual(
+                    *state.JamState(params),
+                    allocator,
+                    &current_state,
+                    &expected_state,
+                ) catch {
                     std.debug.print("Mismatch: actual state != expected state\n", .{});
+                    std.debug.print("{}", .{expected_state});
                     return error.StateMismatch;
                 };
             } else |err| {

@@ -46,21 +46,6 @@ pub const CoresStatistics = struct {
 pub const ServicesStatisticsMapEntry = struct {
     id: types.ServiceId,
     record: state.validator_stats.ServiceActivityRecord,
-
-    pub fn decode(_: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
-        const codec = @import("../codec.zig");
-
-        // Read the service ID as a variable integer
-        const id = try codec.readInteger(reader);
-
-        // Decode the service activity record
-        const record = try codec.deserializeAlloc(state.validator_stats.ServiceActivityRecord, .{}, allocator, reader);
-
-        return @This(){
-            .id = @intCast(id),
-            .record = record,
-        };
-    }
 };
 
 pub const ServiceStatistics = struct {
