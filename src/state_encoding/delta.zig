@@ -27,8 +27,8 @@ pub fn encodeServiceAccountBase(account: *const ServiceAccount, writer: anytype)
     try writer.writeInt(u64, account.min_gas_on_transfer, .little); // a_m
 
     const storage_footprint = account.storageFootprint();
-    span.trace("Writing storage length (a_l): {d}", .{storage_footprint.a_l});
-    try writer.writeInt(u64, storage_footprint.a_l, .little); // a_l
+    span.trace("Writing storage length (a_l): {d}", .{storage_footprint.a_o});
+    try writer.writeInt(u64, storage_footprint.a_o, .little); // a_l
 
     // Write 4-byte items count (a_i)
     span.trace("Writing items count (a_i): {d}", .{storage_footprint.a_i});

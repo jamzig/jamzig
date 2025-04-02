@@ -8,7 +8,7 @@ const DeltaSnapshot = @import("../services_snapshot.zig").DeltaSnapshot;
 const ReturnCode = @import("host_calls.zig").ReturnCode;
 
 // Add tracing import
-const trace = @import("../tracing.zig").scoped(.general_host_calls);
+const trace = @import("../tracing.zig").scoped(.host_calls);
 
 /// Minimal context for general host calls
 pub const GeneralContext = struct {
@@ -23,9 +23,32 @@ pub const GeneralContext = struct {
 pub fn debugLog(
     exec_ctx: *PVM.ExecutionContext,
 ) PVM.HostCallResult {
-    _ = exec_ctx;
+    const span = trace.span(.host_call_debug_log);
+    defer span.deinit();
+
     // https://hackmd.io/@polkadot/jip1
-    std.debug.print("ecalli 100 log function called\n", .{});
+    const level = switch (exec_ctx.registers[7]) {
+        0 => "FATAL_ERROR",
+        1 => "WARNING",
+        2 => "INFO",
+        3 => "HELPFULL_INFO",
+        4 => "PENDANTIC",
+        else => "UNKOWN_LEVEL",
+    };
+    const target = if (exec_ctx.registers[8] == 0 and exec_ctx.registers[9] == 0)
+        ""
+    else
+        exec_ctx.memory.readSlice(@truncate(exec_ctx.registers[8]), exec_ctx.registers[9]) catch message: {
+            span.err("Could not access memory for target component", .{});
+            break :message "";
+        };
+
+    const message = exec_ctx.memory.readSlice(@truncate(exec_ctx.registers[10]), exec_ctx.registers[11]) catch {
+        span.err("Could not access memory for message component", .{});
+        return .play;
+    };
+
+    span.warn("DEBUGLOG {s} {s}: {s}", .{ level, target, message });
     return .play;
 }
 
@@ -436,7 +459,7 @@ pub fn infoService(
         .threshold_balance = fprint.a_t,
         .min_item_gas = service_account.?.min_gas_accumulate,
         .min_memo_gas = service_account.?.min_gas_on_transfer,
-        .total_storage_size = fprint.a_l,
+        .total_storage_size = fprint.a_o,
         .total_items = fprint.a_i,
     };
 

@@ -11,7 +11,7 @@ const OnTransferContext = @import("context.zig").OnTransferContext;
 const PVM = @import("../../pvm.zig").PVM;
 
 // Add tracing import
-const trace = @import("../../tracing.zig").scoped(.ontransfer);
+const trace = @import("../../tracing.zig").scoped(.host_calls);
 
 pub const HostCalls =
     struct {

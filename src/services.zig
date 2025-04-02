@@ -27,7 +27,6 @@ pub const Timeslot = types.TimeSlot;
 // Gp@9.3
 pub const StorageFootprint = struct {
     a_i: u32,
-    a_l: u64,
     a_o: u64,
     a_t: Balance,
 };
@@ -407,22 +406,21 @@ pub const ServiceAccount = struct {
         const a_i: u32 = (2 * self.preimage_lookups.count()) + self.storage.count();
         // a_l
         var plkeys = self.preimage_lookups.keyIterator();
-        var a_l: u64 = 0;
+        var a_o: u64 = 0;
         while (plkeys.next()) |plkey| {
-            a_l += 81 + plkey.length;
+            a_o += 81 + plkey.length;
         }
 
         var svals = self.storage.valueIterator();
         while (svals.next()) |value| {
-            a_l += 32 + @as(u64, @intCast(value.len));
+            a_o += 32 + @as(u64, @intCast(value.len));
         }
 
         // FIXME: this comes for JamParams
         // a_t
-        const a_t: Balance = B_S + B_I * a_i + B_L * a_l;
+        const a_t: Balance = B_S + B_I * a_i + B_L * a_o;
 
-        // TODO: remove a_l, is old name
-        return .{ .a_i = a_i, .a_l = a_l, .a_o = a_l, .a_t = a_t };
+        return .{ .a_i = a_i, .a_o = a_o, .a_t = a_t };
     }
 };
 

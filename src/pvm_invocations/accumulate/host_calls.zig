@@ -14,7 +14,7 @@ const ReturnCode = @import("../host_calls.zig").ReturnCode;
 const PVM = @import("../../pvm.zig").PVM;
 
 // Add tracing import
-const trace = @import("../../tracing.zig").scoped(.accumulate);
+const trace = @import("../../tracing.zig").scoped(.host_calls);
 
 pub fn HostCalls(params: Params) type {
     return struct {
