@@ -1,8 +1,6 @@
 const std = @import("std");
-
 const types = @import("../types.zig");
 const state = @import("../state.zig");
-
 const accumulate = @import("../accumulate.zig");
 
 const Params = @import("../jam_params.zig").Params;
@@ -10,12 +8,39 @@ const StateTransition = @import("../state_delta.zig").StateTransition;
 
 const trace = @import("../tracing.zig").scoped(.stf);
 
+/// This structure contains all the necessary data for the validator statistics
+/// state transition function, decoupled from the Block type.
+pub const ValidatorStatsInput = struct {
+    /// The validator index who produced the block
+    author_index: ?types.ValidatorIndex,
+    /// The list of work guarantees
+    guarantees: []const types.ReportGuarantee,
+    /// The list of availability assurances
+    assurances: []const types.AvailAssurance,
+    /// The number of tickets introduced in this block
+    tickets_count: u32,
+    /// The list of preimages
+    preimages: []const types.Preimage,
+
+    /// Create a ValidatorStatsInput from a Block
+    pub fn fromBlock(block: *const types.Block) ValidatorStatsInput {
+        return ValidatorStatsInput{
+            .author_index = block.header.author_index,
+            .guarantees = block.extrinsic.guarantees.data,
+            .assurances = block.extrinsic.assurances.data,
+            .tickets_count = @intCast(block.extrinsic.tickets.data.len),
+            .preimages = block.extrinsic.preimages.data,
+        };
+    }
+};
+
 pub const Error = error{};
 
+/// Modified transition function that takes ValidatorStatsInput instead of Block
 pub fn transition(
     comptime params: Params,
     stx: *StateTransition(params),
-    new_block: *const types.Block,
+    input: ValidatorStatsInput,
     ready_reports: []types.WorkReport,
     accumulation_stats: *const std.AutoHashMap(types.ServiceId, accumulate.execution.AccumulationServiceStats),
     transfer_stats: *const std.AutoHashMap(types.ServiceId, accumulate.execution.TransferServiceStats),
@@ -28,7 +53,7 @@ pub fn transition(
 
     // Since we have validated guarantees here lets run through them
     // and update appropiate core statistics.
-    for (new_block.extrinsic.guarantees.data) |guarantee| {
+    for (input.guarantees) |guarantee| {
         const core_stats = try pi.getCoreStats(guarantee.report.core_index);
 
         const report = guarantee.report;
@@ -47,7 +72,7 @@ pub fn transition(
     // Set the polpularity
     for (0..params.core_count) |core| {
         const core_stats = try pi.getCoreStats(@intCast(core));
-        for (new_block.extrinsic.assurances.data) |assurance| {
+        for (input.assurances) |assurance| {
             if (assurance.coreSetInBitfield(@intCast(core))) {
                 // This is set when we have an availability assurance
                 core_stats.popularity += 1;
@@ -63,13 +88,15 @@ pub fn transition(
                 try std.math.divCeil(u32, report.package_spec.exports_count * 65, 64));
     }
 
-    var stats = try pi.getValidatorStats(new_block.header.author_index);
-    stats.blocks_produced += 1;
-    stats.tickets_introduced += @intCast(new_block.extrinsic.tickets.data.len);
+    if (input.author_index) |author_index| {
+        var stats = try pi.getValidatorStats(author_index);
+        stats.blocks_produced += 1;
+        stats.tickets_introduced += input.tickets_count;
+    }
 
     // Eq 13.11: Preimages Introduced (provided_count, provided_size)
     // Depends on E_P (PreimagesExtrinsic)
-    for (new_block.extrinsic.preimages.data) |preimage| {
+    for (input.preimages) |preimage| {
         const service_stats = try pi.getOrCreateServiceStats(preimage.requester);
         service_stats.provided_count += 1;
         service_stats.provided_size += @intCast(preimage.blob.len);
@@ -77,7 +104,7 @@ pub fn transition(
 
     // Eq 13.12, 13.13, 13.15 (partially): Refinement Stats
     // Depends on E_G (GuaranteesExtrinsic -> WorkReports -> WorkResults)
-    for (new_block.extrinsic.guarantees.data) |guarantee| {
+    for (input.guarantees) |guarantee| {
         for (guarantee.report.results) |result| {
             const service_stats = try pi.getOrCreateServiceStats(result.service_id);
             // Eq 13.12 part 1: refinement_count
@@ -113,6 +140,20 @@ pub fn transition(
         service_stats.on_transfers_count += stats_X.transfer_count;
         service_stats.on_transfers_gas_used += stats_X.gas_used;
     }
+}
+
+/// Legacy transition function that uses a Block directly
+/// This is kept for backward compatibility
+pub fn transition_from_block(
+    comptime params: Params,
+    stx: *StateTransition(params),
+    new_block: *const types.Block,
+    ready_reports: []types.WorkReport,
+    accumulation_stats: *const std.AutoHashMap(types.ServiceId, accumulate.execution.AccumulationServiceStats),
+    transfer_stats: *const std.AutoHashMap(types.ServiceId, accumulate.execution.TransferServiceStats),
+) !void {
+    const input = ValidatorStatsInput.fromBlock(new_block);
+    return transition(params, stx, input, ready_reports, accumulation_stats, transfer_stats);
 }
 
 pub fn transition_epoch(

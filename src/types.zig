@@ -234,7 +234,6 @@ pub const WorkExecResult = union(enum(u8)) {
                 const length = try codec.readInteger(reader);
                 const data = try alloc.alloc(u8, length);
                 try reader.readNoEof(data);
-                std.debug.print("data: {}", .{std.fmt.fmtSliceHexLower(data)});
                 break :blk WorkExecResult{ .ok = data };
             },
             1 => WorkExecResult{ .out_of_gas = {} },
