@@ -15,7 +15,7 @@ pub fn processAccumulateReports(
     allocator: std.mem.Allocator,
     test_case: *const tvector.TestCase,
     base_state: *state.JamState(params),
-) !types.AccumulateRoot {
+) !accumulate.ProcessAccumulationResult {
     // Create a StateTransition using the provided base_state
     var stx = try state_delta.StateTransition(params).init(
         allocator,
@@ -74,7 +74,7 @@ pub fn runAccumulateTest(comptime params: Params, allocator: std.mem.Allocator, 
         },
         .ok => |expected_root| {
             if (process_result) |actual_root| {
-                if (!std.mem.eql(u8, &actual_root, &expected_root)) {
+                if (!std.mem.eql(u8, &actual_root.accumulate_root, &expected_root)) {
                     std.debug.print("Mismatch: actual root != expected root\n", .{});
                     return error.RootMismatch;
                 }

@@ -26,5 +26,6 @@ pub fn createEmptyWorkReport(id: [32]u8) WorkReport {
         .segment_root_lookup = &[_]types.SegmentRootLookupItem{},
         .auth_output = &[_]u8{},
         .results = &[_]types.WorkResult{},
+        .stats = .{ .auth_gas_used = 0 },
     };
 }

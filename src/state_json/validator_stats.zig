@@ -26,7 +26,7 @@ pub fn jsonStringifyPi(pi: *const Pi, jw: anytype) !void {
         const service_id_str = try std.fmt.allocPrint(pi.allocator, "{}", .{entry.key_ptr.*});
         defer pi.allocator.free(service_id_str);
         try jw.objectField(service_id_str);
-        try entry.value_ptr.*.jsonStringify(jw);
+        // try entry.value_ptr.*.jsonStringify(jw); // FIXME: redo this json thing
     }
     try jw.endObject();
 

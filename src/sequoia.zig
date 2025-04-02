@@ -430,7 +430,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 epoch_mark = .{
                     .entropy = self.state.eta.?[0],
                     .tickets_entropy = self.state.eta.?[1],
-                    .validators = try self.state.gamma.?.k.getBandersnatchPublicKeys(self.allocator), // TODO: this has to be gamma_k_prime
+                    .validators = try self.state.gamma.?.k.getEpochMarkValidatorsKeys(self.allocator), // TODO: this has to be gamma_k_prime
                 };
             }
 
