@@ -28,11 +28,12 @@ pub fn processAccumulateReports(
     try @import("../stf/time.zig").transition(params, &stx, test_case.input.slot);
 
     // Process the newly available reports
-    const results = try accumulate.processAccumulateReports(
+    var results = try accumulate.processAccumulateReports(
         params,
         &stx,
         test_case.input.reports,
     );
+    defer results.deinit(allocator);
 
     // Merge prime into base
     try stx.mergePrimeOntoBase();

@@ -132,7 +132,7 @@ pub fn stateTransition(
     );
     defer markers.deinit(allocator);
 
-    try validator_stats.transition(
+    try validator_stats.transitionFromBlock(
         params,
         state_transition,
         new_block,

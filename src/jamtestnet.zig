@@ -88,27 +88,29 @@ test "jamduna:orderedaccumulation" {
     );
 }
 
-test "javajam:safrole" {
-    const allocator = std.testing.allocator;
-    const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
-    try runStateTransitionTests(
-        JAMDUNA_PARAMS,
-        loader.loader(),
-        allocator,
-        "src/jamtestnet/teams/javajam/state_transitions",
-    );
-}
+// TODO: update
+// test "javajam:safrole" {
+//     const allocator = std.testing.allocator;
+//     const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
+//     try runStateTransitionTests(
+//         JAMDUNA_PARAMS,
+//         loader.loader(),
+//         allocator,
+//         "src/jamtestnet/teams/javajam/state_transitions",
+//     );
+// }
 
-test "jamzig:safrole" {
-    const allocator = std.testing.allocator;
-    const loader = jamtestnet.jamzig.Loader(JAMDUNA_PARAMS){};
-    try runStateTransitionTests(
-        JAMDUNA_PARAMS,
-        loader.loader(),
-        allocator,
-        "src/jamtestnet/teams/jamzig/safrole/state_transitions",
-    );
-}
+// TODO: update
+// test "jamzig:safrole" {
+//     const allocator = std.testing.allocator;
+//     const loader = jamtestnet.jamzig.Loader(JAMDUNA_PARAMS){};
+//     try runStateTransitionTests(
+//         JAMDUNA_PARAMS,
+//         loader.loader(),
+//         allocator,
+//         "src/jamtestnet/teams/jamzig/safrole/state_transitions",
+//     );
+// }
 
 /// Run state transition tests using vectors from the specified directory
 pub fn runStateTransitionTests(

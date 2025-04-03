@@ -345,8 +345,9 @@ pub const ActivityRecord = struct {
 pub const ActivityRecords = []ActivityRecord; // SIZE(validators_count)
 
 pub const Statistics = struct {
-    current: ActivityRecords,
-    last: ActivityRecords,
+    vals_current: ActivityRecords,
+    vals_last: ActivityRecords,
+    // TODO: add cores and services
 };
 
 pub const PreimageEntry = struct {

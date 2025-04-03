@@ -144,7 +144,7 @@ pub fn transition(
 
 /// Legacy transition function that uses a Block directly
 /// This is kept for backward compatibility
-pub fn transition_from_block(
+pub fn transitionFromBlock(
     comptime params: Params,
     stx: *StateTransition(params),
     new_block: *const types.Block,
