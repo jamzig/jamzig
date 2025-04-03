@@ -200,15 +200,14 @@ pub fn HostCalls(params: Params) type {
             const required_memory_size = always_accumulate_count * 12;
 
             // Read memory for always-accumulate services
-            const always_accumulate_data = if (always_accumulate_count > 0) blk: {
-                const data = exec_ctx.memory.readSlice(@truncate(always_accumulate_ptr), required_memory_size) catch {
+            var always_accumulate_data: PVM.Memory.MemorySlice = if (always_accumulate_count > 0)
+                exec_ctx.memory.readSlice(@truncate(always_accumulate_ptr), required_memory_size) catch {
                     span.err("Memory access failed while reading always-accumulate services", .{});
                     return .{ .terminal = .panic };
-                };
-                break :blk data;
-            } else blk: {
-                break :blk &[_]u8{};
-            };
+                }
+            else
+                .{ .buffer = &[_]u8{} };
+            defer always_accumulate_data.deinit();
 
             // Create a new always-accumulate services map
             var always_accumulate_services = std.AutoHashMap(types.ServiceId, types.Gas).init(ctx_regular.allocator);
@@ -220,8 +219,8 @@ pub fn HostCalls(params: Params) type {
                 const offset = i * 12;
 
                 // Read service ID (4 bytes) and gas limit (8 bytes)
-                const service_id = std.mem.readInt(u32, always_accumulate_data[offset..][0..4], .little);
-                const gas_limit = std.mem.readInt(u64, always_accumulate_data[offset + 4 ..][0..8], .little);
+                const service_id = std.mem.readInt(u32, always_accumulate_data.buffer[offset..][0..4], .little);
+                const gas_limit = std.mem.readInt(u64, always_accumulate_data.buffer[offset + 4 ..][0..8], .little);
 
                 span.debug("Always-accumulate service {d}: ID={d}, gas={d}", .{ i, service_id, gas_limit });
 
@@ -290,11 +289,11 @@ pub fn HostCalls(params: Params) type {
 
             // Read code hash from memory
             span.debug("Reading code hash from memory at 0x{x}", .{code_hash_ptr});
-            const code_hash_slice = exec_ctx.memory.readSlice(@truncate(code_hash_ptr), 32) catch {
+            var code_hash = exec_ctx.memory.readHash(@truncate(code_hash_ptr)) catch {
                 span.err("Memory access failed while reading code hash", .{});
                 return .{ .terminal = .panic };
             };
-            const code_hash: [32]u8 = code_hash_slice[0..32].*;
+
             span.trace("Code hash: {s}", .{std.fmt.fmtSliceHexLower(&code_hash)});
 
             // Get mutable service account - this is always the current service
@@ -386,17 +385,19 @@ pub fn HostCalls(params: Params) type {
 
             // Read memo data from memory
             span.debug("Reading memo data from memory at 0x{x}", .{memo_ptr});
-            const memo_slice = exec_ctx.memory.readSlice(@truncate(memo_ptr), params.transfer_memo_size) catch {
+            var memo_slice = exec_ctx.memory.readSlice(@truncate(memo_ptr), params.transfer_memo_size) catch {
                 span.err("Memory access failed while reading memo data", .{});
                 return .{ .terminal = .panic };
             };
+            defer memo_slice.deinit();
+
             span.trace("Memo data (first 32 bytes max): {s}", .{
-                std.fmt.fmtSliceHexLower(memo_slice[0..@min(32, memo_slice.len)]),
+                std.fmt.fmtSliceHexLower(memo_slice.buffer[0..@min(32, memo_slice.buffer.len)]),
             });
 
             // Create a memo buffer and copy data from memory
             var memo: [128]u8 = [_]u8{0} ** 128;
-            @memcpy(memo[0..@min(memo_slice.len, 128)], memo_slice[0..@min(memo_slice.len, 128)]);
+            @memcpy(memo[0..@min(memo_slice.buffer.len, 128)], memo_slice.buffer[0..@min(memo_slice.buffer.len, 128)]);
 
             // Create a deferred transfer
             span.debug("Creating deferred transfer", .{});
@@ -468,13 +469,14 @@ pub fn HostCalls(params: Params) type {
             const total_size: u32 = 32 * @as(u32, params.max_authorizations_queue_items);
 
             // Read all hashes at once
-            const hashes_data = exec_ctx.memory.readSlice(@truncate(output_ptr), total_size) catch {
+            var hashes_data = exec_ctx.memory.readSlice(@truncate(output_ptr), total_size) catch {
                 span.err("Memory access failed while reading authorizer hashes", .{});
                 return .{ .terminal = .panic };
             };
+            defer hashes_data.deinit();
 
             // Create a sequence of authorizer hashes
-            const authorizer_hashes = std.mem.bytesAsSlice(types.AuthorizerHash, hashes_data);
+            const authorizer_hashes = std.mem.bytesAsSlice(types.AuthorizerHash, hashes_data.buffer);
 
             for (authorizer_hashes, 0..) |hash, i| {
                 span.trace("Authorizer hash {d}: {s}", .{ i, std.fmt.fmtSliceHexLower(&hash) });
@@ -557,11 +559,11 @@ pub fn HostCalls(params: Params) type {
 
             // Read code hash from memory
             span.debug("Reading code hash from memory at 0x{x}", .{code_hash_ptr});
-            const code_hash_slice = exec_ctx.memory.readSlice(@truncate(code_hash_ptr), 32) catch {
+            var code_hash = exec_ctx.memory.readHash(@truncate(code_hash_ptr)) catch {
                 span.err("Memory access failed while reading code hash", .{});
                 return .{ .terminal = .panic };
             };
-            const code_hash: [32]u8 = code_hash_slice[0..32].*;
+
             span.trace("Code hash: {s}", .{std.fmt.fmtSliceHexLower(&code_hash)});
 
             // Check if the calling service has enough balance for the initial funding
@@ -661,11 +663,10 @@ pub fn HostCalls(params: Params) type {
 
             // Read hash from memory
             span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
-            const hash_slice = exec_ctx.memory.readSlice(@truncate(hash_ptr), 32) catch {
+            const hash = exec_ctx.memory.readHash(@truncate(hash_ptr)) catch {
                 span.err("Memory access failed while reading hash", .{});
                 return .{ .terminal = .panic };
             };
-            const hash: [32]u8 = hash_slice[0..32].*;
             span.trace("Hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
 
             // Get the current_service
@@ -763,12 +764,11 @@ pub fn HostCalls(params: Params) type {
 
             // Read hash from memory
             span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
-            const hash_slice = exec_ctx.memory.readSlice(@truncate(hash_ptr), 32) catch {
+            const hash = exec_ctx.memory.readHash(@truncate(hash_ptr)) catch {
                 span.err("Memory access failed while reading hash", .{});
                 return .{ .terminal = .panic };
             };
 
-            const hash: [32]u8 = hash_slice[0..32].*;
             span.trace("Hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
 
             // Get service account
@@ -863,12 +863,11 @@ pub fn HostCalls(params: Params) type {
 
             // Read hash from memory
             span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
-            const hash_slice = exec_ctx.memory.readSlice(@truncate(hash_ptr), 32) catch {
+            const hash = exec_ctx.memory.readHash(@truncate(hash_ptr)) catch {
                 span.err("Memory access failed while reading hash", .{});
                 return .{ .terminal = .panic };
             };
 
-            const hash: [32]u8 = hash_slice[0..32].*;
             span.trace("Hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
 
             // Get mutable service account
@@ -936,12 +935,11 @@ pub fn HostCalls(params: Params) type {
 
             // Read hash from memory
             span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
-            const hash_slice = exec_ctx.memory.readSlice(@truncate(hash_ptr), 32) catch {
+            const hash = exec_ctx.memory.readHash(@truncate(hash_ptr)) catch {
                 span.err("Memory access failed while reading hash", .{});
                 return .{ .terminal = .panic };
             };
 
-            const hash: [32]u8 = hash_slice[0..32].*;
             span.trace("Hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
 
             // Get mutable service account
@@ -992,16 +990,16 @@ pub fn HostCalls(params: Params) type {
 
             // Read hash from memory
             span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
-            const hash_slice = exec_ctx.memory.readSlice(@truncate(hash_ptr), 32) catch {
+            const hash = exec_ctx.memory.readHash(@truncate(hash_ptr)) catch {
                 // Error: memory access failed
                 span.err("Memory access failed while reading hash", .{});
                 return .{ .terminal = .panic };
             };
 
-            span.debug("Accumulation output hash: {s}", .{std.fmt.fmtSliceHexLower(hash_slice)});
+            span.debug("Accumulation output hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
 
             // Set the accumulation output
-            ctx_regular.accumulation_output = hash_slice[0..32].*;
+            ctx_regular.accumulation_output = hash;
 
             // Return success
             span.debug("Yield successful", .{});

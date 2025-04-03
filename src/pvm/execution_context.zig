@@ -264,7 +264,7 @@ pub const ExecutionContext = struct {
 
     /// Construct the return value by looking determining if we can
     /// read the range between registers 7 and 8. If the range is invalid we return []
-    pub fn readSliceBetweenRegister7AndRegister8(self: *@This()) []const u8 {
+    pub fn readSliceBetweenRegister7AndRegister8(self: *@This()) Memory.MemorySlice {
         const span = trace.span(.return_value_as_slice);
         defer span.deinit();
 
@@ -282,7 +282,7 @@ pub const ExecutionContext = struct {
                 span.err("Memory violation at address 0x{x:0>8}: {s}", .{ violation.address, @tagName(violation.violation_type) });
             }
             span.debug("Returning empty slice due to memory read error", .{});
-            return &[_]u8{};
+            return .{ .buffer = &[_]u8{} };
         };
     }
 

@@ -35,20 +35,22 @@ pub fn debugLog(
         4 => "PENDANTIC",
         else => "UNKOWN_LEVEL",
     };
-    const target = if (exec_ctx.registers[8] == 0 and exec_ctx.registers[9] == 0)
-        ""
+    var target: PVM.Memory.MemorySlice = if (exec_ctx.registers[8] == 0 and exec_ctx.registers[9] == 0)
+        .{ .buffer = &[_]u8{} }
     else
         exec_ctx.memory.readSlice(@truncate(exec_ctx.registers[8]), exec_ctx.registers[9]) catch message: {
             span.err("Could not access memory for target component", .{});
-            break :message "";
+            break :message .{ .buffer = &[_]u8{} };
         };
+    defer target.deinit();
 
-    const message = exec_ctx.memory.readSlice(@truncate(exec_ctx.registers[10]), exec_ctx.registers[11]) catch {
+    var message = exec_ctx.memory.readSlice(@truncate(exec_ctx.registers[10]), exec_ctx.registers[11]) catch {
         span.err("Could not access memory for message component", .{});
         return .play;
     };
+    defer message.deinit();
 
-    span.warn("DEBUGLOG {s} {s}: {s}", .{ level, target, message });
+    span.warn("DEBUGLOG {s} {s}: {s}", .{ level, target.buffer, message.buffer });
     return .play;
 }
 
@@ -108,13 +110,12 @@ pub fn lookupPreimage(
 
     // Read hash from memory (access verification is implicit)
     span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
-    const hash_slice = exec_ctx.memory.readSlice(@truncate(hash_ptr), 32) catch {
+    const hash = exec_ctx.memory.readHash(@truncate(hash_ptr)) catch {
         // Error: memory access failed
         span.err("Memory access failed while reading hash", .{});
         return .{ .terminal = .panic };
     };
 
-    const hash: [32]u8 = hash_slice[0..32].*;
     span.trace("Hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
 
     // Look up preimage at the specified timeslot
@@ -189,11 +190,12 @@ pub fn readStorage(
 
     // Read key data from memory
     span.debug("Reading key data from memory at 0x{x} (len={d})", .{ k_o, k_z });
-    const key_data = exec_ctx.memory.readSlice(@truncate(k_o), @truncate(k_z)) catch {
+    var key_data = exec_ctx.memory.readSlice(@truncate(k_o), @truncate(k_z)) catch {
         span.err("Memory access failed while reading key data", .{});
         return .{ .terminal = .panic };
     };
-    span.trace("Key data: {s}", .{std.fmt.fmtSliceHexLower(key_data)});
+    defer key_data.deinit();
+    span.trace("Key data: {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
     // Construct storage key: H(E_4(service_id) ⌢ key_data)
     span.debug("Constructing storage key", .{});
@@ -209,7 +211,7 @@ pub fn readStorage(
     };
 
     // Add key data
-    key_input.appendSlice(key_data) catch {
+    key_input.appendSlice(key_data.buffer) catch {
         span.err("Failed to append key data to key input", .{});
         return .{ .terminal = .panic };
     };
@@ -266,7 +268,7 @@ pub fn writeStorage(
     const v_z = exec_ctx.registers[10]; // Value size
 
     span.debug("Host call: write storage for service {d}", .{host_ctx.service_id});
-    span.debug("Key ptr: 0x{x}, Key size: {d}, Value ptr: 0x{x}, Value size: {d}", .{
+    span.trace("Key ptr: 0x{x}, Key size: {d}, Value ptr: 0x{x}, Value size: {d}", .{
         k_o, k_z, v_o, v_z,
     });
 
@@ -284,11 +286,12 @@ pub fn writeStorage(
 
     // Read key data from memory
     span.debug("Reading key data from memory at 0x{x} (len={})", .{ k_o, k_z });
-    const key_data = exec_ctx.memory.readSlice(@truncate(k_o), @truncate(k_z)) catch {
+    var key_data = exec_ctx.memory.readSlice(@truncate(k_o), @truncate(k_z)) catch {
         span.err("Memory access failed while reading key data", .{});
         return .{ .terminal = .panic };
     };
-    span.trace("Key data: {s}", .{std.fmt.fmtSliceHexLower(key_data)});
+    defer key_data.deinit();
+    span.trace("Key data: {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
     // Construct storage key: H(E_4(service_id) ⌢ key_data)
     span.debug("Constructing storage key", .{});
@@ -304,7 +307,7 @@ pub fn writeStorage(
     };
 
     // Add key data
-    key_input.appendSlice(key_data) catch {
+    key_input.appendSlice(key_data.buffer) catch {
         span.err("Failed to append key data to key input", .{});
         return .{ .terminal = .panic };
     };
@@ -332,22 +335,24 @@ pub fn writeStorage(
 
     // Read value from memory
     span.debug("Reading value data from memory at 0x{x} len={d}", .{ v_o, v_z });
-    const value = exec_ctx.memory.readSlice(@truncate(v_o), @truncate(v_z)) catch {
+    var value = exec_ctx.memory.readSlice(@truncate(v_o), @truncate(v_z)) catch {
         span.err("Memory access failed while reading value data", .{});
         return .{ .terminal = .panic };
     };
+    defer value.deinit();
+
     span.trace("Value data len={d} (first 32 bytes max): {s}", .{
-        value.len,
-        std.fmt.fmtSliceHexLower(value[0..@min(32, value.len)]),
+        value.buffer.len,
+        std.fmt.fmtSliceHexLower(value.buffer[0..@min(32, value.buffer.len)]),
     });
 
     // Write to storage
-    span.debug("Writing to storage, value size: {d}", .{value.len});
+    span.debug("Writing to storage, value size: {d}", .{value.buffer.len});
     // Get current value length if key exists
 
     // Write and get the prior value owned
     var maybe_prior_value: ?[]const u8 = pv: {
-        const value_owned = host_ctx.allocator.dupe(u8, value) catch {
+        const value_owned = host_ctx.allocator.dupe(u8, value.buffer) catch {
             return .{ .terminal = .panic };
         };
         break :pv service_account.writeStorage(storage_key, value_owned) catch {
@@ -358,8 +363,8 @@ pub fn writeStorage(
     };
     defer if (maybe_prior_value) |pv| host_ctx.allocator.free(pv);
 
-    if (maybe_prior_value) |_| {
-        span.debug("Prior value found, length: {d}", .{maybe_prior_value.?});
+    if (maybe_prior_value) |prior_value| {
+        span.debug("Prior value found, length: {}", .{std.fmt.fmtSliceEscapeLower(prior_value)});
     } else {
         span.debug("No prior value found", .{});
     }
@@ -368,7 +373,7 @@ pub fn writeStorage(
     span.debug("Checking storage footprint against balance", .{});
     const footprint = service_account.storageFootprint();
     if (footprint.a_t > service_account.balance) {
-        span.debug("Insufficient balance for storage, returning FULL", .{});
+        span.warn("Insufficient balance for storage, returning FULL", .{});
         // Restore old value, if we had a prior value, otherwise
         // we remove the storage key, as we do not have enough balance
         if (maybe_prior_value) |prior_value| {
