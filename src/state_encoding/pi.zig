@@ -89,29 +89,7 @@ fn encodeCoreStats(stats: []CoreActivityRecord, writer: anytype) !void {
         defer entry_span.deinit();
         entry_span.debug("Encoding stats for core {}", .{i});
 
-        entry_span.trace("Gas used: {}", .{entry.gas_used});
-        try codec.writeInteger(entry.gas_used, writer);
-
-        entry_span.trace("Imports: {}", .{entry.imports});
-        try codec.writeInteger(entry.imports, writer);
-
-        entry_span.trace("Extrinsic count: {}", .{entry.extrinsic_count});
-        try codec.writeInteger(entry.extrinsic_count, writer);
-
-        entry_span.trace("Extrinsic size: {}", .{entry.extrinsic_size});
-        try codec.writeInteger(entry.extrinsic_size, writer);
-
-        entry_span.trace("Exports: {}", .{entry.exports});
-        try codec.writeInteger(entry.exports, writer);
-
-        entry_span.trace("Bundle size: {}", .{entry.bundle_size});
-        try codec.writeInteger(entry.bundle_size, writer);
-
-        entry_span.trace("DA load: {}", .{entry.da_load});
-        try codec.writeInteger(entry.da_load, writer);
-
-        entry_span.trace("Popularity: {}", .{entry.popularity});
-        try codec.writeInteger(entry.popularity, writer);
+        try entry.encode(.{}, writer);
     }
 
     span.debug("Successfully encoded all core stats", .{});

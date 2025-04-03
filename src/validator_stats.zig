@@ -50,36 +50,36 @@ pub const ValidatorStats = struct {
 };
 
 pub const CoreActivityRecord = struct {
-    // Total gas consumed by core for reported work. Includes all
-    // refinement and authorizations.
-    gas_used: U64,
-    // Number of segments imported from DA made by core for reported work.
-    imports: U16,
-    // Total number of extrinsics used by core for reported work.
-    extrinsic_count: U16,
-    //  Total size of extrinsics used by core for reported work.
-    extrinsic_size: U32,
-    // Number of segments exported into DA made by core for reported work.
-    exports: U16,
-    // The work-bundle size. This is the size of data being placed into Audits DA by the core.
-    bundle_size: U32,
     // Amount of bytes which are placed into either Audits or Segments DA.
     // This includes the work-bundle (including all extrinsics and
     // imports) as well as all (exported) segments.
     da_load: U32,
     // Number of validators which formed super-majority for assurance.
     popularity: U16,
+    // Number of segments imported from DA made by core for reported work.
+    imports: U16,
+    // Number of segments exported into DA made by core for reported work.
+    exports: U16,
+    // Total number of extrinsics used by core for reported work.
+    extrinsic_count: U16,
+    //  Total size of extrinsics used by core for reported work.
+    extrinsic_size: U32,
+    // The work-bundle size. This is the size of data being placed into Audits DA by the core.
+    bundle_size: U32,
+    // Total gas consumed by core for reported work. Includes all
+    // refinement and authorizations.
+    gas_used: U64,
 
     pub fn init() CoreActivityRecord {
         return CoreActivityRecord{
-            .gas_used = 0,
+            .da_load = 0,
+            .popularity = 0,
             .imports = 0,
             .extrinsic_count = 0,
             .extrinsic_size = 0,
             .exports = 0,
             .bundle_size = 0,
-            .da_load = 0,
-            .popularity = 0,
+            .gas_used = 0,
         };
     }
 
@@ -87,29 +87,29 @@ pub const CoreActivityRecord = struct {
         const codec = @import("codec.zig");
 
         // Encode each field using variable-length integer encoding
-        try codec.writeInteger(self.gas_used, writer);
-        try codec.writeInteger(self.imports, writer);
-        try codec.writeInteger(self.extrinsic_count, writer);
-        try codec.writeInteger(self.extrinsic_size, writer);
-        try codec.writeInteger(self.exports, writer);
-        try codec.writeInteger(self.bundle_size, writer);
         try codec.writeInteger(self.da_load, writer);
         try codec.writeInteger(self.popularity, writer);
+        try codec.writeInteger(self.imports, writer);
+        try codec.writeInteger(self.exports, writer);
+        try codec.writeInteger(self.extrinsic_size, writer);
+        try codec.writeInteger(self.extrinsic_count, writer);
+        try codec.writeInteger(self.bundle_size, writer);
+        try codec.writeInteger(self.gas_used, writer);
     }
 
-    pub fn decode(_: anytype, reader: anytype, _: std.mem.Allocator) !@This() {
+    pub fn decode(_: anytype, reader: anytype, _: anytype) !@This() {
         const codec = @import("codec.zig");
 
         // Read each field using variable-length integer decoding
         // and truncate to the appropriate size
-        const gas_used = try codec.readInteger(reader);
-        const imports = @as(U16, @truncate(try codec.readInteger(reader)));
-        const extrinsic_count = @as(U16, @truncate(try codec.readInteger(reader)));
-        const extrinsic_size = @as(U32, @truncate(try codec.readInteger(reader)));
-        const exports = @as(U16, @truncate(try codec.readInteger(reader)));
-        const bundle_size = @as(U32, @truncate(try codec.readInteger(reader)));
         const da_load = @as(U32, @truncate(try codec.readInteger(reader)));
         const popularity = @as(U16, @truncate(try codec.readInteger(reader)));
+        const imports = @as(U16, @truncate(try codec.readInteger(reader)));
+        const exports = @as(U16, @truncate(try codec.readInteger(reader)));
+        const extrinsic_size = @as(U32, @truncate(try codec.readInteger(reader)));
+        const extrinsic_count = @as(U16, @truncate(try codec.readInteger(reader)));
+        const bundle_size = @as(U32, @truncate(try codec.readInteger(reader)));
+        const gas_used = try codec.readInteger(reader);
 
         return @This(){
             .gas_used = gas_used,

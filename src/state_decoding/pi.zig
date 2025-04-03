@@ -95,36 +95,7 @@ fn decodeCoreStats(core_count: u32, reader: anytype, stats: *std.ArrayList(CoreA
         defer core_span.deinit();
         core_span.debug("Decoding core {d}/{d}", .{ i + 1, core_count });
 
-        const gas_used = try codec.readInteger(reader);
-        const imports = @as(u16, @truncate(try codec.readInteger(reader)));
-        const extrinsic_count = @as(u16, @truncate(try codec.readInteger(reader)));
-        const extrinsic_size = @as(u32, @truncate(try codec.readInteger(reader)));
-        const exports = @as(u16, @truncate(try codec.readInteger(reader)));
-        const bundle_size = @as(u32, @truncate(try codec.readInteger(reader)));
-        const da_load = @as(u32, @truncate(try codec.readInteger(reader)));
-        const popularity = @as(u16, @truncate(try codec.readInteger(reader)));
-
-        core_span.trace("Core activity: gas_used={d}, imports={d}, extrinsics={d}({d} bytes), exports={d}, bundle={d}, da_load={d}, popularity={d}", .{
-            gas_used,
-            imports,
-            extrinsic_count,
-            extrinsic_size,
-            exports,
-            bundle_size,
-            da_load,
-            popularity,
-        });
-
-        try stats.append(CoreActivityRecord{
-            .gas_used = gas_used,
-            .imports = imports,
-            .extrinsic_count = extrinsic_count,
-            .extrinsic_size = extrinsic_size,
-            .exports = exports,
-            .bundle_size = bundle_size,
-            .da_load = da_load,
-            .popularity = popularity,
-        });
+        try stats.append(try CoreActivityRecord.decode(.{}, reader, .{}));
     }
 
     span.debug("Successfully decoded stats for {d} cores", .{core_count});
