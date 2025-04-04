@@ -502,7 +502,7 @@ pub const EpochMark = struct {
         return @This(){
             .entropy = self.entropy,
             .tickets_entropy = self.tickets_entropy,
-            .validators = try allocator.dupe(BandersnatchPublic, self.validators),
+            .validators = try allocator.dupe(EpochMarkValidatorsKeys, self.validators),
         };
     }
 };

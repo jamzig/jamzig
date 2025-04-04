@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     rust_deps.staticallyLinkTo(exe);
+    exe.linkLibCpp();
     b.installArtifact(exe);
 
     const jamtestnet_export = b.addExecutable(.{
