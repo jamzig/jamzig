@@ -136,7 +136,7 @@ pub fn runStateTransitionTests(
             continue;
         }
 
-        std.debug.print("\nProcessing transition: {s}\n\n", .{state_transition_vector.bin.name});
+        // std.debug.print("\nProcessing transition: {s}\n\n", .{state_transition_vector.bin.name});
 
         var state_transition = try loader.loadTestVector(allocator, state_transition_vector.bin.path);
         defer state_transition.deinit(allocator);
@@ -146,7 +146,7 @@ pub fn runStateTransitionTests(
         defer pre_state_mdict.deinit();
 
         // std.debug.print("{}", .{types.fmt.format(pre_state_mdict)});
-        std.debug.print("{}", .{types.fmt.format(state_transition.block())});
+        // std.debug.print("{}", .{types.fmt.format(state_transition.block())});
 
         // Validator Root Calculations
         try state_transition.validateRoots(allocator);
