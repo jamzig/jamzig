@@ -123,10 +123,11 @@
       devShells.default = env.mkShell {
         # Packages required for compiling, linking and running
         # Libraries added here will be automatically added to the LD_LIBRARY_PATH and PKG_CONFIG_PATH
-        nativeBuildInputs = [ 
+        nativeBuildInputs = with pkgs; [ 
             zls-pkg 
             rustToolchain
-            pkgs.qemu
+
+            qemu
           ];
             
 

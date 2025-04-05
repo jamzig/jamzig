@@ -4,8 +4,8 @@
     .fingerprint = 0x4b3c352fa1870e81,
     .dependencies = .{
         .lsquic = .{
-            .url = "git+https://github.com/jamzig/lsquic#bc3bc885a1c85fe81f1654ac0a5e491ae8457b7e",
-            .hash = "12209622b08c2a46f8c8b1887b8c7b3d3a0f6fa4571d4f11d542d847cf15729b594b",
+            .url = "git+https://github.com/jamzig/lsquic#ed6ced0cbc6447f7135a32db491e398debdf8af7",
+            .hash = "12207247a06ac1e7f4ddd6f0fbca4bcdcdf78655432a07928a96c8ec456bdfca71e3",
         },
         .pretty = .{
             .url = "https://github.com/timfayz/pretty/archive/v0.10.4.tar.gz",
