@@ -89,16 +89,16 @@ test "jamduna:orderedaccumulation" {
 }
 
 // TODO: update
-// test "javajam:safrole" {
-//     const allocator = std.testing.allocator;
-//     const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
-//     try runStateTransitionTests(
-//         JAMDUNA_PARAMS,
-//         loader.loader(),
-//         allocator,
-//         "src/jamtestnet/teams/javajam/state_transitions",
-//     );
-// }
+test "javajam:stf" {
+    const allocator = std.testing.allocator;
+    const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
+    try runStateTransitionTests(
+        JAMDUNA_PARAMS,
+        loader.loader(),
+        allocator,
+        "src/jamtestnet/teams/javajam/stf/state_transitions",
+    );
+}
 
 // TODO: update
 // test "jamzig:safrole" {
