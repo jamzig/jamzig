@@ -41,13 +41,18 @@ pub const RecentBlock = struct {
 
                 for (block.extrinsic.guarantees.data) |guarantee| {
                     try reports.append(.{
-                        // TODO: doulb check if we need the workpackage hash
-                        // instead of the work report hash
-                        // .hash = try guarantee.report.hash(allocator),
                         .hash = guarantee.report.package_spec.hash,
                         .exports_root = guarantee.report.package_spec.exports_root,
                     });
                 }
+
+                // This is actually a map in the graypaper, and as such, they need to be sorted by key
+                // when serialized. Use insertion sort as we do not expect many items here
+                std.sort.insertion(types.ReportedWorkPackage, reports.items, {}, struct {
+                    pub fn lessThan(_: void, a: types.ReportedWorkPackage, b: types.ReportedWorkPackage) bool {
+                        return std.mem.lessThan(u8, &a.hash, &b.hash);
+                    }
+                }.lessThan);
 
                 break :blk try reports.toOwnedSlice();
             },
