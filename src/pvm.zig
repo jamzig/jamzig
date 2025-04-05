@@ -228,7 +228,7 @@ pub const PVM = struct {
                         // if memory range in valid memory
                         // read the memory range and return it
                         const return_value = exec_ctx.readSliceBetweenRegister7AndRegister8();
-                        return .{ .halt = try allocator.dupe(u8, return_value) };
+                        return .{ .halt = try allocator.dupe(u8, return_value.buffer) };
                     },
                     .out_of_gas => {
                         return .{ .terminal = .out_of_gas };

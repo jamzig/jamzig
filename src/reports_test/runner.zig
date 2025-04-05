@@ -2,12 +2,24 @@ const std = @import("std");
 const converters = @import("./converters.zig");
 const tvector = @import("../jamtestvectors/reports.zig");
 const reports = @import("../reports.zig");
+const stats = @import("../stf/validator_stats.zig");
 const state = @import("../state.zig");
 const types = @import("../types.zig");
 const helpers = @import("../tests/helpers.zig");
 const diff = @import("../tests/diff.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
+
+/// Create a ValidatorStatsInput from a test case for validator stats processing
+pub fn buildValidatorStatsInput(test_case: *const tvector.TestCase) stats.ValidatorStatsInput {
+    return stats.ValidatorStatsInput{
+        .author_index = null, // Use a default value since test vectors don't specify an author
+        .guarantees = test_case.input.guarantees.data,
+        .assurances = &[_]types.AvailAssurance{}, // Empty as test vectors don't include assurances
+        .tickets_count = 0, // No tickets in the test vector
+        .preimages = &[_]types.Preimage{}, // No preimages in the test vector
+    };
+}
 
 pub fn validateAndProcessGuaranteeExtrinsic(
     comptime params: Params,
@@ -38,6 +50,16 @@ pub fn validateAndProcessGuaranteeExtrinsic(
         allocator,
         &stx,
         validated_extrinsic,
+    );
+
+    // Process the statistics
+    try stats.transition(
+        params,
+        &stx,
+        buildValidatorStatsInput(test_case),
+        &[_]types.WorkReport{}, // No ready reports in the test
+        &std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.AccumulationServiceStats).init(allocator),
+        &std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.TransferServiceStats).init(allocator),
     );
 
     // Merge the prime onto base
@@ -142,8 +164,14 @@ pub fn runReportTest(comptime params: Params, allocator: std.mem.Allocator, test
                 };
 
                 // Verify state matches expected state
-                diff.expectFormattedEqual(*state.JamState(params), allocator, &current_state, &expected_state) catch {
+                diff.expectFormattedEqual(
+                    *state.JamState(params),
+                    allocator,
+                    &current_state,
+                    &expected_state,
+                ) catch {
                     std.debug.print("Mismatch: actual state != expected state\n", .{});
+                    std.debug.print("{}", .{expected_state});
                     return error.StateMismatch;
                 };
             } else |err| {

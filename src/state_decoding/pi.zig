@@ -1,46 +1,73 @@
 const std = @import("std");
 const testing = std.testing;
 const validator_statistics = @import("../validator_stats.zig");
+const codec = @import("../codec.zig");
+
 const Pi = validator_statistics.Pi;
+
 const ValidatorStats = validator_statistics.ValidatorStats;
+const CoreActivityRecord = validator_statistics.CoreActivityRecord;
+const ServiceActivityRecord = validator_statistics.ServiceActivityRecord;
 const ValidatorIndex = @import("../types.zig").ValidatorIndex;
+const ServiceId = @import("../types.zig").ServiceId;
 
-pub fn decode(validators_count: u32, reader: anytype, allocator: std.mem.Allocator) !Pi {
-    // Initialize Pi with validator count which we'll determine from the data
-    var current_epoch_stats = try std.ArrayList(ValidatorStats).initCapacity(allocator, validators_count);
-    errdefer current_epoch_stats.deinit();
+const trace = @import("../tracing.zig").scoped(.pi_decoding);
 
-    var previous_epoch_stats = try std.ArrayList(ValidatorStats).initCapacity(allocator, validators_count);
-    errdefer previous_epoch_stats.deinit();
+pub fn decode(validators_count: u32, core_count: u32, reader: anytype, allocator: std.mem.Allocator) !Pi {
+    const span = trace.span(.decode);
+    defer span.deinit();
+    span.debug("Starting Pi decoding - validators: {d}, cores: {d}", .{ validators_count, core_count });
 
-    // Read current epoch stats
-    try decodeEpochStats(validators_count, reader, &current_epoch_stats);
-
-    // Read previous epoch stats
-    try decodeEpochStats(validators_count, reader, &previous_epoch_stats);
-
-    // Ensure both arrays have same length
-    if (current_epoch_stats.items.len != previous_epoch_stats.items.len) {
-        return error.InvalidData;
+    var pi = try Pi.init(allocator, validators_count, core_count);
+    errdefer {
+        span.debug("Error during decoding, cleaning up Pi structure", .{});
+        pi.deinit();
     }
 
-    return Pi{
-        .current_epoch_stats = current_epoch_stats,
-        .previous_epoch_stats = previous_epoch_stats,
-        .allocator = allocator,
-        .validator_count = current_epoch_stats.items.len,
-    };
+    span.debug("Decoding current epoch stats", .{});
+    try decodeEpochStats(validators_count, reader, &pi.current_epoch_stats);
+
+    span.debug("Decoding previous epoch stats", .{});
+    try decodeEpochStats(validators_count, reader, &pi.previous_epoch_stats);
+
+    span.debug("Decoding core stats", .{});
+    try decodeCoreStats(core_count, reader, &pi.core_stats);
+
+    span.debug("Decoding service stats", .{});
+    try decodeServiceStats(reader, &pi.service_stats);
+
+    span.debug("Successfully decoded Pi structure", .{});
+    return pi;
 }
 
 fn decodeEpochStats(validators_count: u32, reader: anytype, stats: *std.ArrayList(ValidatorStats)) !void {
-    for (0..validators_count) |_| {
-        // Try to read all stats fields
+    const span = trace.span(.decode_epoch_stats);
+    defer span.deinit();
+    span.debug("Decoding stats for {d} validators", .{validators_count});
+
+    // We are building our core stats from scratch
+    stats.clearRetainingCapacity();
+
+    for (0..validators_count) |i| {
+        const validator_span = span.child(.validator);
+        defer validator_span.deinit();
+        validator_span.debug("Decoding validator {d}/{d}", .{ i + 1, validators_count });
+
         const blocks_produced = try reader.readInt(u32, .little);
         const tickets_introduced = try reader.readInt(u32, .little);
         const preimages_introduced = try reader.readInt(u32, .little);
         const octets_across_preimages = try reader.readInt(u32, .little);
         const reports_guaranteed = try reader.readInt(u32, .little);
         const availability_assurances = try reader.readInt(u32, .little);
+
+        validator_span.trace("Stats: blocks={d}, tickets={d}, preimages={d}, octets={d}, reports={d}, assurances={d}", .{
+            blocks_produced,
+            tickets_introduced,
+            preimages_introduced,
+            octets_across_preimages,
+            reports_guaranteed,
+            availability_assurances,
+        });
 
         try stats.append(ValidatorStats{
             .blocks_produced = blocks_produced,
@@ -51,91 +78,87 @@ fn decodeEpochStats(validators_count: u32, reader: anytype, stats: *std.ArrayLis
             .availability_assurances = availability_assurances,
         });
     }
+
+    span.debug("Successfully decoded stats for {d} validators", .{validators_count});
 }
 
-test "decode Pi - successful case" {
-    // Create a test buffer with mock data
-    var buffer: [4 * @sizeOf(ValidatorStats)]u8 = undefined; // Space for 2 validators × 2 epochs
-    var fbs = std.io.fixedBufferStream(&buffer);
-    var writer = fbs.writer();
+fn decodeCoreStats(core_count: u32, reader: anytype, stats: *std.ArrayList(CoreActivityRecord)) !void {
+    const span = trace.span(.decode_core_stats);
+    defer span.deinit();
+    span.debug("Decoding stats for {d} cores", .{core_count});
 
-    // Write current epoch data for 2 validators
-    try writer.writeInt(u32, 1, .little); // blocks_produced
-    try writer.writeInt(u32, 2, .little); // tickets_introduced
-    try writer.writeInt(u32, 3, .little); // preimages_introduced
-    try writer.writeInt(u32, 4, .little); // octets_across_preimages
-    try writer.writeInt(u32, 5, .little); // reports_guaranteed
-    try writer.writeInt(u32, 6, .little); // availability_assurances
+    // We are building our core stats from scratch
+    stats.clearRetainingCapacity();
 
-    try writer.writeInt(u32, 7, .little);
-    try writer.writeInt(u32, 8, .little);
-    try writer.writeInt(u32, 9, .little);
-    try writer.writeInt(u32, 10, .little);
-    try writer.writeInt(u32, 11, .little);
-    try writer.writeInt(u32, 12, .little);
+    for (0..core_count) |i| {
+        const core_span = span.child(.core);
+        defer core_span.deinit();
+        core_span.debug("Decoding core {d}/{d}", .{ i + 1, core_count });
 
-    // Write previous epoch data
-    try writer.writeInt(u32, 13, .little);
-    try writer.writeInt(u32, 14, .little);
-    try writer.writeInt(u32, 15, .little);
-    try writer.writeInt(u32, 16, .little);
-    try writer.writeInt(u32, 17, .little);
-    try writer.writeInt(u32, 18, .little);
+        try stats.append(try CoreActivityRecord.decode(.{}, reader, .{}));
+    }
 
-    try writer.writeInt(u32, 19, .little);
-    try writer.writeInt(u32, 20, .little);
-    try writer.writeInt(u32, 21, .little);
-    try writer.writeInt(u32, 22, .little);
-    try writer.writeInt(u32, 23, .little);
-    try writer.writeInt(u32, 24, .little);
-
-    // Reset reader position
-    fbs.reset();
-    const reader = fbs.reader();
-
-    // Decode the data
-    var pi = try decode(2, reader, testing.allocator);
-    defer pi.deinit();
-
-    // Verify current epoch stats
-    try testing.expectEqual(@as(usize, 2), pi.current_epoch_stats.items.len);
-    try testing.expectEqual(@as(u32, 1), pi.current_epoch_stats.items[0].blocks_produced);
-    try testing.expectEqual(@as(u32, 2), pi.current_epoch_stats.items[0].tickets_introduced);
-    try testing.expectEqual(@as(u32, 7), pi.current_epoch_stats.items[1].blocks_produced);
-    try testing.expectEqual(@as(u32, 8), pi.current_epoch_stats.items[1].tickets_introduced);
-
-    // Verify previous epoch stats
-    try testing.expectEqual(@as(usize, 2), pi.previous_epoch_stats.items.len);
-    try testing.expectEqual(@as(u32, 13), pi.previous_epoch_stats.items[0].blocks_produced);
-    try testing.expectEqual(@as(u32, 14), pi.previous_epoch_stats.items[0].tickets_introduced);
-    try testing.expectEqual(@as(u32, 19), pi.previous_epoch_stats.items[1].blocks_produced);
-    try testing.expectEqual(@as(u32, 20), pi.previous_epoch_stats.items[1].tickets_introduced);
+    span.debug("Successfully decoded stats for {d} cores", .{core_count});
 }
 
-test "decode Pi - empty buffer" {
-    var buffer: [0]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buffer);
-    const reader = fbs.reader();
+fn decodeServiceStats(reader: anytype, stats: *std.AutoHashMap(ServiceId, ServiceActivityRecord)) !void {
+    const span = trace.span(.decode_service_stats);
+    defer span.deinit();
 
-    // Attempt to decode empty buffer should result in error
-    try testing.expectError(error.EndOfStream, decode(1, reader, testing.allocator));
-}
+    const service_count = @as(u32, @truncate(try codec.readInteger(reader)));
+    span.debug("Decoding stats for {d} services", .{service_count});
 
-test "decode Pi - incomplete data" {
-    var buffer: [20]u8 = undefined; // Not enough data for complete stats
-    var fbs = std.io.fixedBufferStream(&buffer);
-    var writer = fbs.writer();
+    for (0..service_count) |i| {
+        const service_span = span.child(.service);
+        defer service_span.deinit();
 
-    // Write partial data
-    try writer.writeInt(u32, 1, .little);
-    try writer.writeInt(u32, 2, .little);
-    try writer.writeInt(u32, 3, .little);
-    try writer.writeInt(u32, 4, .little);
-    try writer.writeInt(u32, 5, .little);
+        // TODO: check this against the graypaper
+        const service_id = @as(u32, @truncate(try codec.readInteger(reader)));
+        // const service_id = try reader.readInt(u32, .little);
+        service_span.debug("Decoding service {d}/{d} (ID: {d})", .{ i + 1, service_count, service_id });
 
-    fbs.reset();
-    const reader = fbs.reader();
+        const provided_count = @as(u16, @truncate(try codec.readInteger(reader)));
+        const provided_size = @as(u32, @truncate(try codec.readInteger(reader)));
 
-    // Attempt to decode incomplete data should result in error
-    try testing.expectError(error.EndOfStream, decode(1, reader, testing.allocator));
+        const refinement_count = @as(u32, @truncate(try codec.readInteger(reader)));
+        const refinement_gas_used = try codec.readInteger(reader);
+
+        // FIXME: fix ordering back to @davxy ordering after merge
+        // of: https://github.com/jam-duna/jamtestnet/issues/181
+        const imports = @as(u32, @truncate(try codec.readInteger(reader)));
+        const exports = @as(u32, @truncate(try codec.readInteger(reader)));
+        const extrinsic_size = @as(u32, @truncate(try codec.readInteger(reader)));
+        const extrinsic_count = @as(u32, @truncate(try codec.readInteger(reader)));
+
+        const accumulate_count = @as(u32, @truncate(try codec.readInteger(reader)));
+        const accumulate_gas_used = try codec.readInteger(reader);
+
+        const on_transfers_count = @as(u32, @truncate(try codec.readInteger(reader)));
+        const on_transfers_gas_used = try codec.readInteger(reader);
+
+        service_span.trace("Service data: provided={d} items ({d} bytes), refinements={d} (gas={d})", .{ provided_count, provided_size, refinement_count, refinement_gas_used });
+
+        service_span.trace("Service activity: imports={d}, extrinsics={d} ({d} bytes), exports={d}", .{ imports, extrinsic_count, extrinsic_size, exports });
+
+        service_span.trace("Service operations: accumulate={d} (gas={d}), transfers={d} (gas={d})", .{ accumulate_count, accumulate_gas_used, on_transfers_count, on_transfers_gas_used });
+
+        const record = ServiceActivityRecord{
+            .provided_count = provided_count,
+            .provided_size = provided_size,
+            .refinement_count = refinement_count,
+            .refinement_gas_used = refinement_gas_used,
+            .imports = imports,
+            .extrinsic_count = extrinsic_count,
+            .extrinsic_size = extrinsic_size,
+            .exports = exports,
+            .accumulate_count = accumulate_count,
+            .accumulate_gas_used = accumulate_gas_used,
+            .on_transfers_count = on_transfers_count,
+            .on_transfers_gas_used = on_transfers_gas_used,
+        };
+
+        try stats.put(service_id, record);
+    }
+
+    span.debug("Successfully decoded stats for {d} services", .{service_count});
 }

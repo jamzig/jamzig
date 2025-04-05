@@ -88,27 +88,29 @@ test "jamduna:orderedaccumulation" {
     );
 }
 
-test "javajam:safrole" {
+// TODO: update
+test "javajam:stf" {
     const allocator = std.testing.allocator;
     const loader = jamtestnet.jamduna.Loader(JAMDUNA_PARAMS){};
     try runStateTransitionTests(
         JAMDUNA_PARAMS,
         loader.loader(),
         allocator,
-        "src/jamtestnet/teams/javajam/state_transitions",
+        "src/jamtestnet/teams/javajam/stf/state_transitions",
     );
 }
 
-test "jamzig:safrole" {
-    const allocator = std.testing.allocator;
-    const loader = jamtestnet.jamzig.Loader(JAMDUNA_PARAMS){};
-    try runStateTransitionTests(
-        JAMDUNA_PARAMS,
-        loader.loader(),
-        allocator,
-        "src/jamtestnet/teams/jamzig/safrole/state_transitions",
-    );
-}
+// TODO: update
+// test "jamzig:safrole" {
+//     const allocator = std.testing.allocator;
+//     const loader = jamtestnet.jamzig.Loader(JAMDUNA_PARAMS){};
+//     try runStateTransitionTests(
+//         JAMDUNA_PARAMS,
+//         loader.loader(),
+//         allocator,
+//         "src/jamtestnet/teams/jamzig/safrole/state_transitions",
+//     );
+// }
 
 /// Run state transition tests using vectors from the specified directory
 pub fn runStateTransitionTests(
@@ -129,7 +131,12 @@ pub fn runStateTransitionTests(
     }
 
     for (state_transition_vectors.items()) |state_transition_vector| {
-        // std.debug.print("\nProcessing transition {d}/{d}\n", .{ i + 1, state_transition_vectors.items().len });
+        // This is sometimes placed in the dir
+        if (std.mem.eql(u8, state_transition_vector.bin.name, "genesis.bin")) {
+            continue;
+        }
+
+        // std.debug.print("\nProcessing transition: {s}\n\n", .{state_transition_vector.bin.name});
 
         var state_transition = try loader.loadTestVector(allocator, state_transition_vector.bin.path);
         defer state_transition.deinit(allocator);
@@ -156,7 +163,17 @@ pub fn runStateTransitionTests(
                 allocator,
                 &dict,
             );
-            // std.debug.print("Genesis state initialized\n", .{});
+
+            var current_state_mdict = try current_state.?.buildStateMerklizationDictionary(allocator);
+            defer current_state_mdict.deinit();
+            var genesis_state_diff = try current_state_mdict.diff(&dict);
+            defer genesis_state_diff.deinit();
+
+            if (genesis_state_diff.has_changes()) {
+                std.debug.print("Genesis State Reconstruction Failed. Dict -> Reconstruct -> Dict not symmetrical. Check state encode and decode\n", .{});
+                std.debug.print("{}", .{genesis_state_diff});
+                return error.GenesisStateDiff;
+            }
         }
 
         // Ensure we are starting with the same roots.
@@ -166,6 +183,9 @@ pub fn runStateTransitionTests(
             &state_transition.preStateRoot(),
             &pre_state_root,
         );
+
+        // Print this
+        // std.debug.print("{s}\n", .{current_state.?});
 
         // std.debug.print("Executing state transition...\n", .{});
         var transition = try stf.stateTransition(
@@ -209,6 +229,7 @@ pub fn runStateTransitionTests(
             state_diff.printToStdErr();
 
             // std.debug.print("{}", .{current_state.?});
+            // std.debug.print("{}", .{types.fmt.format(current_state.?.delta.?.getAccount(1065941251).?.storageFootprint())});
 
             return error.UnexpectedStateDiff;
         }

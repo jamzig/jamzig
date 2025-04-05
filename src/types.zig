@@ -245,12 +245,52 @@ pub const WorkExecResult = union(enum(u8)) {
     }
 };
 
+pub const RefineLoad = struct {
+    gas_used: U64,
+    imports: U16,
+    extrinsic_count: U16,
+    extrinsic_size: U32,
+    exports: U16,
+
+    pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
+        const codec = @import("codec.zig");
+
+        // Encode each field using variable-length integer encoding
+        try codec.writeInteger(self.gas_used, writer);
+        try codec.writeInteger(self.imports, writer);
+        try codec.writeInteger(self.extrinsic_count, writer);
+        try codec.writeInteger(self.extrinsic_size, writer);
+        try codec.writeInteger(self.exports, writer);
+    }
+
+    pub fn decode(_: anytype, reader: anytype, _: std.mem.Allocator) !@This() {
+        const codec = @import("codec.zig");
+
+        // Read each field using variable-length integer decoding
+        // and truncate to the appropriate size
+        const gas_used = try codec.readInteger(reader);
+        const imports = @as(U16, @truncate(try codec.readInteger(reader)));
+        const extrinsic_count = @as(U16, @truncate(try codec.readInteger(reader)));
+        const extrinsic_size = @as(U32, @truncate(try codec.readInteger(reader)));
+        const exports = @as(U16, @truncate(try codec.readInteger(reader)));
+
+        return @This(){
+            .gas_used = gas_used,
+            .imports = imports,
+            .extrinsic_count = extrinsic_count,
+            .extrinsic_size = extrinsic_size,
+            .exports = exports,
+        };
+    }
+};
+
 pub const WorkResult = struct {
     service_id: ServiceId,
     code_hash: OpaqueHash,
     payload_hash: OpaqueHash,
     accumulate_gas: Gas,
     result: WorkExecResult,
+    refine_load: RefineLoad,
 
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){
@@ -259,6 +299,7 @@ pub const WorkResult = struct {
             .payload_hash = self.payload_hash,
             .accumulate_gas = self.accumulate_gas,
             .result = try self.result.deepClone(allocator),
+            .refine_load = self.refine_load,
         };
     }
 
@@ -322,6 +363,28 @@ pub const SegmentRootLookupItem = struct {
 
 pub const SegmentRootLookup = []SegmentRootLookupItem;
 
+// TODO: since these are varint encoded, I wrapped them, maybe adapt codec
+// to create a special type indicating they are varint
+pub const WorkReportStats = struct {
+    auth_gas_used: Gas,
+
+    pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
+        const codec = @import("codec.zig");
+
+        try codec.writeInteger(self.auth_gas_used, writer);
+    }
+
+    pub fn decode(_: anytype, reader: anytype, _: std.mem.Allocator) !@This() {
+        const codec = @import("codec.zig");
+
+        const auth_gas_used = try codec.readInteger(reader);
+
+        return .{
+            .auth_gas_used = auth_gas_used,
+        };
+    }
+};
+
 pub const WorkReport = struct {
     package_spec: WorkPackageSpec,
     context: RefineContext,
@@ -330,6 +393,7 @@ pub const WorkReport = struct {
     auth_output: []u8,
     segment_root_lookup: SegmentRootLookup,
     results: []WorkResult, // SIZE(1..4)
+    stats: WorkReportStats,
 
     pub fn totalAccumulateGas(self: *const @This()) types.Gas {
         var total: types.Gas = 0;
@@ -354,6 +418,7 @@ pub const WorkReport = struct {
                 }
                 break :blk cloned_results;
             },
+            .stats = self.stats,
         };
     }
 
@@ -414,10 +479,15 @@ pub const BlockInfo = struct {
 
 pub const BlocksHistory = []BlockInfo; // SIZE(0..max_blocks_history)
 
+pub const EpochMarkValidatorsKeys = struct {
+    bandersnatch: BandersnatchPublic,
+    ed25519: Ed25519Public,
+};
+
 pub const EpochMark = struct {
     entropy: Entropy,
     tickets_entropy: Entropy,
-    validators: []BandersnatchPublic, // SIZE(validators_count)
+    validators: []EpochMarkValidatorsKeys, // SIZE(validators_count)
 
     pub fn validators_size(params: jam_params.Params) usize {
         return params.validators_count;
@@ -432,7 +502,7 @@ pub const EpochMark = struct {
         return @This(){
             .entropy = self.entropy,
             .tickets_entropy = self.tickets_entropy,
-            .validators = try allocator.dupe(BandersnatchPublic, self.validators),
+            .validators = try allocator.dupe(EpochMarkValidatorsKeys, self.validators),
         };
     }
 };
@@ -523,6 +593,18 @@ pub const ValidatorSet = struct {
         var keys = try allocator.alloc(BandersnatchPublic, self.validators.len);
         for (self.validators, 0..) |validator, i| {
             keys[i] = validator.ed25519;
+        }
+        return keys;
+    }
+
+    /// Returns an allocated slice of EpochMarkValidatorsKeys from all validators
+    pub fn getEpochMarkValidatorsKeys(self: ValidatorSet, allocator: std.mem.Allocator) ![]EpochMarkValidatorsKeys {
+        var keys = try allocator.alloc(EpochMarkValidatorsKeys, self.validators.len);
+        for (self.validators, 0..) |validator, i| {
+            keys[i] = EpochMarkValidatorsKeys{
+                .bandersnatch = validator.bandersnatch,
+                .ed25519 = validator.ed25519,
+            };
         }
         return keys;
     }
@@ -899,6 +981,13 @@ pub const AvailAssurance = struct {
     validator_index: ValidatorIndex,
     signature: Ed25519Signature,
 
+    pub fn coreSetInBitfield(self: *const @This(), core: types.CoreIndex) bool {
+        const byte = core / 8;
+        const bit = core % 8;
+
+        return self.bitfield[byte] & (@as(u8, 1) << @intCast(bit)) != 0;
+    }
+
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         return @This(){
             .anchor = self.anchor,
@@ -971,6 +1060,7 @@ pub const ReportGuarantee = struct {
 };
 
 pub const GuaranteesExtrinsic = struct {
+    // TODO: rename to items
     data: []ReportGuarantee, // SIZE(0..cores_count)
 
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {

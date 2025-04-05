@@ -4,9 +4,13 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const state_delta = @import("state_delta.zig");
 
+pub const execution = @import("accumulate/execution.zig");
+
 const WorkReportAndDeps = state.reports_ready.WorkReportAndDeps;
 const Params = @import("jam_params.zig").Params;
 const meta = @import("meta.zig");
+pub const ProcessAccumulationResult = @import("accumulate/execution.zig").ProcessAccumulationResult;
+pub const DeferredTransfer = @import("pvm_invocations/accumulate.zig").DeferredTransfer;
 
 // Add tracing import
 const trace = @import("tracing.zig").scoped(.accumulate);
@@ -135,7 +139,7 @@ pub fn processAccumulateReports(
     comptime params: Params,
     stx: *state_delta.StateTransition(params),
     reports: []types.WorkReport,
-) !types.AccumulateRoot {
+) !@import("accumulate/execution.zig").ProcessAccumulationResult {
     const span = trace.span(.process_accumulate_reports);
     defer span.deinit();
 
@@ -362,51 +366,55 @@ pub fn processAccumulateReports(
 
     transfer_span.debug("Applying {d} deferred transfers", .{result.transfers.len});
 
-    // Get delta for service accounts
-    var delta_prime: *state.Delta = try stx.ensure(.delta_prime);
-
     // 12.24: Apply all deferred transfers to the service accounts
-    // δ‡ = {s ↦ ΨT(δ†, τ′, s, R(t, s)) | (s ↦ a) ∈ δ†}
+    var transfer_stats = std.AutoHashMap(types.ServiceId, @import("accumulate/execution.zig").TransferServiceStats).init(allocator);
+    errdefer transfer_stats.deinit();
     if (result.transfers.len > 0) {
         transfer_span.debug("Processing transfers for destination services", .{});
 
-        // Group transfers by destination service
-        var grouped_transfers = std.AutoHashMap(types.ServiceId, std.ArrayList(types.ServiceId)).init(allocator);
-        defer meta.deinit.deinitHashMapValuesAndMap(stx.allocator, grouped_transfers);
+        var grouped_transfers_by_dest = std.AutoHashMap(types.ServiceId, std.ArrayList(DeferredTransfer)).init(allocator);
+        defer meta.deinit.deinitHashMapValuesAndMap(stx.allocator, grouped_transfers_by_dest);
 
-        // Process transfers for each destination service
         for (result.transfers) |transfer| {
             transfer_span.trace("Transfer: {d} -> {d}, amount: {d}", .{ transfer.sender, transfer.destination, transfer.amount });
 
-            // Get or create the list for this destination
-            var entry = try grouped_transfers.getOrPut(transfer.destination);
+            var entry = try grouped_transfers_by_dest.getOrPut(transfer.destination);
             if (!entry.found_existing) {
-                entry.value_ptr.* = std.ArrayList(types.ServiceId).init(allocator);
+                entry.value_ptr.* = std.ArrayList(DeferredTransfer).init(allocator);
             }
 
-            // Add the sender to the list
-            try entry.value_ptr.append(transfer.sender);
+            try entry.value_ptr.append(transfer);
+        }
 
-            // TODO: call ΨT
-            // For now, we just log the transfers
+        // Get delta for service accounts
+        const delta_prime: *state.Delta = try stx.ensure(.delta_prime);
 
-            // Sender balance is updated in the transfer function
-            // if (delta_prime.getAccount(transfer.sender)) |sender_account| {
-            //     if (sender_account.balance >= transfer.amount) {
-            //         sender_account.balance -= transfer.amount;
-            //         transfer_span.trace("Reduced balance of sender {d} by {d}", .{ transfer.sender, transfer.amount });
-            //     } else {
-            //         transfer_span.err("Sender {d} has insufficient balance {d} for transfer {d}", .{ transfer.sender, sender_account.balance, transfer.amount });
-            //     }
-            // }
+        var iter = grouped_transfers_by_dest.iterator();
+        while (iter.next()) |entry| {
+            const service_id = entry.key_ptr.*;
+            const deferred_transfers = entry.value_ptr.*.items;
 
-            // Update recipient balance
-            if (delta_prime.getAccount(transfer.destination)) |dest_account| {
-                dest_account.balance += transfer.amount;
-                transfer_span.trace("Increased balance of destination {d} by {d}", .{ transfer.destination, transfer.amount });
-            } else {
-                transfer_span.err("Destination account {d} not found", .{transfer.destination});
-            }
+            var context = @import("pvm_invocations/ontransfer.zig").OnTransferContext{
+                .service_id = entry.key_ptr.*,
+                .service_accounts = @import("services_snapshot.zig").DeltaSnapshot.init(delta_prime),
+                .allocator = allocator,
+            };
+            defer context.deinit();
+
+            const res = try @import("pvm_invocations/ontransfer.zig").invoke(
+                params,
+                allocator,
+                &context,
+                stx.time.current_slot,
+                service_id,
+                deferred_transfers,
+            );
+
+            // Store transfer stats
+            try transfer_stats.put(service_id, .{
+                .gas_used = res.gas_used,
+                .transfer_count = @intCast(deferred_transfers.len),
+            });
         }
 
         transfer_span.debug("Transfers applied successfully", .{});
@@ -525,8 +533,45 @@ pub fn processAccumulateReports(
     const accumulate_root = @import("merkle_binary.zig").M_b(blobs.items, std.crypto.hash.sha3.Keccak256);
     root_span.debug("AccumulateRoot calculated: {s}", .{std.fmt.fmtSliceHexLower(&accumulate_root)});
 
+    // --- Calculate I and X statistics ---
+    const stats_span = span.child(.calculate_stats);
+    defer stats_span.deinit();
+
+    // Initialize stats maps BEFORE deferring their deinit
+    var accumulation_stats = std.AutoHashMap(types.ServiceId, @import("accumulate/execution.zig").AccumulationServiceStats).init(allocator);
+    errdefer accumulation_stats.deinit();
+
+    // Calculate I stats (Accumulation) - Eq 12.25
+    stats_span.debug("Calculating I (Accumulation) statistics for {d} accumulated reports", .{accumulated.len});
+    // Use the per-service gas usage returned by outerAccumulation
+    var service_gas_iter = result.service_gas_used.iterator();
+    while (service_gas_iter.next()) |entry| {
+        const service_id = entry.key_ptr.*;
+        const gas_used = entry.value_ptr.*;
+        // Count how many reports were processed for *this* service
+        var count: u32 = 0;
+        for (accumulated) |report| {
+            for (report.results) |work_result| {
+                if (work_result.service_id == service_id) {
+                    count += 1;
+                }
+            }
+        }
+        try accumulation_stats.put(service_id, .{
+            .gas_used = gas_used,
+            .accumulated_count = count,
+        });
+        stats_span.trace("Added I stats for service {d}: count={d}, gas={d}", .{ service_id, count, gas_used });
+    }
+
     span.debug("Process accumulate reports completed successfully", .{});
-    return accumulate_root;
+    // Return the final result structure including the computed statistics
+    // Note: Ownership of the HashMaps passes to the caller.
+    return @import("accumulate/execution.zig").ProcessAccumulationResult{
+        .accumulate_root = accumulate_root,
+        .accumulation_stats = accumulation_stats,
+        .transfer_stats = transfer_stats,
+    };
 }
 
 fn mapWorkPackageHash(buffer: anytype, items: anytype) ![]types.WorkReportHash {

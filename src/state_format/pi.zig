@@ -21,7 +21,7 @@ test "format Pi state" {
     const allocator = std.testing.allocator;
 
     // Create a sample Pi state
-    var pi = try Pi.init(allocator, 1);
+    var pi = try Pi.init(allocator, 1, 1);
     defer pi.deinit();
 
     // Add some sample data

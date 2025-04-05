@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("../types.zig");
+const state = @import("../state.zig");
 const jam_params = @import("../jam_params.zig");
 
 pub const BASE_PATH = "src/jamtestvectors/data/reports/";
@@ -17,6 +18,64 @@ pub const AuthPools = struct {
         }
         allocator.free(self.pools);
         self.* = undefined;
+    }
+};
+
+pub const Account = struct {
+    service: types.ServiceInfo,
+};
+
+pub const AccountsMapEntry = struct {
+    id: types.ServiceId,
+    data: Account,
+};
+
+pub const CoresStatistics = struct {
+    stats: []state.validator_stats.CoreActivityRecord,
+
+    pub fn stats_size(params: jam_params.Params) usize {
+        return params.core_count;
+    }
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.stats);
+        self.* = undefined;
+    }
+};
+
+pub const ServicesStatisticsMapEntry = struct {
+    id: types.ServiceId,
+    record: state.validator_stats.ServiceActivityRecord,
+};
+
+pub const ServiceStatistics = struct {
+    stats: []ServicesStatisticsMapEntry,
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.stats);
+        self.* = undefined;
+    }
+
+    // encode would need to sort inplace
+
+    pub fn decode(_: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
+        const codec = @import("../codec.zig");
+
+        // Read the length as a variable integer
+        const length = try codec.readInteger(reader);
+
+        // Allocate memory for the service activity records
+        var stats = try allocator.alloc(ServicesStatisticsMapEntry, length);
+        errdefer allocator.free(stats);
+
+        // Decode each service activity record
+        for (0..length) |i| {
+            stats[i] = try codec.deserializeAlloc(ServicesStatisticsMapEntry, .{}, allocator, reader);
+        }
+
+        return @This(){
+            .stats = stats,
+        };
     }
 };
 
@@ -44,26 +103,30 @@ pub const State = struct {
     /// [α] Authorization pools per core
     auth_pools: AuthPools,
 
-    /// [δ] Services dictionary
-    services: []ServiceItem,
+    /// [δ] Relevant services account data. Refer to T(σ) in GP Appendix D.
+    accounts: []AccountsMapEntry,
+
+    /// [δ] Relevant services account data. Refer to T(σ) in GP Appendix D.
+    /// Cores-statistics
+    cores_statistics: CoresStatistics,
+
+    /// Services-statistics
+    services_statistics: ServiceStatistics,
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         self.avail_assignments.deinit(allocator);
         self.curr_validators.deinit(allocator);
         self.prev_validators.deinit(allocator);
-        for (self.offenders) |*offender| {
-            _ = offender;
-        }
+        self.cores_statistics.deinit(allocator);
+        self.services_statistics.deinit(allocator);
         allocator.free(self.offenders);
+
         for (self.recent_blocks) |*block| {
             block.deinit(allocator);
         }
         allocator.free(self.recent_blocks);
+        allocator.free(self.accounts);
         self.auth_pools.deinit(allocator);
-        for (self.services) |*service| {
-            _ = service; // TODO what here
-        }
-        allocator.free(self.services);
         self.* = undefined;
     }
 };

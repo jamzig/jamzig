@@ -318,13 +318,13 @@ pub const DiffEntry = struct {
                 defer allocator.free(new_hex);
 
                 var i: usize = 0;
-                while (i < @max(old_hex.len, new_hex.len)) : (i += 40) {
-                    const old_chunk = if (i < old_hex.len) old_hex[i..@min(i + 40, old_hex.len)] else "";
-                    const new_chunk = if (i < new_hex.len) new_hex[i..@min(i + 40, new_hex.len)] else "";
+                while (i < @max(old_hex.len, new_hex.len)) : (i += 64) {
+                    const old_chunk = if (i < old_hex.len) old_hex[i..@min(i + 64, old_hex.len)] else "";
+                    const new_chunk = if (i < new_hex.len) new_hex[i..@min(i + 64, new_hex.len)] else "";
 
                     // Print old chunk with potential highlighting
                     var j: usize = 0;
-                    while (j < 40) : (j += 1) {
+                    while (j < 64) : (j += 1) {
                         const old_char = if (j < old_chunk.len) old_chunk[j] else ' ';
                         const new_char = if (j < new_chunk.len) new_chunk[j] else ' ';
 
@@ -341,7 +341,7 @@ pub const DiffEntry = struct {
 
                     // Print new chunk with potential highlighting
                     j = 0;
-                    while (j < 40) : (j += 1) {
+                    while (j < 64) : (j += 1) {
                         const old_char = if (j < old_chunk.len) old_chunk[j] else ' ';
                         const new_char = if (j < new_chunk.len) new_chunk[j] else ' ';
 
@@ -374,6 +374,7 @@ pub const MerklizationDictionaryDiff = struct {
         self.entries.items;
     }
 
+    // TODO: camelCase
     pub fn has_changes(self: *const MerklizationDictionaryDiff) bool {
         return self.entries.items.len > 0;
     }
@@ -757,7 +758,7 @@ pub fn buildStateMerklizationDictionaryWithConfig(
 
         // Pi (13)
         const pi_key = constructSimpleByteKey(13);
-        var pi_managed = try getOrInitManaged(allocator, &state.pi, .{ allocator, params.validators_count });
+        var pi_managed = try getOrInitManaged(allocator, &state.pi, .{ allocator, params.validators_count, params.core_count });
         defer pi_managed.deinit(allocator);
         const pi_value = try encodeAndOwnSlice(allocator, state_encoder.encodePi, .{pi_managed.ptr});
         try map.put(pi_key, .{
@@ -779,8 +780,7 @@ pub fn buildStateMerklizationDictionaryWithConfig(
         const xi_key = constructSimpleByteKey(15);
         var xi_managed = try getOrInitManaged(allocator, &state.xi, .{allocator});
         defer xi_managed.deinit(allocator);
-        // FIXME: now hard coded epoch size
-        const xi_value = try encodeAndOwnSlice(allocator, state_encoder.encodeXi, .{ 12, allocator, &xi_managed.ptr.entries });
+        const xi_value = try encodeAndOwnSlice(allocator, state_encoder.encodeXi, .{ params.epoch_length, allocator, &xi_managed.ptr.entries });
         try map.put(xi_key, .{
             .key = xi_key,
             .value = xi_value,

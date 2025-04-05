@@ -79,7 +79,7 @@ pub const TestEnvironment = struct {
         }
     }
 
-    pub fn getMemory(self: *const @This(), offset: usize, length: usize) ![]const u8 {
+    pub fn getMemory(self: *const @This(), offset: usize, length: usize) !Memory.MemorySlice {
         if (offset + length <= self.memory_size) {
             return try self.initial_memory.readSlice(
                 self.memory_base_address + @as(u32, @intCast(offset)),
@@ -166,7 +166,7 @@ pub const TestEnvironment = struct {
                 }
 
                 // Make a copy of the affected memory region
-                const mem_data = execution_context.memory.readSlice(
+                const mem_data = execution_context.memory.readSliceOwned(
                     @intCast(capture_address),
                     access.size,
                 ) catch {
@@ -183,7 +183,7 @@ pub const TestEnvironment = struct {
                     };
                 };
 
-                result_memory = try self.allocator.dupe(u8, mem_data);
+                result_memory = mem_data;
                 memory_address = @intCast(capture_address);
             }
         }

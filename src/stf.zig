@@ -61,10 +61,9 @@ pub fn stateTransition(
         try new_block.header.getEntropy(),
     );
 
-    try validator_stats.transition(
+    try validator_stats.transition_epoch(
         params,
         state_transition,
-        new_block,
     );
 
     // => rho_dagger
@@ -94,19 +93,16 @@ pub fn stateTransition(
     );
 
     // accumulate
-    const work_reports = try available_assignments.getWorkReports(allocator);
-    defer {
-        for (work_reports) |*report| {
-            report.deinit(allocator);
-        }
-        allocator.free(work_reports);
-    }
-    const accumulate_root = try accumulate.transition(
+    const ready_reports = try available_assignments.getWorkReports(allocator);
+    defer @import("meta.zig").deinit.deinitEntriesAndFreeSlice(allocator, ready_reports);
+
+    var accumulate_result = try accumulate.transition(
         params,
         allocator,
         state_transition,
-        work_reports,
+        ready_reports,
     );
+    defer accumulate_result.deinit(allocator);
 
     try preimages.transition(
         params,
@@ -119,7 +115,7 @@ pub fn stateTransition(
         params,
         state_transition,
         new_block,
-        accumulate_root,
+        accumulate_result.accumulate_root,
     );
 
     // Process authorizations using guarantees extrinsic data
@@ -135,6 +131,15 @@ pub fn stateTransition(
         new_block.extrinsic.tickets,
     );
     defer markers.deinit(allocator);
+
+    try validator_stats.transitionFromBlock(
+        params,
+        state_transition,
+        new_block,
+        ready_reports,
+        &accumulate_result.accumulation_stats,
+        &accumulate_result.transfer_stats,
+    );
 
     return state_transition;
 }

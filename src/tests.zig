@@ -41,6 +41,8 @@ comptime {
 
     _ = @import("pvm_invocations/accumulate.zig");
     _ = @import("pvm_invocations/accumulate_test.zig");
+    _ = @import("pvm_invocations/ontransfer.zig");
+    _ = @import("pvm_invocations/ontransfer_test.zig");
 
     _ = @import("merkle.zig");
     _ = @import("merkle_test.zig");
@@ -90,7 +92,8 @@ comptime {
     _ = @import("assurances_test.zig");
 
     _ = @import("reports.zig");
-    _ = @import("reports_test.zig");
+    // FIXME: enable when: https://github.com/davxy/jam-test-vectors/issues/34 has been merged https://github.com/davxy/jam-test-vectors/pull/35
+    // _ = @import("reports_test.zig");
 
     _ = @import("disputes.zig");
     _ = @import("disputes_test.zig");

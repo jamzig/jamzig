@@ -495,7 +495,7 @@ pub const Memory = struct {
 
         var memory = try Memory.initWithCapacity(
             allocator,
-            ro_pages,
+            read_only.len,
             heap_pages,
             input.len,
             stack_size_in_bytes,
@@ -746,51 +746,128 @@ pub const Memory = struct {
         return result;
     }
 
-    /// Read a slice from memory, not allowing cross-page reads
-    /// FIXME: this should be able to cross pages
-    pub fn readSlice(self: *Memory, address: u32, size: usize) ![]const u8 {
+    pub const MemorySlice = struct {
+        buffer: []const u8,
+        allocator: ?std.mem.Allocator = null,
+
+        pub fn deinit(self: *@This()) void {
+            // if we have an allocator we own the slice and should free it
+            if (self.allocator) |alloc| {
+                alloc.free(self.buffer);
+            }
+            self.* = undefined;
+        }
+    };
+
+    /// Reads a hash from memory
+    pub fn readHash(self: *Memory, address: u32) ![32]u8 {
+        var hash_slice = try self.readSlice(address, 32);
+        defer hash_slice.deinit();
+
+        return hash_slice.buffer[0..32].*;
+    }
+
+    /// Read a slice from memory
+    pub fn readSlice(self: *Memory, address: u32, size: usize) !MemorySlice {
         const span = trace.span(.memory_read_slice);
         defer span.deinit();
         span.debug("Reading slice of {d} bytes from address 0x{X:0>8}", .{ size, address });
 
-        // Find the page containing the address
-        const page = self.page_table.findPageOfAddresss(address) orelse {
-            span.err("Page fault - non-allocated memory at 0x{X:0>8}", .{address});
+        // Special case for zero-size reads
+        if (size == 0) {
+            span.debug("Zero-size read requested, returning empty slice", .{});
+            return .{ .buffer = &[_]u8{} };
+        }
+
+        // Find the page containing the starting address
+        const first_page = self.page_table.findPageOfAddresss(address) orelse {
+            const aligned_addr = @divTrunc(address, Z_P) * Z_P;
+            span.err("Page fault - non-allocated memory at 0x{X:0>8} (aligned: 0x{X:0>8})", .{ address, aligned_addr });
             self.last_violation = ViolationInfo{
                 .violation_type = .NonAllocated,
-                .address = address,
+                .address = aligned_addr,
                 .attempted_size = size,
                 .page = null,
             };
             return Error.PageFault;
         };
-        span.trace("Found page at 0x{X:0>8} with flags {s}", .{ page.page.address, @tagName(page.page.flags) });
 
-        // Check if read would cross page boundary
-        const offset = address - page.page.address;
-        const end_offset = offset + size;
-        span.trace("Read range: offset 0x{X} to 0x{X} (page size: 0x{X})", .{ offset, end_offset, Z_P });
+        span.trace("Found first page at 0x{X:0>8} with flags {s}", .{ first_page.page.address, @tagName(first_page.page.flags) });
 
-        if (end_offset > Z_P) {
-            span.err("Cross-page read detected - read would span page boundary", .{});
-            return Error.CrossPageRead;
+        // Calculate offset and available bytes in the first page
+        const offset = address - first_page.page.address;
+        const bytes_in_first_page = Z_P - offset;
+        span.trace("Offset in first page: 0x{X}, bytes available: {d}", .{ offset, bytes_in_first_page });
+
+        // If the entire read fits in the first page, return a slice directly
+        if (size <= bytes_in_first_page) {
+            const result = first_page.page.data[offset..][0..size];
+            if (size <= 64) {
+                span.trace("Read data (single page): {any}", .{std.fmt.fmtSliceHexLower(result)});
+            } else {
+                span.trace("First 64 bytes (single page): {any}", .{std.fmt.fmtSliceHexLower(result[0..@min(64, size)])});
+            }
+            span.debug("Successfully read {d} bytes from a single page", .{size});
+            return .{ .buffer = result };
         }
 
-        // Return slice of page data
-        const result = page.page.data[offset..][0..size];
+        // For cross-page reads, we need to allocate a buffer and copy the data
+        span.debug("Cross-page read detected, allocating buffer for {d} bytes", .{size});
+        var buffer = try self.allocator.alloc(u8, size);
+        errdefer self.allocator.free(buffer);
+
+        // Copy data from the first page
+        @memcpy(buffer[0..bytes_in_first_page], first_page.page.data[offset..Z_P]);
+        span.trace("Copied {d} bytes from first page", .{bytes_in_first_page});
+
+        // Copy data from subsequent pages
+        var bytes_read = bytes_in_first_page;
+        var remaining = size - bytes_read;
+        var current_page = first_page;
+
+        while (remaining > 0) {
+            // Get the next contiguous page
+            current_page = current_page.nextContiguous() orelse {
+                const next_addr = current_page.page.address + Z_P;
+                span.err("Page fault - missing contiguous page at 0x{X:0>8}", .{next_addr});
+                self.allocator.free(buffer);
+                self.last_violation = ViolationInfo{
+                    .violation_type = .NonAllocated,
+                    .address = next_addr,
+                    .attempted_size = size,
+                    .page = current_page.page,
+                };
+                return Error.PageFault;
+            };
+            span.trace("Reading from next page at 0x{X:0>8}", .{current_page.page.address});
+
+            // Determine how many bytes to copy from this page
+            const bytes_to_copy = @min(remaining, Z_P);
+            @memcpy(buffer[bytes_read..][0..bytes_to_copy], current_page.page.data[0..bytes_to_copy]);
+
+            bytes_read += bytes_to_copy;
+            remaining -= bytes_to_copy;
+            span.trace("Copied {d} bytes from page, {d} bytes remaining", .{ bytes_to_copy, remaining });
+        }
+
         if (size <= 64) {
-            span.trace("Read data: {any}", .{std.fmt.fmtSliceHexLower(result)});
+            span.trace("Read data (cross-page): {any}", .{std.fmt.fmtSliceHexLower(buffer)});
         } else {
-            span.trace("First 64 bytes: {any}", .{std.fmt.fmtSliceHexLower(result[0..@min(64, size)])});
+            span.trace("First 64 bytes (cross-page): {any}", .{std.fmt.fmtSliceHexLower(buffer[0..@min(64, size)])});
         }
-        span.debug("Successfully read {d} bytes", .{size});
+        span.debug("Successfully read {d} bytes across multiple pages", .{size});
 
-        return result;
+        return .{ .buffer = buffer, .allocator = self.allocator };
     }
 
     pub fn readSliceOwned(self: *Memory, address: u32, size: usize) ![]const u8 {
         const slice = try self.readSlice(address, size);
-        return self.allocator.dupe(u8, slice);
+        // either was already owned, and otherwise we dupe
+        if (slice.allocator) |_| {
+            return slice.buffer;
+        } else {
+            return self.allocator.dupe(u8, slice.buffer);
+        }
     }
 
     /// Write a slice to memory, not allowing cross-page writes
