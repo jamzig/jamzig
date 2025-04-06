@@ -120,4 +120,7 @@ comptime {
 
     _ = @import("crypto/bandersnatch.zig");
     _ = @import("crypto/bls12_381.zig");
+
+    // Networking
+    _ = @import("net/udp_socket.zig");
 }
