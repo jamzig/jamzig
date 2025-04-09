@@ -5,11 +5,15 @@ const common = @import("common.zig");
 const certificate_verifier = @import("certificate_verifier.zig");
 const constants = @import("constants.zig");
 const UdpSocket = @import("../udp_socket.zig").UdpSocket;
+const xev = @import("xev");
 
 pub const JamSnpClient = struct {
     allocator: std.mem.Allocator,
     keypair: std.crypto.sign.Ed25519.KeyPair,
     socket: UdpSocket,
+
+    packets_in_event: xev.UDP,
+    tick_event: xev.Timer,
 
     lsquic_engine: *lsquic.lsquic_engine,
     lsquic_engine_api: lsquic.lsquic_engine_api,
@@ -88,7 +92,7 @@ pub const JamSnpClient = struct {
                 .ea_stream_if = &client.lsquic_stream_iterface,
                 .ea_stream_if_ctx = null, // Will be set later
                 .ea_packets_out = &sendPacketsOut,
-                .ea_packets_out_ctx = null, // Will be set later
+                .ea_packets_out_ctx = null, // Will be et later
                 .ea_get_ssl_ctx = &getSslContext,
                 .ea_lookup_cert = null,
                 .ea_cert_lu_ctx = null,
@@ -98,9 +102,11 @@ pub const JamSnpClient = struct {
             .chain_genesis_hash = try allocator.dupe(u8, chain_genesis_hash),
             .is_builder = is_builder,
             // TODO:
-            // .packets_in_event = xev.UDP.initFd(self.socket.internal),
-            // .tick_event = try xev.Timer.init(),
+            .packets_in_event = xev.UDP.initFd(socket.socket),
+            .tick_event = try xev.Timer.init(),
         };
+
+        client.lsquic_engine_api.ea_packets_out_ctx = &client.socket;
 
         // Create lsquic engine
         client.*.lsquic_engine = lsquic.lsquic_engine_new(0, &client.*.lsquic_engine_api) orelse {
@@ -108,6 +114,96 @@ pub const JamSnpClient = struct {
         };
 
         return client;
+    }
+
+    pub fn run(self: *@This()) !void {
+        var loop = try xev.Loop.init(.{});
+        defer loop.deinit();
+
+        // Trigger first timer at 500ms setting the ticker in motion
+        var tick_complete: xev.Completion = undefined;
+        self.tick_event.run(&loop, &tick_complete, 500, @This(), self, onTick);
+
+        var packets_in_complete: xev.Completion = undefined;
+
+        // 1500 is the interface's MTU, so we'll never receive more bytes than that
+        // from UDP.
+        const read_buffer = try self.allocator.alloc(u8, 1500);
+        defer self.allocator.free(read_buffer);
+
+        var state: xev.UDP.State = undefined;
+        self.packets_in_event.read(
+            &loop,
+            &packets_in_complete,
+            &state,
+            .{ .slice = read_buffer },
+            @This(),
+            self,
+            onPacketsIn,
+        );
+
+        try loop.run(.until_done);
+    }
+
+    fn onTick(
+        maybe_self: ?*@This(),
+        xev_loop: *xev.Loop,
+        xev_completion: *xev.Completion,
+        xev_timer_error: xev.Timer.RunError!void,
+    ) xev.CallbackAction {
+        errdefer |err| std.debug.panic("onTick failed with: {s}", .{@errorName(err)});
+        try xev_timer_error;
+
+        const self = maybe_self.?;
+
+        lsquic.lsquic_engine_process_conns(self.lsquic_engine);
+
+        // Delta is in 1/1_000_000 so we divide by 100 to get ms
+        var delta: c_int = undefined;
+
+        var timeout_in_ms: u64 = 100;
+        if (lsquic.lsquic_engine_earliest_adv_tick(self.lsquic_engine, &delta) != 0) {
+            if (delta > 0) {
+                timeout_in_ms = @intCast(@divTrunc(delta, 1000));
+            }
+        }
+
+        self.tick_event.run(xev_loop, xev_completion, timeout_in_ms, @This(), self, onTick);
+
+        return .disarm;
+    }
+
+    fn onPacketsIn(
+        maybe_self: ?*@This(),
+        _: *xev.Loop,
+        _: *xev.Completion,
+        _: *xev.UDP.State,
+        peer_address: std.net.Address,
+        _: xev.UDP,
+        xev_read_buffer: xev.ReadBuffer,
+        xev_read_error: xev.ReadError!usize,
+    ) xev.CallbackAction {
+        errdefer |err| std.debug.panic("onPacketsIn failed with: {s}", .{@errorName(err)});
+
+        const bytes = try xev_read_error;
+
+        const self = maybe_self.?;
+
+        const local_address = try self.socket.getLocalAddress();
+
+        if (0 > lsquic.lsquic_engine_packet_in(
+            self.lsquic_engine,
+            xev_read_buffer.slice.ptr,
+            bytes,
+            @ptrCast(&local_address.any),
+            @ptrCast(&peer_address.any),
+            self,
+            0,
+        )) {
+            @panic("lsquic_engine_packet_in failed");
+        }
+
+        return .rearm;
     }
 
     pub fn deinit(self: *JamSnpClient) void {
@@ -288,36 +384,27 @@ pub const JamSnpClient = struct {
 
     fn sendPacketsOut(
         ctx: ?*anyopaque,
-        specs: ?[*]const lsquic.lsquic_out_spec,
-        n_specs: c_uint,
+        specs_ptr: ?[*]const lsquic.lsquic_out_spec,
+        specs_len: c_uint,
     ) callconv(.C) c_int {
-        const self = @as(*JamSnpClient, @ptrCast(@alignCast(ctx)));
-        var count: c_uint = 0;
+        const socket = @as(*UdpSocket, @ptrCast(@alignCast(ctx)));
 
-        for (0..n_specs) |i| {
-            const spec = specs.?[i];
+        const specs = specs_ptr.?[0..specs_len];
 
-            // Convert iovec to a slice
-            var total_size: usize = 0;
-            for (0..spec.iovlen) |j| {
-                total_size += spec.iov.?[j].iov_len;
-            }
-
-            var buffer = self.allocator.alloc(u8, total_size) catch break;
-            defer self.allocator.free(buffer);
-
-            var offset: usize = 0;
-            for (0..spec.iovlen) |j| {
-                const iov = spec.iov.?[j];
-                @memcpy(buffer[offset .. offset + iov.iov_len], @as([*]const u8, @ptrCast(iov.iov_base))[0..iov.iov_len]);
-                offset += iov.iov_len;
-            }
+        var send_packets: c_int = 0;
+        for (specs) |spec| {
+            const iov = spec.iov[0..spec.iovlen];
 
             // Send the packet
-            _ = self.socket.sendToSockAddr(buffer, @ptrCast(@alignCast(spec.dest_sa))) catch break;
-            count += 1;
+            for (iov) |iovec| {
+                const buf_ptr: [*]const u8 = @ptrCast(iovec.iov_base);
+                const buf_len: usize = @intCast(iovec.iov_len);
+                const buffer = buf_ptr[0..buf_len];
+                _ = socket.sendToSockAddr(buffer, @ptrCast(@alignCast(spec.dest_sa))) catch break;
+            }
+            send_packets += 1;
         }
 
-        return @intCast(count);
+        return send_packets;
     }
 };

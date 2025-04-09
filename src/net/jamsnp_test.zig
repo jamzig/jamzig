@@ -70,6 +70,10 @@ test "JAMSNP Client-Server Connection" {
     try client.connect("::1", test_port);
     std.debug.print("Client initiated connection to server\n", .{});
 
+    // Client
+    std.debug.print("Client running..\n", .{});
+    try client.run();
+
     // Short sleep to avoid busy-waiting
     std.time.sleep(2 * std.time.ns_per_s);
 
