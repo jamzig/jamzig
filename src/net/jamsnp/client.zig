@@ -202,7 +202,7 @@ pub const JamSnpClient = struct {
 
         // Run a single tick
         span.debug("Running event loop for a single tick", .{});
-        try self.loop.run(.once);
+        try self.loop.run(.no_wait);
         span.debug("Event loop tick completed", .{});
     }
 
