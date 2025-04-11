@@ -1,5 +1,8 @@
 const std = @import("std");
 const ssl = @import("ssl");
+
+const Base32 = @import("../base32.zig").Encoding;
+
 const trace = @import("../../tracing.zig").scoped(.network);
 
 /// Certificate verification callback for JAMSNP
@@ -8,11 +11,16 @@ pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.
     defer span.deinit();
     span.debug("Starting certificate verification", .{});
 
-    // Get the peer certificate
-    const cert = ssl.X509_STORE_CTX_get_current_cert(certs) orelse {
-        span.err("Failed to get current certificate", .{});
-        return 0; // Verification failed
-    };
+    const ssl_handle = ssl.X509_STORE_CTX_get_ex_data(certs, ssl.SSL_get_ex_data_X509_STORE_CTX_idx());
+
+    // Now you can use ssl_handle to get the peer certificate or perform other operations
+    const cert = ssl.SSL_get_peer_certificate(@ptrCast(ssl_handle));
+
+    // // Get the peer certificate
+    // const cert = ssl.X509_STORE_CTX_get_current_cert(certs) orelse {
+    //     span.err("Failed to get current certificate", .{});
+    //     return 0; // Verification failed
+    // };
     span.debug("Got peer certificate", .{});
 
     // 1. Check signature algorithm is Ed25519
@@ -56,16 +64,20 @@ pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.
     defer name_check_span.deinit();
 
     // 4. Extract the DNS name and verify format
-    const dnsName = ssl.GENERAL_NAME_get0_value(gn, ssl.GEN_DNS) orelse {
+    var type_val: c_int = undefined;
+    const dnsName = ssl.GENERAL_NAME_get0_value(gn, &type_val);
+
+    if (dnsName == null or type_val != ssl.GEN_DNS) {
         name_check_span.err("Alternative name is not a DNS name", .{});
-        return 0; // Failed to get value
-    };
+        return 0;
+    }
     name_check_span.debug("Alternative name is a DNS name", .{});
 
     const dnsNameStr = ssl.ASN1_STRING_get0_data(@ptrCast(@alignCast(dnsName)));
     const dnsNameLen: usize = @intCast(ssl.ASN1_STRING_length(@ptrCast(@alignCast(dnsName))));
 
     name_check_span.debug("DNS name length: {d}", .{dnsNameLen});
+    name_check_span.debug("DNS name value: {s}", .{dnsNameStr[0..dnsNameLen]});
 
     if (dnsNameLen != 53) { // 53-character DNS name
         name_check_span.err("DNS name has invalid length: {d} (expected 53)", .{dnsNameLen});
@@ -73,9 +85,8 @@ pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.
     }
 
     // Create a buffer to safely print the DNS name for logging
-    var dns_buffer: [54]u8 = undefined;
+    var dns_buffer: [53]u8 = undefined;
     @memcpy(dns_buffer[0..dnsNameLen], dnsNameStr[0..dnsNameLen]);
-    dns_buffer[dnsNameLen] = 0; // null terminate
     name_check_span.trace("DNS name: {s}", .{dns_buffer[0..dnsNameLen]});
 
     // Check format 'e' + base32 encoded pubkey
@@ -90,23 +101,12 @@ pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.
     defer base32_check_span.deinit();
     base32_check_span.debug("Checking base32 encoding for DNS name", .{});
 
-    var invalid_chars: [10]u8 = undefined;
-    var invalid_count: usize = 0;
-
-    for (1..dnsNameLen) |i| {
-        const c = dnsNameStr[i];
-        const isValid =
-            (c >= 'a' and c <= 'z') or
-            (c >= '2' and c <= '7');
-
-        if (!isValid) {
-            if (invalid_count < invalid_chars.len) {
-                invalid_chars[invalid_count] = c;
-                invalid_count += 1;
-            }
-            base32_check_span.err("Invalid base32 character '{c}' at position {d}", .{ c, i });
-            return 0; // Character not in the expected base32 alphabet
-        }
+    var decode_buffer: [32]u8 = undefined;
+    if (Base32.decode(&decode_buffer, dnsNameStr[1..53])) |pubkey| {
+        // TODO: check if this pubkey matches the signature of this certificate
+        _ = pubkey;
+    } else |_| {
+        name_check_span.err("DNS name not properly encoded", .{});
     }
 
     base32_check_span.debug("DNS name is properly base32 encoded", .{});

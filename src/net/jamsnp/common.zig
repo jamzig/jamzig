@@ -1,9 +1,10 @@
 const std = @import("std");
 
-const base32 = @import("base32");
 const ssl = @import("ssl");
 
 const constants = @import("constants.zig");
+
+const Base32 = @import("../base32.zig").Encoding;
 
 const trace = @import("../../tracing.zig").scoped(.network);
 
@@ -139,53 +140,44 @@ pub const X509Certificate = struct {
         const pubkey = &keypair.public_key.bytes;
         span.trace("Adding SAN with encoded pubkey: {s}", .{std.fmt.fmtSliceHexLower(pubkey)});
 
-        // Create a SAN extension
-        const subject_alt_names = ssl.GENERAL_NAMES_new() orelse {
-            span.err("Failed to create general names object", .{});
-            @panic("GENERAL_NAMES_new failed");
-        };
-        defer ssl.GENERAL_NAMES_free(subject_alt_names);
-        span.debug("Created GENERAL_NAMES object for subject alternative names", .{});
-
         // Generate the base32 encoded public key
-        const size = comptime base32.std_encoding.encodeLen(32);
-        var dns_name_buf: [size + 1]u8 = undefined;
-        dns_name_buf[0] = 'e'; // First character is 'e'
+        const size = comptime Base32.encodeLen(32);
+        var pubkey_encoding_buf: [size]u8 = undefined;
 
         // Base32 encode the public key (32 bytes) - results in 52 chars
-        _ = base32.std_encoding.encode(dns_name_buf[1..], pubkey);
+        const encoded = Base32.encode(&pubkey_encoding_buf, pubkey);
+        span.trace("Encoded pubkey {s} len: {d}", .{ encoded, encoded.len });
 
-        span.debug("Created DNS name for certificate", .{});
-        span.trace("DNS name value: {s}", .{dns_name_buf[0 .. size + 1]});
-        // span.trace("DNS name pubkey: {}", .{std.fmt.fmtSliceHexLower(pubkey)});
-
-        // Create a DNS-type general name with our encoded key
-        const general_name = ssl.GENERAL_NAME_new() orelse {
-            span.err("Failed to create general name", .{});
-            @panic("GENERAL_NAME_new failed");
+        // Create a string for the extension value in OpenSSL format
+        // The format is DNS:name
+        var ext_value_buf: [128]u8 = undefined;
+        const ext_value = std.fmt.bufPrintZ(&ext_value_buf, "DNS:e{s}", .{encoded}) catch {
+            span.err("Failed to format DNS name", .{});
+            @panic("bufPrint failed");
         };
-        span.debug("Created GENERAL_NAME for alternative name", .{});
+        span.debug("Formatted SAN extension value: {s}", .{ext_value});
 
-        // Create ASN1_STRING for the DNS name
-        const dns_str = ssl.ASN1_STRING_new() orelse {
-            span.err("Failed to create ASN1 string", .{});
-            @panic("ASN1_STRING_new failed");
+        // Create extension using string format
+        const ext = ssl.X509V3_EXT_nconf_nid(
+            null, // conf
+            null, // ctx
+            ssl.NID_subject_alt_name, // ext_nid
+            @ptrCast(ext_value.ptr), // value
+        ) orelse {
+            span.err("Failed to create subject alternative name extension", .{});
+            @panic("X509V3_EXT_conf_nid failed");
         };
-        span.debug("Created ASN1_STRING for DNS name", .{});
+        span.debug("Created X509 extension for subject alternative names", .{});
 
-        if (ssl.ASN1_STRING_set(dns_str, &dns_name_buf, 53) == 0) {
-            span.err("Failed to set ASN1 string value", .{});
-            @panic("ASN1_STRING_set failed");
+        // Add the extension to the certificate
+        if (ssl.X509_add_ext(cert, ext, -1) == 0) {
+            span.err("Failed to add subject alternative name extension to certificate", .{});
+            @panic("X509_add_ext failed");
         }
-        span.debug("Set ASN1 string value with encoded pubkey", .{});
+        span.debug("Added subject alternative name extension to certificate", .{});
 
-        // Set the DNS name in the general name
-        ssl.GENERAL_NAME_set0_value(general_name, ssl.GEN_DNS, @ptrCast(dns_str));
-        span.debug("Set DNS name value in GENERAL_NAME", .{});
-
-        // Add the general name to the subject alternative names
-        _ = ssl.sk_GENERAL_NAME_push(subject_alt_names, general_name);
-        span.debug("Added GENERAL_NAME to subject alternative names", .{});
+        // Free the extension now that it's been added
+        ssl.X509_EXTENSION_free(ext);
 
         // Sign the certificate with our private key
         if (ssl.X509_sign(cert, pkey, null) == 0) {
@@ -196,55 +188,6 @@ pub const X509Certificate = struct {
 
         span.debug("Certificate creation completed successfully", .{});
         return cert;
-    }
-
-    /// Base32 encode a 32-byte Ed25519 public key into a 52-character string
-    /// Uses the alphabet "abcdefghijklmnopqrstuvwxyz234567" as specified in JAMSNP
-    fn base32EncodeEd25519Key(pubkey: [32]u8, out_buf: []u8) void {
-        const span = trace.span(.base32_encode);
-        defer span.deinit();
-        span.debug("Base32 encoding Ed25519 public key", .{});
-        span.trace("Input pubkey: {s}", .{std.fmt.fmtSliceHexLower(&pubkey)});
-
-        const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
-        var i: usize = 0;
-        var out_idx: usize = 0;
-
-        // Process 5 bits at a time
-        while (i < 32) {
-            // Handle full bytes
-            const b0 = if (i < 32) pubkey[i] else 0;
-            i += 1;
-            const b1 = if (i < 32) pubkey[i] else 0;
-            i += 1;
-            const b2 = if (i < 32) pubkey[i] else 0;
-            i += 1;
-            const b3 = if (i < 32) pubkey[i] else 0;
-            i += 1;
-            const b4 = if (i < 32) pubkey[i] else 0;
-            i += 1;
-
-            // Extract groups of 5 bits and convert to base32 characters
-            out_buf[out_idx] = alphabet[(b0 >> 3) & 0x1F];
-            out_idx += 1;
-            out_buf[out_idx] = alphabet[((b0 << 2) | (b1 >> 6)) & 0x1F];
-            out_idx += 1;
-            out_buf[out_idx] = alphabet[(b1 >> 1) & 0x1F];
-            out_idx += 1;
-            out_buf[out_idx] = alphabet[((b1 << 4) | (b2 >> 4)) & 0x1F];
-            out_idx += 1;
-            out_buf[out_idx] = alphabet[((b2 << 1) | (b3 >> 7)) & 0x1F];
-            out_idx += 1;
-            out_buf[out_idx] = alphabet[(b3 >> 2) & 0x1F];
-            out_idx += 1;
-            out_buf[out_idx] = alphabet[((b3 << 3) | (b4 >> 5)) & 0x1F];
-            out_idx += 1;
-            out_buf[out_idx] = alphabet[b4 & 0x1F];
-            out_idx += 1;
-        }
-
-        span.trace("Encoded output: {s}", .{out_buf[0..out_idx]});
-        span.debug("Base32 encoding completed, encoded {d} bytes to {d} characters", .{ pubkey.len, out_idx });
     }
 };
 
@@ -348,12 +291,12 @@ pub fn configureSSLContext(
     if (is_client) {
         verify_span.debug("Configuring certificate verification for client mode", .{});
         // For clients, verify peer certificate
-        ssl.SSL_CTX_set_verify(ssl_ctx, ssl.SSL_VERIFY_NONE, null);
+        ssl.SSL_CTX_set_verify(ssl_ctx, ssl.SSL_VERIFY_PEER, null);
         verify_span.debug("Set client verification to SSL_VERIFY_NONE", .{});
     } else {
         verify_span.debug("Configuring certificate verification for server mode", .{});
         // For servers, both request and verify client certificates
-        ssl.SSL_CTX_set_verify(ssl_ctx, ssl.SSL_VERIFY_NONE | ssl.SSL_VERIFY_FAIL_IF_NO_PEER_CERT, null);
+        ssl.SSL_CTX_set_verify(ssl_ctx, ssl.SSL_VERIFY_PEER | ssl.SSL_VERIFY_FAIL_IF_NO_PEER_CERT, null);
         verify_span.debug("Set server verification to SSL_VERIFY_NONE | SSL_VERIFY_FAIL_IF_NO_PEER_CERT", .{});
     }
 
