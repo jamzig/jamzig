@@ -12,9 +12,11 @@ const xev = @import("xev");
 const trace = @import("../../tracing.zig").scoped(.network);
 
 pub const JamSnpServer = struct {
-    allocator: std.mem.Allocator,
+        allocator: std.mem.Allocator,
     keypair: std.crypto.sign.Ed25519.KeyPair,
     socket: UdpSocket,
+    alpn_id: []const u8,
+
 
     // XEVState: Store the event loop
     loop: xev.Loop = undefined,
@@ -74,6 +76,15 @@ pub const JamSnpServer = struct {
             socket.deinit();
         }
 
+                // Create ALPN identifier for server
+        span.debug("Building ALPN identifier", .{});
+        const alpn_id = try common.buildAlpnIdentifier(
+            allocator,
+            chain_genesis_hash,
+            false // is_builder (not applicable for server)
+        );
+        span.debug("ALPN id: {s}", .{alpn_id});
+
         // Configure SSL context
         span.debug("Configuring SSL context", .{});
         const ssl_ctx = try common.configureSSLContext(
@@ -82,7 +93,9 @@ pub const JamSnpServer = struct {
             chain_genesis_hash,
             false, // is_client
             false, // is_builder (not applicable for server)
+            alpn_id,
         );
+
         errdefer {
             span.debug("Cleaning up SSL context after error", .{});
             ssl.SSL_CTX_free(ssl_ctx);
@@ -115,7 +128,7 @@ pub const JamSnpServer = struct {
 
         // Initialize server structure first
         span.debug("Setting up server structure", .{});
-        server.* = JamSnpServer{
+                server.* = JamSnpServer{
             .allocator = allocator,
             .keypair = keypair,
             .socket = socket,
@@ -125,10 +138,13 @@ pub const JamSnpServer = struct {
             .ssl_ctx = ssl_ctx,
             .chain_genesis_hash = try allocator.dupe(u8, chain_genesis_hash),
             .allow_builders = allow_builders,
+            // Store ALPN ID for later cleanup
+            .alpn_id = alpn_id,
             // Initialize xev event handlers
             .packets_in_event = xev.UDP.initFd(socket.socket),
             .tick_event = try xev.Timer.init(),
         };
+
         span.trace("Chain genesis hash length: {d} bytes", .{chain_genesis_hash.len});
         span.trace("Chain genesis hash: {s}", .{std.fmt.fmtSliceHexLower(chain_genesis_hash)});
 
@@ -162,7 +178,7 @@ pub const JamSnpServer = struct {
         return server;
     }
 
-    pub fn deinit(self: *JamSnpServer) void {
+        pub fn deinit(self: *JamSnpServer) void {
         const span = trace.span(.deinit);
         defer span.deinit();
         span.debug("Deinitializing JamSnpServer", .{});
@@ -177,11 +193,14 @@ pub const JamSnpServer = struct {
 
         self.allocator.free(self.read_buffer);
         self.allocator.free(self.chain_genesis_hash);
+        // ALPN identifier needs to be freed by the server
+        self.allocator.free(self.alpn_id);
 
         self.allocator.destroy(self);
 
         span.debug("JamSnpServer deinitialized successfully", .{});
     }
+
 
     pub fn listen(self: *JamSnpServer, addr: []const u8, port: u16) !void {
         const span = trace.span(.listen);

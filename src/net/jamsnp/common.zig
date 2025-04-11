@@ -9,7 +9,7 @@ const Base32 = @import("../base32.zig").Encoding;
 const trace = @import("../../tracing.zig").scoped(.network);
 
 /// Builds the ALPN identifier string for JAMSNP
-pub fn buildAlpnIdentifier(allocator: std.mem.Allocator, chain_genesis_hash: []const u8, is_builder: bool) ![:0]u8 {
+pub fn buildAlpnIdentifier(allocator: std.mem.Allocator, chain_genesis_hash: []const u8, is_builder: bool) ![]u8 {
     const span = trace.span(.build_alpn_identifier);
     defer span.deinit();
     span.debug("Building ALPN identifier", .{});
@@ -29,7 +29,7 @@ pub fn buildAlpnIdentifier(allocator: std.mem.Allocator, chain_genesis_hash: []c
         try writer.writeAll("/builder");
     }
 
-    const result = try buffer.toOwnedSliceSentinel(0);
+    const result = try buffer.toOwnedSlice();
     span.debug("ALPN identifier created: {s}", .{result});
     return result;
 }
@@ -193,11 +193,12 @@ pub const X509Certificate = struct {
 
 /// Configure SSL context for JAMSNP
 pub fn configureSSLContext(
-    allocator: std.mem.Allocator,
+    _: std.mem.Allocator,
     keypair: std.crypto.sign.Ed25519.KeyPair,
     chain_genesis_hash: []const u8,
     is_client: bool,
     is_builder: bool,
+    alpn_id: []const u8,
 ) !*ssl.SSL_CTX {
     const span = trace.span(.configure_ssl_context);
     defer span.deinit();
@@ -305,10 +306,7 @@ pub fn configureSSLContext(
     defer alpn_span.deinit();
     alpn_span.debug("Configuring ALPN", .{});
 
-    // FIXME: check this is a memory leak, just for making this work for now
-    const alpn_id = try buildAlpnIdentifier(allocator, chain_genesis_hash, is_builder);
-    // defer allocator.free(alpn_id);
-    alpn_span.debug("Built ALPN identifier: {s}", .{alpn_id});
+    alpn_span.debug("Using provided ALPN identifier: {s}", .{alpn_id});
 
     const alpn_protos = [1][]const u8{alpn_id};
 
@@ -373,7 +371,7 @@ pub fn configureSSLContext(
             }
         }.callback;
 
-        ssl.SSL_CTX_set_alpn_select_cb(ssl_ctx, select_cb, @ptrCast(alpn_id.ptr));
+        ssl.SSL_CTX_set_alpn_select_cb(ssl_ctx, select_cb, @ptrCast(@constCast(alpn_id.ptr)));
         alpn_span.debug("Set server ALPN select callback successfully", .{});
     }
 

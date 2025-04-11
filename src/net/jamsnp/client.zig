@@ -77,6 +77,11 @@ pub const JamSnpClient = struct {
             socket.deinit();
         }
 
+        // Create ALPN identifier
+        span.debug("Building ALPN identifier", .{});
+        const alpn_id = try common.buildAlpnIdentifier(allocator, chain_genesis_hash, is_builder);
+        span.debug("ALPN id: {s}", .{alpn_id});
+
         // Configure SSL context
         span.debug("Configuring SSL context", .{});
         const ssl_ctx = try common.configureSSLContext(
@@ -85,6 +90,7 @@ pub const JamSnpClient = struct {
             chain_genesis_hash,
             true, // is_client
             is_builder,
+            alpn_id,
         );
         errdefer {
             span.debug("Cleaning up SSL context after error", .{});
@@ -107,10 +113,7 @@ pub const JamSnpClient = struct {
             std.debug.panic("Client engine settings problem: {s}", .{error_buffer});
         }
 
-        // Create ALPN identifier
-        span.debug("Building ALPN identifier", .{});
-        const alpn_id = try common.buildAlpnIdentifier(allocator, chain_genesis_hash, is_builder);
-        span.debug("ALPN id: {s}", .{alpn_id});
+        // We already have alpn_id from earlier
 
         // Since lsquic references these settings
         // we need this to be on the heap with a lifetime which outlasts the
