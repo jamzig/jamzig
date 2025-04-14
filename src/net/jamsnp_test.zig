@@ -4,7 +4,8 @@ const lsquic = @import("lsquic");
 const JamSnpServer = @import("jamsnp/server.zig").JamSnpServer;
 const JamSnpClient = @import("jamsnp/client.zig").JamSnpClient;
 const common = @import("jamsnp/common.zig");
-const UdpSocket = @import("udp_socket.zig").UdpSocket;
+const network = @import("network");
+
 
 // Add a logging callback function
 fn lsquic_log_callback(ctx: ?*anyopaque, buf: [*c]const u8, len: usize) callconv(.C) c_int {
@@ -33,12 +34,16 @@ test "JAMSNP Client-Server Connection" {
     //
     // ssl.SSL_CTX_set_info_callback(ssl_ctx, ssl_info_callback); // Register the callback
 
-    // Initialize LSQUIC globally
+        // Initialize network and LSQUIC globally
+    try network.init();
+    defer network.deinit();
+    
     if (lsquic.lsquic_global_init(lsquic.LSQUIC_GLOBAL_SERVER | lsquic.LSQUIC_GLOBAL_CLIENT) != 0) {
         std.debug.print("Failed to initialize LSQUIC globally\n", .{});
         return error.LsquicInitFailed;
     }
     defer lsquic.lsquic_global_cleanup();
+
 
     // Generate keypairs for server and client
     const server_keypair = try std.crypto.sign.Ed25519.KeyPair.generateDeterministic([_]u8{0} ** 32);
@@ -61,7 +66,9 @@ test "JAMSNP Client-Server Connection" {
     // Bind the server to localhost on a specific test port
     const test_port: u16 = 12345;
     try server.listen("::1", test_port);
-    std.debug.print("Server is listening on: {}\n", .{server.socket.bound_address.?});
+        const local_endpoint = try server.socket.getLocalEndPoint();
+    std.debug.print("Server is listening on: {}\n", .{local_endpoint});
+
 
     // Create the client
     var client = try JamSnpClient.init(

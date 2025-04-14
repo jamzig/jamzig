@@ -26,6 +26,8 @@ pub fn build(b: *std.Build) !void {
     const xev_mod = xev_dep.module("xev");
 
     // Quic & Ssl
+    const zig_network_dep = b.dependency("zig-network", dep_opts);
+    const zig_network_mod = zig_network_dep.module("network");
     const lsquic_dep = b.dependency("lsquic", dep_opts);
     const lsquic_mod = lsquic_dep.module("lsquic");
     const ssl_dep = lsquic_dep.builder.dependency("boringssl", dep_opts);
@@ -48,6 +50,7 @@ pub fn build(b: *std.Build) !void {
     jamzig_exe.root_module.addOptions("build-options", build_options);
     rust_deps.staticallyLinkTo(jamzig_exe);
     jamzig_exe.root_module.addImport("xev", xev_mod);
+    jamzig_exe.root_module.addImport("znet", zig_network_mod);
     jamzig_exe.root_module.addImport("lsquic", lsquic_mod);
     jamzig_exe.root_module.addImport("ssl", ssl_mod);
     jamzig_exe.root_module.addImport("base32", base32_mod);
@@ -126,6 +129,7 @@ pub fn build(b: *std.Build) !void {
     unit_tests.root_module.addImport("tmpfile", tmpfile_module);
 
     unit_tests.root_module.addImport("xev", xev_mod);
+    unit_tests.root_module.addImport("network", zig_network_mod);
     unit_tests.root_module.addImport("lsquic", lsquic_mod);
     unit_tests.root_module.addImport("ssl", ssl_mod);
     unit_tests.root_module.addImport("base32", base32_mod);

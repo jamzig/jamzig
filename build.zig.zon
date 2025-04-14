@@ -31,6 +31,10 @@
             .url = "git+https://github.com/jamzig/lsquic#ee141c51f1257718c639edf78e300724b38dcb46",
             .hash = "lsquic-0.1.0-oZGGDUWdHQGciJasbWqM3iHTBg_53P3GOnZox9_it9Vt",
         },
+        .@"zig-network" = .{
+            .url = "git+https://github.com/ikskuh/zig-network.git#c76240d2240711a3dcbf1c0fb461d5d1f18be79a",
+            .hash = "network-0.1.0-AAAAAOwlAQAQ6zKPUrsibdpGisxld9ftUKGdMvcCSpaj",
+        },
     },
     .paths = .{
         // This makes *all* files, recursively, included in this package. It is generally

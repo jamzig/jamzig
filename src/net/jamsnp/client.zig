@@ -4,8 +4,11 @@ const ssl = @import("ssl");
 const common = @import("common.zig");
 const certificate_verifier = @import("certificate_verifier.zig");
 const constants = @import("constants.zig");
-const UdpSocket = @import("../udp_socket.zig").UdpSocket;
+const network = @import("network");
+
 const xev = @import("xev");
+
+const toSocketAddress = @import("../ext.zig").toSocketAddress;
 
 // Import the tracing module
 const trace = @import("../../tracing.zig").scoped(.network);
@@ -13,7 +16,8 @@ const trace = @import("../../tracing.zig").scoped(.network);
 pub const JamSnpClient = struct {
     allocator: std.mem.Allocator,
     keypair: std.crypto.sign.Ed25519.KeyPair,
-    socket: UdpSocket,
+    socket: network.Socket,
+
     alpn: []const u8,
 
     loop: xev.Loop = undefined,
@@ -21,6 +25,7 @@ pub const JamSnpClient = struct {
     packets_in: xev.UDP,
     packets_in_c: xev.Completion = undefined,
     packets_in_state: xev.UDP.State = undefined,
+
     packet_in_buffer: []u8 = undefined,
 
     tick: xev.Timer,
@@ -71,8 +76,8 @@ pub const JamSnpClient = struct {
 
         // Create UDP socket
         span.debug("Creating UDP socket", .{});
-        var socket = try UdpSocket.init();
-        errdefer socket.deinit();
+        var socket = try network.Socket.create(.ipv6, .udp);
+        errdefer socket.close();
 
         // Create ALPN identifier
         const alpn_id = try common.buildAlpnIdentifier(allocator, chain_genesis_hash, is_builder);
@@ -119,7 +124,8 @@ pub const JamSnpClient = struct {
             .socket = socket,
             .alpn = alpn_id,
 
-            .packets_in = xev.UDP.initFd(socket.socket),
+            .packets_in = xev.UDP.initFd(socket.internal),
+
             .packet_in_buffer = try allocator.alloc(u8, 1500),
 
             .tick = try xev.Timer.init(),
@@ -187,7 +193,7 @@ pub const JamSnpClient = struct {
     }
 
     pub fn runTick(self: *@This()) !void {
-        const span = trace.span(.run_tick);
+        const span = trace.span(.run_client_tick);
         defer span.deinit();
         span.trace("Running a single tick on JamSnpClient", .{});
         try self.loop.run(.no_wait);
@@ -270,10 +276,11 @@ pub const JamSnpClient = struct {
         const self = maybe_self.?;
 
         span.trace("Getting local address", .{});
-        const local_address = self.socket.getLocalAddress() catch |err| {
+        const local_address = self.socket.getLocalEndPoint() catch |err| {
             span.err("Failed to get local address: {s}", .{@errorName(err)});
             @panic("Failed to get local address");
         };
+
         span.trace("Local address: {}", .{local_address});
 
         span.trace("Passing packet to lsquic engine", .{});
@@ -281,8 +288,9 @@ pub const JamSnpClient = struct {
             self.lsquic_engine,
             xev_read_buffer.slice.ptr,
             bytes,
-            @ptrCast(&local_address.any),
+            @ptrCast(&self.socket.internal),
             @ptrCast(&peer_address.any),
+
             self,
             0,
         ) != 0) {
@@ -301,7 +309,7 @@ pub const JamSnpClient = struct {
         lsquic.lsquic_engine_destroy(self.lsquic_engine);
         ssl.SSL_CTX_free(self.ssl_ctx);
 
-        self.socket.deinit();
+        self.socket.close();
 
         self.tick.deinit();
         self.loop.deinit();
@@ -321,15 +329,21 @@ pub const JamSnpClient = struct {
         span.debug("Connecting to {s}:{d}", .{ peer_addr, peer_port });
 
         // Bind to a local address (use any address)
-        try self.socket.bind("::1", 0);
+        try self.socket.bindToPort(0); // Bind to any available port
 
         // Get the local socket address after binding
-        const local_endpoint = try self.socket.getLocalAddress();
+        const local_endpoint = try self.socket.getLocalEndPoint();
+
         span.debug("Bound to local endpoint: {}", .{local_endpoint});
 
         // Parse peer address
         span.debug("Parsing peer address", .{});
-        const peer_endpoint = try std.net.Address.parseIp(peer_addr, peer_port);
+        const peer_address = try network.Address.parse(peer_addr);
+        const peer_endpoint = network.EndPoint{
+            .address = peer_address,
+            .port = peer_port,
+        };
+
         span.debug("Peer endpoint: {}", .{peer_endpoint});
 
         // Create a connection
@@ -346,8 +360,9 @@ pub const JamSnpClient = struct {
         _ = lsquic.lsquic_engine_connect(
             self.lsquic_engine,
             lsquic.N_LSQVER, // Use default version
-            @ptrCast(&local_endpoint.any),
-            @ptrCast(&peer_endpoint.any),
+            @ptrCast(&self.socket.internal),
+            @ptrCast(&toSocketAddress(peer_endpoint)),
+
             self.ssl_ctx, // peer_ctx
             @ptrCast(connection), // conn_ctx
             null,
@@ -364,7 +379,7 @@ pub const JamSnpClient = struct {
 
     pub const Connection = struct {
         lsquic_connection: *lsquic.lsquic_conn_t,
-        endpoint: std.net.Address,
+        endpoint: network.EndPoint,
         client: *JamSnpClient,
 
         fn onNewConn(
@@ -551,29 +566,32 @@ pub const JamSnpClient = struct {
         defer span.deinit();
         span.trace("Sending {d} packet specs", .{specs_len});
 
-        const socket = @as(*UdpSocket, @ptrCast(@alignCast(ctx)));
+        const socket = @as(*network.Socket, @ptrCast(@alignCast(ctx)));
         const specs = specs_ptr.?[0..specs_len];
 
         var send_packets: c_int = 0;
         send_loop: for (specs, 0..) |spec, i| {
-            const iov = spec.iov[0..spec.iovlen];
+            const iov_slice = spec.iov[0..spec.iovlen];
             span.trace("Processing packet spec {d} with {d} iovecs", .{ i, spec.iovlen });
 
             // Send the packet
-            for (iov, 0..) |iovec, j| {
-                const buf_ptr: [*]const u8 = @ptrCast(iovec.iov_base);
-                const buf_len: usize = @intCast(iovec.iov_len);
-                const buffer = buf_ptr[0..buf_len];
+            for (iov_slice) |iov| {
+                const packet_buf: [*]const u8 = @ptrCast(iov.iov_base);
+                const packet_len: usize = @intCast(iov.iov_len);
+                const packet = packet_buf[0..packet_len];
 
-                const dest_address = std.net.Address.initPosix(@ptrCast(@alignCast(spec.dest_sa)));
+                const dest_addr = std.net.Address.initPosix(@ptrCast(@alignCast(spec.dest_sa)));
 
-                span.trace("Sending {} to {}", .{ std.fmt.fmtSliceHexLower(buffer), dest_address });
+                span.trace("Sending packet of {d} bytes to {}", .{ packet_len, dest_addr });
 
-                _ = socket.sendTo(buffer, dest_address) catch |err| {
-                    span.err("Failed to send packet: {}", .{err});
+                // Send the packet
+                _ = socket.sendTo(network.EndPoint.fromSocketAddress(@ptrCast(@alignCast(&dest_addr.any)), dest_addr.getOsSockLen()) catch |err| {
+                    span.err("Failed to convert socket address: {s}", .{@errorName(err)});
+                    break :send_loop;
+                }, packet) catch |err| {
+                    span.err("Failed to send packet: {s}", .{@errorName(err)});
                     break :send_loop;
                 };
-                span.trace("Successfully sent iovec {d}", .{j});
             }
             send_packets += 1;
         }
