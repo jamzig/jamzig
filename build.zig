@@ -14,24 +14,48 @@ pub fn build(b: *std.Build) !void {
     build_options.addOption([]const u8, "enable_tracing_level", tracing_level);
 
     // Dependencies
-    const pretty_module = b.dependency("pretty", .{ .target = target, .optimize = optimize }).module("pretty");
-    const diffz_module = b.dependency("diffz", .{ .target = target, .optimize = optimize }).module("diffz");
-    const clap_module = b.dependency("clap", .{ .target = target, .optimize = optimize }).module("clap");
+    const dep_opts = .{ .target = target, .optimize = optimize };
+
+    const pretty_module = b.dependency("pretty", dep_opts).module("pretty");
+    const diffz_module = b.dependency("diffz", dep_opts).module("diffz");
+    const clap_module = b.dependency("clap", dep_opts).module("clap");
     const tmpfile_module = b.dependency("tmpfile", .{}).module("tmpfile");
+
+    // Event loop
+    const xev_dep = b.dependency("libxev", dep_opts);
+    const xev_mod = xev_dep.module("xev");
+
+    // Quic & Ssl
+    const zig_network_dep = b.dependency("zig-network", dep_opts);
+    const zig_network_mod = zig_network_dep.module("network");
+    const lsquic_dep = b.dependency("lsquic", dep_opts);
+    const lsquic_mod = lsquic_dep.module("lsquic");
+    const ssl_dep = lsquic_dep.builder.dependency("boringssl", dep_opts);
+    const ssl_mod = ssl_dep.module("ssl");
+    const base32_dep = b.dependency("base32", dep_opts);
+    const base32_mod = base32_dep.module("base32");
 
     // Rest of the existing build.zig implementation...
     var rust_deps = try buildRustDependencies(b, target, optimize);
     defer rust_deps.deinit();
 
-    const exe = b.addExecutable(.{
+    const jamzig_exe = b.addExecutable(.{
         .name = "jamzig",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    rust_deps.staticallyLinkTo(exe);
-    exe.linkLibCpp();
-    b.installArtifact(exe);
+    jamzig_exe.linkLibCpp();
+    // jamzig_exe.linkLibC();
+    jamzig_exe.root_module.addOptions("build-options", build_options);
+    rust_deps.staticallyLinkTo(jamzig_exe);
+    jamzig_exe.root_module.addImport("xev", xev_mod);
+    jamzig_exe.root_module.addImport("znet", zig_network_mod);
+    jamzig_exe.root_module.addImport("lsquic", lsquic_mod);
+    jamzig_exe.root_module.addImport("ssl", ssl_mod);
+    jamzig_exe.root_module.addImport("base32", base32_mod);
+
+    b.installArtifact(jamzig_exe);
 
     const jamtestnet_export = b.addExecutable(.{
         .name = "jamzig-jamtestnet-export",
@@ -60,7 +84,7 @@ pub fn build(b: *std.Build) !void {
 
     // Run Steps
     // NODE
-    const run_cmd = b.addRunArtifact(exe);
+    const run_cmd = b.addRunArtifact(jamzig_exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
@@ -103,6 +127,12 @@ pub fn build(b: *std.Build) !void {
     unit_tests.root_module.addImport("pretty", pretty_module);
     unit_tests.root_module.addImport("diffz", diffz_module);
     unit_tests.root_module.addImport("tmpfile", tmpfile_module);
+
+    unit_tests.root_module.addImport("xev", xev_mod);
+    unit_tests.root_module.addImport("network", zig_network_mod);
+    unit_tests.root_module.addImport("lsquic", lsquic_mod);
+    unit_tests.root_module.addImport("ssl", ssl_mod);
+    unit_tests.root_module.addImport("base32", base32_mod);
 
     unit_tests.linkLibCpp();
 
