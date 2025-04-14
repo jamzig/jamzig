@@ -74,7 +74,7 @@ test "JAMSNP Client-Server Connection" {
     std.debug.print("Client running..\n", .{});
 
     // Now tick both server and client some amount of times
-    for (0..10) |_| {
+    for (0..20) |_| {
         try client.runTick();
         try server.runTick();
         // Short sleep to avoid busy-waiting

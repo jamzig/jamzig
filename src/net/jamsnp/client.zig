@@ -321,12 +321,15 @@ pub const JamSnpClient = struct {
 
         self.socket.deinit();
 
+        self.tick_event.deinit();
         self.loop.deinit();
-        self.allocator.free(self.read_buffer);
 
+        self.allocator.free(self.read_buffer);
         self.allocator.free(self.chain_genesis_hash);
         self.allocator.free(self.alpn);
+
         self.allocator.destroy(self);
+
         span.debug("JamSnpClient deinitialization complete", .{});
     }
 

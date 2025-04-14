@@ -14,20 +14,26 @@ const trace = @import("../../tracing.zig").scoped(.network);
 pub const JamSnpServer = struct {
     allocator: std.mem.Allocator,
     keypair: std.crypto.sign.Ed25519.KeyPair,
+
     socket: UdpSocket,
+
+    // Protocol negotiation identifier(s)
     alpn_id: []const u8,
 
-    // XEVState: Store the event loop
+    // xev: owned state
     loop: xev.Loop = undefined,
-    read_buffer: []u8 = undefined,
-    tick_complete: xev.Completion = undefined,
-    packets_in_complete: xev.Completion = undefined,
-    udp_state: xev.UDP.State = undefined,
 
-    // Add xev event handlers
-    packets_in_event: xev.UDP,
-    tick_event: xev.Timer,
+    // xev: udp memory
+    packets_in: xev.UDP,
+    packets_in_c: xev.Completion = undefined,
+    packets_in_s: xev.UDP.State = undefined,
+    packets_in_buffer: []u8 = undefined,
 
+    // xev: tick
+    tick: xev.Timer,
+    tick_c: xev.Completion = undefined,
+
+    // lsquic: configuraiton
     lsquic_engine: *lsquic.lsquic_engine_t,
     lsquic_engine_api: lsquic.lsquic_engine_api,
     lsquic_engine_settings: lsquic.lsquic_engine_settings,
@@ -53,7 +59,7 @@ pub const JamSnpServer = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         keypair: std.crypto.sign.Ed25519.KeyPair,
-        chain_genesis_hash: []const u8,
+        genesis_hash: []const u8,
         allow_builders: bool,
     ) !*JamSnpServer {
         const span = trace.span(.init);
@@ -70,15 +76,13 @@ pub const JamSnpServer = struct {
         // Create UDP socket
         span.debug("Creating UDP socket", .{});
         var socket = try UdpSocket.init();
-        errdefer {
-            span.debug("Cleaning up socket after error", .{});
-            socket.deinit();
-        }
+        errdefer socket.deinit();
 
         // Create ALPN identifier for server
         span.debug("Building ALPN identifier", .{});
-        const alpn_id = try common.buildAlpnIdentifier(allocator, chain_genesis_hash, false // is_builder (not applicable for server)
+        const alpn_id = try common.buildAlpnIdentifier(allocator, genesis_hash, false // is_builder (not applicable for server)
         );
+        errdefer allocator.free(alpn_id);
         span.debug("ALPN id: {s}", .{alpn_id});
 
         // Configure SSL context
@@ -86,16 +90,12 @@ pub const JamSnpServer = struct {
         const ssl_ctx = try common.configureSSLContext(
             allocator,
             keypair,
-            chain_genesis_hash,
+            genesis_hash,
             false, // is_client
             false, // is_builder (not applicable for server)
             alpn_id,
         );
-
-        errdefer {
-            span.debug("Cleaning up SSL context after error", .{});
-            ssl.SSL_CTX_free(ssl_ctx);
-        }
+        errdefer ssl.SSL_CTX_free(ssl_ctx);
 
         // Set up certificate verification
         span.debug("Setting up certificate verification", .{});
@@ -104,10 +104,7 @@ pub const JamSnpServer = struct {
         // Allocate the server object on the heap to ensure settings lifetime
         span.debug("Allocating server object", .{});
         const server = try allocator.create(JamSnpServer);
-        errdefer {
-            span.debug("Cleaning up server object after error", .{});
-            allocator.destroy(server);
-        }
+        errdefer allocator.destroy(server);
 
         // Initialize lsquic engine settings
         span.debug("Initializing engine settings", .{});
@@ -132,21 +129,20 @@ pub const JamSnpServer = struct {
             .lsquic_engine_api = undefined,
             .lsquic_engine_settings = engine_settings,
             .ssl_ctx = ssl_ctx,
-            .chain_genesis_hash = try allocator.dupe(u8, chain_genesis_hash),
+            .chain_genesis_hash = try allocator.dupe(u8, genesis_hash),
             .allow_builders = allow_builders,
             // Store ALPN ID for later cleanup
             .alpn_id = alpn_id,
             // Initialize xev event handlers
-            .packets_in_event = xev.UDP.initFd(socket.socket),
-            .tick_event = try xev.Timer.init(),
+            .packets_in = xev.UDP.initFd(socket.socket),
+            .tick = try xev.Timer.init(),
         };
 
-        span.trace("Chain genesis hash length: {d} bytes", .{chain_genesis_hash.len});
-        span.trace("Chain genesis hash: {s}", .{std.fmt.fmtSliceHexLower(chain_genesis_hash)});
+        span.trace("Chain genesis hash: {s}", .{std.fmt.fmtSliceHexLower(genesis_hash)});
 
         // Set up engine API with the server object as context
         span.debug("Setting up engine API", .{});
-        server.lsquic_engine_api = lsquic.lsquic_engine_api{
+        server.lsquic_engine_api = .{
             .ea_settings = &server.lsquic_engine_settings,
             .ea_stream_if = &server.lsquic_stream_interface,
             .ea_stream_if_ctx = server,
@@ -160,7 +156,10 @@ pub const JamSnpServer = struct {
 
         // Create lsquic engine
         span.debug("Creating lsquic engine", .{});
-        server.lsquic_engine = lsquic.lsquic_engine_new(lsquic.LSENG_SERVER, &server.lsquic_engine_api) orelse {
+        server.lsquic_engine = lsquic.lsquic_engine_new(
+            lsquic.LSENG_SERVER,
+            &server.lsquic_engine_api,
+        ) orelse {
             span.err("Failed to create lsquic engine", .{});
             allocator.free(server.chain_genesis_hash);
             allocator.destroy(server);
@@ -180,16 +179,15 @@ pub const JamSnpServer = struct {
         span.debug("Deinitializing JamSnpServer", .{});
 
         lsquic.lsquic_engine_destroy(self.lsquic_engine);
-
         ssl.SSL_CTX_free(self.ssl_ctx);
 
         self.socket.deinit();
-        self.tick_event.deinit();
+
+        self.tick.deinit();
         self.loop.deinit();
 
-        self.allocator.free(self.read_buffer);
+        self.allocator.free(self.packets_in_buffer);
         self.allocator.free(self.chain_genesis_hash);
-        // ALPN identifier needs to be freed by the server
         self.allocator.free(self.alpn_id);
 
         self.allocator.destroy(self);
@@ -216,12 +214,12 @@ pub const JamSnpServer = struct {
         self.loop = try xev.Loop.init(.{});
 
         // Allocate the read buffer
-        self.read_buffer = try self.allocator.alloc(u8, 1500);
+        self.packets_in_buffer = try self.allocator.alloc(u8, 1500);
 
         // Set up tick timer if not already running
-        self.tick_event.run(
+        self.tick.run(
             &self.loop,
-            &self.tick_complete,
+            &self.tick_c,
             500,
             @This(),
             self,
@@ -229,11 +227,11 @@ pub const JamSnpServer = struct {
         );
 
         // Set up packet receiving if not already running
-        self.packets_in_event.read(
+        self.packets_in.read(
             &self.loop,
-            &self.packets_in_complete,
-            &self.udp_state,
-            .{ .slice = self.read_buffer },
+            &self.packets_in_c,
+            &self.packets_in_s,
+            .{ .slice = self.packets_in_buffer },
             @This(),
             self,
             onPacketsIn,
@@ -245,12 +243,8 @@ pub const JamSnpServer = struct {
     pub fn runTick(self: *@This()) !void {
         const span = trace.span(.run_tick);
         defer span.deinit();
-        span.debug("Running a single tick on JamSnpServer", .{});
-
-        // Run a single tick
-        span.debug("Running event loop for a single tick", .{});
+        span.trace("Running a single tick on JamSnpServer", .{});
         try self.loop.run(.no_wait);
-        span.debug("Event loop tick completed", .{});
     }
 
     pub fn runUntilDone(self: *@This()) !void {
@@ -279,7 +273,7 @@ pub const JamSnpServer = struct {
         try xev_timer_error;
 
         const self = maybe_self.?;
-        span.debug("Processing connections", .{});
+        span.trace("Processing connections", .{});
         lsquic.lsquic_engine_process_conns(self.lsquic_engine);
 
         // Delta is in 1/1_000_000 so we divide by 1000 to get ms
@@ -294,8 +288,8 @@ pub const JamSnpServer = struct {
             }
         }
 
-        span.debug("Scheduling next tick in {d}ms", .{timeout_in_ms});
-        self.tick_event.run(
+        span.trace("Scheduling next tick in {d}ms", .{timeout_in_ms});
+        self.tick.run(
             xev_loop,
             xev_completion,
             timeout_in_ms,
@@ -303,7 +297,7 @@ pub const JamSnpServer = struct {
             self,
             onTick,
         );
-
+        // TODO: check teh rearm option her
         return .disarm;
     }
 
@@ -315,7 +309,7 @@ pub const JamSnpServer = struct {
         peer_address: std.net.Address,
         _: xev.UDP,
         xev_read_buffer: xev.ReadBuffer,
-        xev_read_error: xev.ReadError!usize,
+        xev_read_result: xev.ReadError!usize,
     ) xev.CallbackAction {
         const span = trace.span(.on_packets_in);
         defer span.deinit();
@@ -325,8 +319,8 @@ pub const JamSnpServer = struct {
             std.debug.panic("onPacketsIn failed with: {s}", .{@errorName(err)});
         }
 
-        const bytes = try xev_read_error;
-        span.debug("Received {d} bytes from {}", .{ bytes, peer_address });
+        const bytes = try xev_read_result;
+        span.trace("Received {d} bytes from {}", .{ bytes, peer_address });
         span.trace("Packet data: {any}", .{std.fmt.fmtSliceHexLower(xev_read_buffer.slice[0..bytes])});
 
         // Now change some bytes
@@ -334,14 +328,14 @@ pub const JamSnpServer = struct {
 
         const self = maybe_self.?;
 
-        span.debug("Getting local address", .{});
+        span.trace("Getting local address", .{});
         const local_address = self.socket.getLocalAddress() catch |err| {
             span.err("Failed to get local address: {s}", .{@errorName(err)});
             @panic("Failed to get local address");
         };
         span.trace("Local address: {}", .{local_address});
 
-        span.debug("Passing packet to lsquic engine", .{});
+        span.trace("Passing packet to lsquic engine", .{});
         if (0 > lsquic.lsquic_engine_packet_in(
             self.lsquic_engine,
             xev_read_buffer.slice.ptr,
@@ -352,16 +346,17 @@ pub const JamSnpServer = struct {
             0, // ecn
         )) {
             span.err("lsquic_engine_packet_in failed", .{});
+            // TODO: is this really unrecoverable?
             @panic("lsquic_engine_packet_in failed");
         }
 
-        span.debug("Processing engine connections", .{});
+        span.trace("Processing engine connections", .{});
         lsquic.lsquic_engine_process_conns(self.lsquic_engine);
 
-        span.debug("Successfully processed incoming packet", .{});
+        span.trace("Successfully processed incoming packet", .{});
 
         // Rearm to listen for more packets
-        self.packets_in_event.read(
+        self.packets_in.read(
             xev_loop,
             xev_completion,
             xev_state,
@@ -377,7 +372,7 @@ pub const JamSnpServer = struct {
     pub fn processPacket(self: *JamSnpServer, packet: []const u8, peer_addr: std.posix.sockaddr, local_addr: std.posix.sockaddr) !void {
         const span = trace.span(.process_packet);
         defer span.deinit();
-        span.debug("Processing incoming packet of {d} bytes", .{packet.len});
+        span.trace("Processing incoming packet of {d} bytes", .{packet.len});
         span.trace("Packet data: {s}", .{std.fmt.fmtSliceHexLower(packet)});
 
         const result = lsquic.lsquic_engine_packet_in(
@@ -395,20 +390,18 @@ pub const JamSnpServer = struct {
             return error.PacketProcessingFailed;
         }
 
-        span.debug("Packet processed successfully, result: {d}", .{result});
+        span.trace("Packet processed successfully, result: {d}", .{result});
 
         // Process connections after receiving packet
-        span.debug("Processing engine connections", .{});
+        span.trace("Processing engine connections", .{});
         lsquic.lsquic_engine_process_conns(self.lsquic_engine);
-        span.debug("Engine connections processed", .{});
+        span.trace("Engine connections processed", .{});
     }
 
     pub const Connection = struct {
         lsquic_connection: *lsquic.lsquic_conn_t,
         server: *JamSnpServer,
         peer_addr: std.net.Address,
-
-        // Add any additional connection-specific state here
 
         fn onNewConn(
             ctx: ?*anyopaque,
@@ -437,7 +430,7 @@ pub const JamSnpServer = struct {
                 .peer_addr = std.net.Address.initPosix(@ptrCast(@alignCast(peer_addr.?))),
             };
 
-            span.debug("Connection established successfully", .{});
+            span.debug("Connection established successfully, peer: {}", .{connection.peer_addr});
             return @ptrCast(connection);
         }
 
