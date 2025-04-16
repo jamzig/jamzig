@@ -123,4 +123,5 @@ comptime {
 
     // Networking
     _ = @import("net/jamsnp_test.zig");
+    _ = @import("net/client_test.zig");
 }

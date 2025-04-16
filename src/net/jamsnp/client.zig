@@ -118,7 +118,7 @@ pub const JamSnpClient = struct {
         client.* = JamSnpClient{
             .allocator = allocator,
             .keypair = keypair,
-            .chain_genesis_hash = try allocator.dupe(u8, chain_genesis_hash),
+            .chain_genesis_hash = chain_genesis_hash,
             .is_builder = is_builder,
 
             .socket = socket,
@@ -302,6 +302,7 @@ pub const JamSnpClient = struct {
         return .rearm;
     }
 
+    // TODO: since its on the heap lets use destroy
     pub fn deinit(self: *JamSnpClient) void {
         const span = trace.span(.deinit);
         defer span.deinit();
