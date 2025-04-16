@@ -10,10 +10,54 @@ const xev = @import("xev");
 
 const toSocketAddress = @import("../ext.zig").toSocketAddress;
 
-// Import the tracing module
 const trace = @import("../../tracing.zig").scoped(.network);
 
 pub const JamSnpClient = struct {
+    pub const EventType = enum {
+        connection_established,
+        connection_failed,
+        connection_closed,
+        stream_created,
+        stream_closed,
+        data_received,
+    };
+
+    pub const Event = union(EventType) {
+        connection_established: struct {
+            connection: *Connection,
+            endpoint: network.EndPoint,
+        },
+        connection_failed: struct {
+            endpoint: network.EndPoint,
+            @"error": anyerror,
+        },
+        connection_closed: struct {
+            connection: *Connection,
+        },
+        stream_created: struct {
+            connection: *Connection,
+            stream: *Stream,
+        },
+        stream_closed: struct {
+            connection: *Connection,
+            stream: *Stream,
+        },
+        data_received: struct {
+            connection: *Connection,
+            stream: *Stream,
+            data: []const u8,
+        },
+    };
+
+    /// Event handler function type
+    pub const EventCallbackFn = *const fn (event: *const Event, context: ?*anyopaque) void;
+
+    /// Event handler registration
+    pub const EventHandler = struct {
+        callback: EventCallbackFn,
+        context: ?*anyopaque,
+    };
+
     allocator: std.mem.Allocator,
     keypair: std.crypto.sign.Ed25519.KeyPair,
     socket: network.Socket,
@@ -57,6 +101,8 @@ pub const JamSnpClient = struct {
     ssl_ctx: *ssl.SSL_CTX,
     chain_genesis_hash: []const u8,
     is_builder: bool,
+
+    event_handler: ?EventHandler = null,
 
     pub fn initWithLoop(
         allocator: std.mem.Allocator,
@@ -247,6 +293,31 @@ pub const JamSnpClient = struct {
         span.debug("Event loop completed", .{});
     }
 
+    pub fn setEventCallback(self: *@This(), callback: EventCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_event_callback);
+        defer span.deinit();
+        span.debug("Setting event callback", .{});
+
+        self.event_handler = .{
+            .callback = callback,
+            .context = context,
+        };
+    }
+
+    /// Notify registered event handler of an event
+    fn notifyEvent(self: *@This(), event: Event) void {
+        const span = trace.span(.notify_event);
+        defer span.deinit();
+        span.debug("Notifying event of type {s}", .{@tagName(event)});
+
+        if (self.event_handler) |handler| {
+            span.debug("Calling event handler", .{});
+            handler.callback(&event, handler.context);
+        } else {
+            span.debug("No event handler registered", .{});
+        }
+    }
+
     fn onTick(
         maybe_self: ?*@This(),
         xev_loop: *xev.Loop,
@@ -347,6 +418,8 @@ pub const JamSnpClient = struct {
         const span = trace.span(.deinit);
         defer span.deinit();
 
+        self.event_handler = null;
+
         lsquic.lsquic_engine_destroy(self.lsquic_engine);
         ssl.SSL_CTX_free(self.ssl_ctx);
 
@@ -373,17 +446,28 @@ pub const JamSnpClient = struct {
         span.debug("Connecting to {s}:{d}", .{ peer_addr, peer_port });
 
         // Bind to a local address (use any address)
-        try self.socket.bindToPort(0); // Bind to any available port
+        self.socket.bindToPort(0) catch |err| {
+            span.err("Failed to bind to local port: {s}", .{@errorName(err)});
+            return err;
+        };
 
         // Get the local socket address after binding
-        const local_endpoint = try self.socket.getLocalEndPoint();
+        const local_endpoint = self.socket.getLocalEndPoint() catch |err| {
+            span.err("Failed to get local endpoint: {s}", .{@errorName(err)});
+            return err;
+        };
 
         span.debug("Bound to local endpoint: {}", .{local_endpoint});
 
-        // Parse peer address
+        // Parse peer address and create endpoint
         span.debug("Parsing peer address", .{});
-        const peer_address = try network.Address.parse(peer_addr);
-        const peer_endpoint = network.EndPoint{
+        var peer_endpoint: network.EndPoint = undefined;
+        const peer_address = network.Address.parse(peer_addr) catch |err| {
+            span.err("Failed to parse peer address: {s}", .{@errorName(err)});
+            return err;
+        };
+
+        peer_endpoint = network.EndPoint{
             .address = peer_address,
             .port = peer_port,
         };
@@ -392,7 +476,22 @@ pub const JamSnpClient = struct {
 
         // Create a connection
         span.trace("Creating connection context", .{});
-        const connection = try self.allocator.create(Connection);
+        const connection = self.allocator.create(Connection) catch |err| {
+            span.err("Failed to allocate connection: {s}", .{@errorName(err)});
+
+            // Notify about the connection failure
+            const event = Event{
+                .connection_failed = .{
+                    .endpoint = peer_endpoint,
+                    .@"error" = err,
+                },
+            };
+            self.notifyEvent(event);
+
+            return err;
+        };
+        errdefer self.allocator.destroy(connection);
+
         connection.* = .{
             .lsquic_connection = undefined,
             .client = self,
@@ -417,6 +516,14 @@ pub const JamSnpClient = struct {
             0, // token
         ) orelse {
             span.err("lsquic_engine_connect failed", .{});
+            const event = Event{
+                .connection_failed = .{
+                    .endpoint = peer_endpoint,
+                    .@"error" = error.ConnectionFailed,
+                },
+            };
+            self.notifyEvent(event);
+
             return error.ConnectionFailed;
         };
     }
@@ -441,6 +548,14 @@ pub const JamSnpClient = struct {
             connection.lsquic_connection = maybe_lsquic_connection.?;
             span.debug("Connection initialized", .{});
 
+            const event = Event{
+                .connection_established = .{
+                    .connection = connection,
+                    .endpoint = connection.endpoint,
+                },
+            };
+            connection.client.notifyEvent(event);
+
             return @ptrCast(connection);
         }
 
@@ -451,6 +566,13 @@ pub const JamSnpClient = struct {
 
             const conn_ctx = lsquic.lsquic_conn_get_ctx(maybe_lsquic_connection).?;
             const conn: *Connection = @alignCast(@ptrCast(conn_ctx));
+
+            const event = Event{
+                .connection_closed = .{
+                    .connection = conn,
+                },
+            };
+            conn.client.notifyEvent(event);
 
             span.debug("Clearing connection context", .{});
             lsquic.lsquic_conn_set_ctx(maybe_lsquic_connection, null);
@@ -534,6 +656,14 @@ pub const JamSnpClient = struct {
                 .connection = connection,
             };
 
+            const event = Event{
+                .stream_created = .{
+                    .connection = connection,
+                    .stream = stream,
+                },
+            };
+            connection.client.notifyEvent(event);
+
             span.debug("Setting stream to want-write", .{});
             _ = lsquic.lsquic_stream_wantwrite(maybe_lsquic_stream, 1);
             span.debug("Stream initialization complete", .{});
@@ -541,13 +671,44 @@ pub const JamSnpClient = struct {
         }
 
         fn onRead(
-            _: ?*lsquic.lsquic_stream_t,
-            _: ?*lsquic.lsquic_stream_ctx_t,
+            maybe_lsquic_stream: ?*lsquic.lsquic_stream_t,
+            maybe_stream_ctx: ?*lsquic.lsquic_stream_ctx_t,
         ) callconv(.C) void {
             const span = trace.span(.on_read);
             defer span.deinit();
-            span.err("Unexpected read on uni-directional stream", .{});
-            @panic("uni-directional streams should never receive data");
+
+            const stream: *Stream = @alignCast(@ptrCast(maybe_stream_ctx.?));
+
+            // Read data from the stream
+            var buf: [4096]u8 = undefined;
+            const read_size = lsquic.lsquic_stream_read(maybe_lsquic_stream, &buf, buf.len);
+
+            if (read_size > 0) {
+                span.debug("Read {d} bytes from stream", .{read_size});
+
+                // Allocate memory for the data and copy it
+                // FIXME: allocate a buffer on read and forward the buffer, or the caller should own the memory
+                // as we want this to be zero-allocation
+                const data = stream.connection.client.allocator.dupe(u8, buf[0..@intCast(read_size)]) catch {
+                    span.err("Failed to allocate memory for stream data", .{});
+                    return;
+                };
+
+                // NOTE: The event handler is responsible for freeing the data memory
+                const event = Event{
+                    .data_received = .{
+                        .connection = stream.connection,
+                        .stream = stream,
+                        .data = data,
+                    },
+                };
+                stream.connection.client.notifyEvent(event);
+            } else if (read_size == 0) {
+                // End of stream
+                span.debug("End of stream reached", .{});
+            } else {
+                span.err("Error reading from stream: {d}", .{read_size});
+            }
         }
 
         fn onWrite(
@@ -590,6 +751,15 @@ pub const JamSnpClient = struct {
             span.debug("Stream close callback", .{});
 
             const stream: *Stream = @alignCast(@ptrCast(maybe_stream.?));
+
+            // Notify about the stream being closed
+            const event = Event{
+                .stream_closed = .{
+                    .connection = stream.connection,
+                    .stream = stream,
+                },
+            };
+            stream.connection.client.notifyEvent(event);
 
             span.debug("Destroying stream", .{});
             stream.connection.client.allocator.destroy(stream);
