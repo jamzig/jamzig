@@ -20,7 +20,8 @@ pub const JamSnpClient = struct {
 
     alpn: []const u8,
 
-    loop: xev.Loop = undefined,
+    loop: ?*xev.Loop = null,
+    loop_owned: bool = false,
 
     packets_in: xev.UDP,
     packets_in_c: xev.Completion = undefined,
@@ -57,7 +58,36 @@ pub const JamSnpClient = struct {
     chain_genesis_hash: []const u8,
     is_builder: bool,
 
-    pub fn init(
+    pub fn initWithLoop(
+        allocator: std.mem.Allocator,
+        keypair: std.crypto.sign.Ed25519.KeyPair,
+        chain_genesis_hash: []const u8,
+        is_builder: bool,
+    ) !*JamSnpClient {
+        const client = try initWithoutLoop(allocator, keypair, chain_genesis_hash, is_builder);
+        errdefer client.deinit();
+
+        try client.initLoop();
+
+        return client;
+    }
+
+    pub fn initAttachLoop(
+        allocator: std.mem.Allocator,
+        keypair: std.crypto.sign.Ed25519.KeyPair,
+        chain_genesis_hash: []const u8,
+        is_builder: bool,
+        loop: *xev.Loop,
+    ) !*JamSnpClient {
+        const client = try initWithoutLoop(allocator, keypair, chain_genesis_hash, is_builder);
+        errdefer client.deinit();
+
+        try client.attachToLoop(loop);
+
+        return client;
+    }
+
+    pub fn initWithoutLoop(
         allocator: std.mem.Allocator,
         keypair: std.crypto.sign.Ed25519.KeyPair,
         chain_genesis_hash: []const u8,
@@ -156,22 +186,32 @@ pub const JamSnpClient = struct {
             return error.LsquicEngineCreationFailed;
         };
 
-        // Build the client loop
-        try client.buildLoop();
-
         span.debug("JamSnpClient initialization successful", .{});
         return client;
     }
 
-    pub fn buildLoop(self: *@This()) !void {
+    pub fn initLoop(self: *@This()) !void {
+        const loop = try self.allocator.create(xev.Loop);
+        loop.* = try xev.Loop.init(.{});
+        self.loop = loop;
+        self.loop_owned = true;
+        self.buildLoop();
+    }
+
+    pub fn attachToLoop(self: *@This(), loop: *xev.Loop) void {
+        self.loop = loop;
+        self.loop_owned = false;
+        self.buildLoop();
+    }
+
+    pub fn buildLoop(self: *@This()) void {
         const span = trace.span(.build_loop);
         defer span.deinit();
 
         span.debug("Initializing event loop", .{});
-        self.loop = try xev.Loop.init(.{});
 
         self.tick.run(
-            &self.loop,
+            self.loop.?,
             &self.tick_c,
             500,
             @This(),
@@ -180,7 +220,7 @@ pub const JamSnpClient = struct {
         );
 
         self.packets_in.read(
-            &self.loop,
+            self.loop.?,
             &self.packets_in_c,
             &self.packets_in_state,
             .{ .slice = self.packet_in_buffer },
@@ -196,14 +236,14 @@ pub const JamSnpClient = struct {
         const span = trace.span(.run_client_tick);
         defer span.deinit();
         span.trace("Running a single tick on JamSnpClient", .{});
-        try self.loop.run(.no_wait);
+        try self.loop.?.run(.no_wait);
     }
 
     pub fn runUntilDone(self: *@This()) !void {
         const span = trace.span(.run);
         defer span.deinit();
         span.debug("Starting JamSnpClient event loop", .{});
-        try self.loop.run(.until_done);
+        try self.loop.?.run(.until_done);
         span.debug("Event loop completed", .{});
     }
 
@@ -313,7 +353,10 @@ pub const JamSnpClient = struct {
         self.socket.close();
 
         self.tick.deinit();
-        self.loop.deinit();
+        if (self.loop) |loop| if (self.loop_owned) {
+            loop.deinit();
+            self.allocator.destroy(loop);
+        };
 
         self.allocator.free(self.packet_in_buffer);
         self.allocator.free(self.chain_genesis_hash);

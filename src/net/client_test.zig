@@ -32,7 +32,7 @@ fn createMockJamSnpClient(allocator: std.mem.Allocator) !*JamSnpClient {
 
     const genesis_hash = try allocator.dupe(u8, &[_]u8{0} ** 32);
 
-    return JamSnpClient.init(
+    return JamSnpClient.initWithoutLoop(
         allocator,
         keypair,
         genesis_hash,

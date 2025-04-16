@@ -76,6 +76,11 @@ pub const ClientThread = struct {
 
         thread.alloc = alloc;
 
+        if (client.loop) |_| {
+            return error.ClientLoopAlreadyInitialized;
+        }
+
+        client.attachToLoop(&thread.loop);
         thread.client = client;
 
         return thread;

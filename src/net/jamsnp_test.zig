@@ -6,7 +6,6 @@ const JamSnpClient = @import("jamsnp/client.zig").JamSnpClient;
 const common = @import("jamsnp/common.zig");
 const network = @import("network");
 
-
 // Add a logging callback function
 fn lsquic_log_callback(ctx: ?*anyopaque, buf: [*c]const u8, len: usize) callconv(.C) c_int {
     _ = ctx; // unused
@@ -34,16 +33,11 @@ test "JAMSNP Client-Server Connection" {
     //
     // ssl.SSL_CTX_set_info_callback(ssl_ctx, ssl_info_callback); // Register the callback
 
-        // Initialize network and LSQUIC globally
-    try network.init();
-    defer network.deinit();
-    
     if (lsquic.lsquic_global_init(lsquic.LSQUIC_GLOBAL_SERVER | lsquic.LSQUIC_GLOBAL_CLIENT) != 0) {
         std.debug.print("Failed to initialize LSQUIC globally\n", .{});
         return error.LsquicInitFailed;
     }
     defer lsquic.lsquic_global_cleanup();
-
 
     // Generate keypairs for server and client
     const server_keypair = try std.crypto.sign.Ed25519.KeyPair.generateDeterministic([_]u8{0} ** 32);
@@ -51,7 +45,7 @@ test "JAMSNP Client-Server Connection" {
     std.debug.print("Generated Ed25519 keypairs\n", .{});
 
     // Dummy genesis hash
-    const genesis_hash = "0123456789abcdef"; // 16 bytes, we'll use first 8 in ALPN
+    const genesis_hash = try std.testing.allocator.dupe(u8, "0123456789abcdef"); // 16 bytes, we'll use first 8 in ALPN
 
     // Create the server
     var server = try JamSnpServer.init(
@@ -66,12 +60,11 @@ test "JAMSNP Client-Server Connection" {
     // Bind the server to localhost on a specific test port
     const test_port: u16 = 12345;
     try server.listen("::1", test_port);
-        const local_endpoint = try server.socket.getLocalEndPoint();
+    const local_endpoint = try server.socket.getLocalEndPoint();
     std.debug.print("Server is listening on: {}\n", .{local_endpoint});
 
-
     // Create the client
-    var client = try JamSnpClient.init(
+    var client = try JamSnpClient.initWithLoop(
         std.testing.allocator,
         client_keypair,
         genesis_hash,
