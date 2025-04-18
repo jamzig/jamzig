@@ -162,7 +162,9 @@ pub const Worker = struct {
 
             // Push the response to the worker's mailbox
             _ = cmd.metadata.mailbox.push(response, .{ .instant = {} });
-            cmd.metadata.mailbox_wakeup.notify() catch {};
+            cmd.metadata.mailbox_wakeup.notify() catch |err| {
+                std.debug.panic("[{s}] Error notifying mailbox wakeup: {any}\n", .{ self.id, err });
+            };
         }
     }
 
@@ -249,7 +251,9 @@ pub const WorkerHandle = struct {
         _: *xev.Completion,
         r: xev.Async.WaitError!void,
     ) xev.CallbackAction {
-        _ = r catch unreachable;
+        _ = r catch |err| {
+            std.debug.panic("[{s}] Error in wakeup callback: {any}\n", .{ self_.?.id, err });
+        };
 
         // Process any pending results
         self_.?.processResponses();
