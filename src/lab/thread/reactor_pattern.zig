@@ -4,14 +4,6 @@ const Allocator = std.mem.Allocator;
 
 const Mailbox = @import("../../datastruct/blocking_queue.zig").BlockingQueue;
 
-pub const CommandType = enum {
-    add,
-    subtract,
-    multiply,
-    divide,
-    shutdown,
-};
-
 pub const CommandCallback = *const fn (result: ?*anyopaque, context: ?*anyopaque) void;
 
 pub const CommandMetadata = struct {
@@ -21,13 +13,21 @@ pub const CommandMetadata = struct {
     mailbox_wakeup: *xev.Async, // Async handle for waking up the worker
 };
 
+pub const CommandOperation = union(enum) {
+    add: struct { a: f64, b: f64 },
+    subtract: struct { a: f64, b: f64 },
+    multiply: struct { a: f64, b: f64 },
+    divide: struct { a: f64, b: f64 },
+    shutdown: void,
+};
+
 pub const Command = struct {
-    cmd_type: CommandType,
-    params: struct {
-        a: f64 = 0,
-        b: f64 = 0,
-    },
+    operation: CommandOperation,
     metadata: CommandMetadata,
+
+    pub fn getMetadata(self: Command) CommandMetadata {
+        return self.metadata;
+    }
 };
 
 pub const Response = struct {
@@ -216,7 +216,7 @@ pub const Worker = struct {
 
     fn processCommands(self: *Worker) !void {
         while (self.mailbox.pop()) |cmd| {
-            std.debug.print("[{s}] Processing command: {any}\n", .{ self.id, cmd.cmd_type });
+            std.debug.print("[{s}] Processing command: {any}\n", .{ self.id, @tagName(@as(std.meta.Tag(CommandOperation), cmd.operation)) });
 
             // Get a response and result from the pool
             const pair = self.response_pool.acquire() orelse {
@@ -225,24 +225,24 @@ pub const Worker = struct {
             };
 
             // Process the command and fill in the result
-            pair.result.* = switch (cmd.cmd_type) {
-                .add => CommandResult{
+            pair.result.* = switch (cmd.operation) {
+                .add => |params| CommandResult{
                     .success = true,
-                    .value = cmd.params.a + cmd.params.b,
+                    .value = params.a + params.b,
                 },
 
-                .subtract => CommandResult{
+                .subtract => |params| CommandResult{
                     .success = true,
-                    .value = cmd.params.a - cmd.params.b,
+                    .value = params.a - params.b,
                 },
 
-                .multiply => CommandResult{
+                .multiply => |params| CommandResult{
                     .success = true,
-                    .value = cmd.params.a * cmd.params.b,
+                    .value = params.a * params.b,
                 },
 
-                .divide => blk: {
-                    if (cmd.params.b == 0) {
+                .divide => |params| blk: {
+                    if (params.b == 0) {
                         break :blk CommandResult{
                             .success = false,
                             .error_message = "Division by zero",
@@ -251,7 +251,7 @@ pub const Worker = struct {
 
                     break :blk CommandResult{
                         .success = true,
-                        .value = cmd.params.a / cmd.params.b,
+                        .value = params.a / params.b,
                     };
                 },
 
@@ -394,8 +394,7 @@ pub const WorkerHandle = struct {
 
     pub fn add(self: *WorkerHandle, a: f64, b: f64, callback: CommandCallback, context: ?*anyopaque) !void {
         try self.thread.sendCommand(Command{
-            .cmd_type = .add,
-            .params = .{ .a = a, .b = b },
+            .operation = .{ .add = .{ .a = a, .b = b } },
             .metadata = .{
                 .callback = callback,
                 .context = context,
@@ -407,8 +406,7 @@ pub const WorkerHandle = struct {
 
     pub fn subtract(self: *WorkerHandle, a: f64, b: f64, callback: CommandCallback, context: ?*anyopaque) !void {
         try self.thread.sendCommand(Command{
-            .cmd_type = .subtract,
-            .params = .{ .a = a, .b = b },
+            .operation = .{ .subtract = .{ .a = a, .b = b } },
             .metadata = .{
                 .callback = callback,
                 .context = context,
@@ -420,8 +418,7 @@ pub const WorkerHandle = struct {
 
     pub fn multiply(self: *WorkerHandle, a: f64, b: f64, callback: CommandCallback, context: ?*anyopaque) !void {
         try self.thread.sendCommand(Command{
-            .cmd_type = .multiply,
-            .params = .{ .a = a, .b = b },
+            .operation = .{ .multiply = .{ .a = a, .b = b } },
             .metadata = .{
                 .callback = callback,
                 .context = context,
@@ -433,8 +430,7 @@ pub const WorkerHandle = struct {
 
     pub fn divide(self: *WorkerHandle, a: f64, b: f64, callback: CommandCallback, context: ?*anyopaque) !void {
         try self.thread.sendCommand(Command{
-            .cmd_type = .divide,
-            .params = .{ .a = a, .b = b },
+            .operation = .{ .divide = .{ .a = a, .b = b } },
             .metadata = .{
                 .callback = callback,
                 .context = context,
@@ -446,8 +442,7 @@ pub const WorkerHandle = struct {
 
     pub fn shutdown(self: *WorkerHandle, callback: CommandCallback, context: ?*anyopaque) !void {
         try self.thread.sendCommand(Command{
-            .cmd_type = .shutdown,
-            .params = .{ .a = 0, .b = 0 },
+            .operation = .{ .shutdown = {} },
             .metadata = .{
                 .callback = callback,
                 .context = context,
