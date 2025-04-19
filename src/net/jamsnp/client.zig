@@ -17,6 +17,29 @@ pub const ConnectionId = uuid.Uuid;
 pub const StreamId = uuid.Uuid;
 
 pub const JamSnpClient = struct {
+    /// Note on Stream Creation Callbacks and Timeouts:
+    ///
+    /// Calling `Connection.createStream()` successfully queues a request with lsquic via
+    /// `lsquic_conn_make_stream()`. The corresponding `Stream.onNewStream` callback (which
+    /// triggers the user's `StreamCreatedCallbackFn`) might be delayed if the connection
+    /// handshake is not yet complete or if stream limits imposed by the peer have been reached.
+    ///
+    /// While lsquic documentation doesn't provide a single, explicit guarantee that *every*
+    /// successful `lsquic_conn_make_stream()` call will *always* result in *either*
+    /// `on_new_stream` or a connection closure/error callback, the library's documented
+    /// behavior strongly implies this is the case. Critical errors that prevent stream
+    /// creation or affect the connection typically lead to connection termination,
+    /// which triggers the `Connection.onConnClosed` callback (`ConnectionClosedCallbackFn`).
+    ///
+    /// **Practical Implication:** Applications should primarily rely on the
+    /// `ConnectionClosedCallbackFn` as the signal that any pending stream creation
+    /// requests on that connection have implicitly failed if the `StreamCreatedCallbackFn`
+    /// was not received.
+    ///
+    /// Explicit application-level timeouts for stream creation are generally NOT implemented
+    /// in this client due to the added complexity. They should only be considered if
+    /// application logic requires absolute certainty of success/failure reporting within a
+    /// specific timeframe, potentially as a fallback for rare, undocumented edge cases.
 
     // Define callback function types
     pub const ConnectionEstablishedCallbackFn = *const fn (connection: ConnectionId, endpoint: network.EndPoint, context: ?*anyopaque) void;
@@ -64,12 +87,12 @@ pub const JamSnpClient = struct {
     lsquic_engine_settings: lsquic.lsquic_engine_settings,
     lsquic_stream_iterface: lsquic.lsquic_stream_if = .{
         // Mandatory callbacks
-        .on_new_conn = Connection.onNewConn,
-        .on_conn_closed = Connection.onConnClosed,
-        .on_new_stream = Stream.onNewStream,
-        .on_read = Stream.onRead,
-        .on_write = Stream.onWrite,
-        .on_close = Stream.onClose,
+        .on_new_conn = Connection.onConnectionCreated,
+        .on_conn_closed = Connection.onConnectionClosed,
+        .on_new_stream = Stream.onStreamCreated,
+        .on_read = Stream.onStreamRead,
+        .on_write = Stream.onStreamWrite,
+        .on_close = Stream.onStreamClosed,
         // Optional callbacks
         // .on_goaway_received = Connection.onGoawayReceived,
         // .on_dg_write = onDbWrite,
@@ -95,7 +118,6 @@ pub const JamSnpClient = struct {
     data_end_of_stream_handler: CallbackHandler = .{ .callback = null, .context = null },
     data_error_handler: CallbackHandler = .{ .callback = null, .context = null },
     data_wouldblock_handler: CallbackHandler = .{ .callback = null, .context = null },
-    data_write_started_handler: CallbackHandler = .{ .callback = null, .context = null },
     data_write_progress_handler: CallbackHandler = .{ .callback = null, .context = null },
     data_write_completed_handler: CallbackHandler = .{ .callback = null, .context = null },
 
@@ -571,7 +593,6 @@ pub const JamSnpClient = struct {
         self.data_end_of_stream_handler = .{ .callback = null, .context = null };
         self.data_error_handler = .{ .callback = null, .context = null };
         self.data_wouldblock_handler = .{ .callback = null, .context = null };
-        self.data_write_started_handler = .{ .callback = null, .context = null };
         self.data_write_progress_handler = .{ .callback = null, .context = null };
         self.data_write_completed_handler = .{ .callback = null, .context = null };
 
@@ -590,8 +611,25 @@ pub const JamSnpClient = struct {
         self.allocator.free(self.chain_genesis_hash);
         self.allocator.free(self.alpn);
 
-        self.connections.deinit();
+        if (self.streams.count() > 0) {
+            span.warn("Streams map is not empty during deinit. Remaining connections: {}\n", .{self.streams.count()});
+            var it = self.streams.iterator();
+            while (it.next()) |entry| {
+                const stream = entry.value_ptr.*;
+                stream.destroy(self.allocator);
+            }
+        }
         self.streams.deinit();
+
+        if (self.connections.count() > 0) {
+            span.warn("Connections map is not empty during deinit. Remaining connections: {}\n", .{self.connections.count()});
+            var it = self.connections.iterator();
+            while (it.next()) |entry| {
+                const conn = entry.value_ptr.*;
+                conn.destroy(self.allocator);
+            }
+        }
+        self.connections.deinit();
 
         // Destroy the object itself
         self.allocator.destroy(self);
@@ -706,7 +744,7 @@ pub const JamSnpClient = struct {
             span.debug("Stream creation request successful", .{});
         }
 
-        fn onNewConn(
+        fn onConnectionCreated(
             _: ?*anyopaque,
             maybe_lsquic_connection: ?*lsquic.lsquic_conn_t,
         ) callconv(.C) *lsquic.lsquic_conn_ctx_t {
@@ -725,7 +763,12 @@ pub const JamSnpClient = struct {
             return @ptrCast(connection);
         }
 
-        fn onConnClosed(maybe_lsquic_connection: ?*lsquic.lsquic_conn_t) callconv(.C) void {
+        // Note on Connection/Stream Closure Callback Order:
+        // lsquic is expected to invoke `Stream.onClose` for all streams associated
+        // with a connection *before* it invokes `Connection.onConnClosed` for the
+        // connection itself. Therefore, explicit stream cleanup is not performed
+        // within `Connection.onConnClosed`.
+        fn onConnectionClosed(maybe_lsquic_connection: ?*lsquic.lsquic_conn_t) callconv(.C) void {
             const span = trace.span(.on_conn_closed);
             defer span.deinit();
             span.debug("Connection closed callback", .{});
@@ -759,6 +802,11 @@ pub const JamSnpClient = struct {
         want_read: bool = false,
         read_buffer: ?[]u8 = null,
         read_buffer_pos: usize = 0,
+
+        pub fn destroy(self: *Stream, alloc: std.mem.Allocator) void {
+            self.* = undefined;
+            alloc.destroy(self);
+        }
 
         pub fn wantRead(self: *Stream, want: bool) void {
             const span = trace.span(.stream_want_read);
@@ -856,7 +904,8 @@ pub const JamSnpClient = struct {
             }
         }
 
-        fn onNewStream(
+        // LSQUIC Callbacks
+        fn onStreamCreated(
             _: ?*anyopaque,
             maybe_lsquic_stream: ?*lsquic.lsquic_stream_t,
         ) callconv(.C) *lsquic.lsquic_stream_ctx_t {
@@ -871,6 +920,9 @@ pub const JamSnpClient = struct {
             span.debug("Creating stream context", .{});
             const stream = connection.client.allocator.create(Stream) catch {
                 span.err("Failed to allocate memory for stream", .{});
+                // NOTE: we are panicing here, we can add a cusomt error callback
+                // here for now we keep it like this.
+                // TODO: handle errors properly
                 @panic("OutOfMemory");
             };
 
@@ -887,7 +939,7 @@ pub const JamSnpClient = struct {
             return @ptrCast(stream);
         }
 
-        fn onRead(
+        fn onStreamRead(
             maybe_lsquic_stream: ?*lsquic.lsquic_stream_t,
             maybe_stream_ctx: ?*lsquic.lsquic_stream_ctx_t,
         ) callconv(.C) void {
@@ -938,7 +990,7 @@ pub const JamSnpClient = struct {
             }
         }
 
-        fn onWrite(
+        fn onStreamWrite(
             maybe_lsquic_stream: ?*lsquic.lsquic_stream_t,
             maybe_stream: ?*lsquic.lsquic_stream_ctx_t,
         ) callconv(.C) void {
@@ -992,7 +1044,7 @@ pub const JamSnpClient = struct {
             }
         }
 
-        fn onClose(
+        fn onStreamClosed(
             _: ?*lsquic.lsquic_stream_t,
             maybe_stream: ?*lsquic.lsquic_stream_ctx_t,
         ) callconv(.C) void {
@@ -1016,6 +1068,7 @@ pub const JamSnpClient = struct {
         }
     };
 
+    // Event loop methods
     fn onTick(
         maybe_self: ?*@This(),
         xev_loop: *xev.Loop,
