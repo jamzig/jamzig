@@ -48,98 +48,112 @@ pub const ClientThread = struct {
     event_queue: *Mailbox(Client.Event, 64),
 
     pub const Command = union(enum) {
-        const Connect = struct {
-            address: []const u8,
-            port: u16,
-        };
+        pub const ConnectPayload = struct {
+            const Data = struct {
+                address: []const u8,
+                port: u16,
+            };
 
-        const Disconnect = struct {
-            connection_id: ConnectionId,
-        };
-
-        const CreateStream = struct {
-            connection_id: ConnectionId,
-        };
-
-        const DestroyStream = struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-        };
-
-        const StreamWrite = struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            data: []const u8,
-        };
-
-        const StreamRead = struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            data: []const u8,
-        };
-
-        const StreamWantRead = struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            want: bool,
-        };
-
-        const StreamWantWrite = struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            want: bool,
-        };
-
-        const StreamFlush = struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-        };
-
-        const StreamShutdown = struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            how: c_int,
-        };
-
-        connect: struct {
-            data: ClientThread.Command.Connect,
+            data: Data,
             metadata: CommandMetadata(anyerror!ConnectionId),
-        },
-        disconnect: struct {
-            data: ClientThread.Command.Disconnect,
+        };
+
+        pub const DisconnectPayload = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+            };
+
+            data: Data,
             metadata: CommandMetadata(void),
-        },
-        create_stream: struct {
-            data: ClientThread.Command.CreateStream,
+        };
+
+        pub const CreateStreamPayload = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+            };
+
+            data: Data,
             metadata: CommandMetadata(void),
-        },
-        destroy_stream: struct {
-            data: ClientThread.Command.DestroyStream,
+        };
+
+        pub const DestroyStreamPayload = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+                stream_id: StreamId,
+            };
+
+            data: Data,
             metadata: CommandMetadata(void),
-        },
-        send_data: struct {
-            data: ClientThread.Command.StreamWrite,
+        };
+
+        pub const SendDataPayload = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+                stream_id: StreamId,
+                data: []const u8,
+            };
+
+            data: Data,
             metadata: CommandMetadata(void),
-        },
-        stream_want_read: struct {
-            data: ClientThread.Command.StreamWantRead,
+        };
+
+        pub const StreamWantReadPayload = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+                stream_id: StreamId,
+                want: bool,
+            };
+
+            data: Data,
             metadata: CommandMetadata(void),
-        },
-        stream_want_write: struct {
-            data: ClientThread.Command.StreamWantWrite,
+        };
+
+        pub const StreamWantWritePayload = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+                stream_id: StreamId,
+                want: bool,
+            };
+
+            data: Data,
             metadata: CommandMetadata(void),
-        },
-        stream_flush: struct {
-            data: ClientThread.Command.StreamFlush,
+        };
+
+        pub const StreamFlushPayload = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+                stream_id: StreamId,
+            };
+
+            data: Data,
             metadata: CommandMetadata(void),
-        },
-        stream_shutdown: struct {
-            data: ClientThread.Command.StreamShutdown,
+        };
+
+        pub const StreamShutdownPayload = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+                stream_id: StreamId,
+                how: c_int,
+            };
+
+            data: Data,
             metadata: CommandMetadata(void),
-        },
-        shutdown: struct {
+        };
+
+        pub const ShutdownPayload = struct {
             metadata: CommandMetadata(void),
-        },
+        };
+
+        connect: ConnectPayload,
+        disconnect: DisconnectPayload,
+        create_stream: CreateStreamPayload,
+        destroy_stream: DestroyStreamPayload,
+        send_data: SendDataPayload,
+        stream_want_read: StreamWantReadPayload,
+        stream_want_write: StreamWantWritePayload,
+        stream_flush: StreamFlushPayload,
+        stream_shutdown: StreamShutdownPayload,
+        shutdown: ShutdownPayload,
     };
 
     pub fn initThread(alloc: std.mem.Allocator, client: *JamSnpClient) !*ClientThread {
@@ -393,7 +407,7 @@ pub const Client = struct {
                 .port = port,
             },
             .metadata = .{
-                .callback = callback orelse defaultCallback,
+                .callback = callback,
                 .context = context,
             },
         } };
@@ -401,9 +415,6 @@ pub const Client = struct {
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
         try self.thread.wakeup.notify();
     }
-
-    // Default callback for operations
-    fn defaultCallback(_: ?*anyopaque, _: ?*anyopaque) void {}
 
     pub fn disconnect(self: *Client, connection_id: ConnectionId) !void {
         return self.disconnectWithCallback(connection_id, null, null);
@@ -420,7 +431,7 @@ pub const Client = struct {
                 .connection_id = connection_id,
             },
             .metadata = .{
-                .callback = callback orelse defaultCallback,
+                .callback = callback,
                 .context = context,
             },
         } };
@@ -444,7 +455,7 @@ pub const Client = struct {
                 .connection_id = connection_id,
             },
             .metadata = .{
-                .callback = callback orelse defaultCallback,
+                .callback = callback,
                 .context = context,
             },
         } };
@@ -469,7 +480,7 @@ pub const Client = struct {
                 .stream_id = stream.stream_id,
             },
             .metadata = .{
-                .callback = callback orelse defaultCallback,
+                .callback = callback,
                 .context = context,
             },
         } };
