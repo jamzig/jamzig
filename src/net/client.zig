@@ -7,12 +7,31 @@
 const std = @import("std");
 const xev = @import("xev");
 
-const JamSnpClient = @import("jamsnp/client.zig").JamSnpClient;
-const types = @import("types.zig");
-const ConnectionId = types.ConnectionId;
-const StreamId = types.StreamId;
+const jamsnp_client = @import("jamsnp/client.zig");
+
+const ConnectionId = jamsnp_client.ConnectionId;
+const StreamId = jamsnp_client.StreamId;
+const JamSnpClient = jamsnp_client.JamSnpClient;
 
 const Mailbox = @import("../datastruct/blocking_queue.zig").BlockingQueue;
+
+/// Callback type for command completion
+pub fn CommandCallback(T: type) type {
+    return *const fn (result: T, context: ?*anyopaque) void;
+}
+
+pub fn CommandMetadata(T: type) type {
+    return struct {
+        callback: ?CommandCallback(T) = null,
+        context: ?*anyopaque = null,
+
+        pub fn callWithResult(self: *const CommandMetadata(T), result: T) void {
+            if (self.callback) |callback| {
+                callback(result, self.context);
+            }
+        }
+    };
+}
 
 pub const ClientThread = struct {
     alloc: std.mem.Allocator,
@@ -47,7 +66,13 @@ pub const ClientThread = struct {
             stream_id: StreamId,
         };
 
-        const SendData = struct {
+        const StreamWrite = struct {
+            connection_id: ConnectionId,
+            stream_id: StreamId,
+            data: []const u8,
+        };
+
+        const StreamRead = struct {
             connection_id: ConnectionId,
             stream_id: StreamId,
             data: []const u8,
@@ -76,16 +101,45 @@ pub const ClientThread = struct {
             how: c_int,
         };
 
-        connect: Connect,
-        disconnect: Disconnect,
-        create_stream: CreateStream,
-        destroy_stream: DestroyStream,
-        send_data: SendData,
-        stream_want_read: StreamWantRead,
-        stream_want_write: StreamWantWrite,
-        stream_flush: StreamFlush,
-        stream_shutdown: StreamShutdown,
-        shutdown: void,
+        connect: struct {
+            data: ClientThread.Command.Connect,
+            metadata: CommandMetadata(anyerror!ConnectionId),
+        },
+        disconnect: struct {
+            data: ClientThread.Command.Disconnect,
+            metadata: CommandMetadata(void),
+        },
+        create_stream: struct {
+            data: ClientThread.Command.CreateStream,
+            metadata: CommandMetadata(void),
+        },
+        destroy_stream: struct {
+            data: ClientThread.Command.DestroyStream,
+            metadata: CommandMetadata(void),
+        },
+        send_data: struct {
+            data: ClientThread.Command.StreamWrite,
+            metadata: CommandMetadata(void),
+        },
+        stream_want_read: struct {
+            data: ClientThread.Command.StreamWantRead,
+            metadata: CommandMetadata(void),
+        },
+        stream_want_write: struct {
+            data: ClientThread.Command.StreamWantWrite,
+            metadata: CommandMetadata(void),
+        },
+        stream_flush: struct {
+            data: ClientThread.Command.StreamFlush,
+            metadata: CommandMetadata(void),
+        },
+        stream_shutdown: struct {
+            data: ClientThread.Command.StreamShutdown,
+            metadata: CommandMetadata(void),
+        },
+        shutdown: struct {
+            metadata: CommandMetadata(void),
+        },
     };
 
     pub fn initThread(alloc: std.mem.Allocator, client: *JamSnpClient) !*ClientThread {
@@ -189,8 +243,14 @@ pub const ClientThread = struct {
     fn drainMailbox(self: *ClientThread) !void {
         while (self.mailbox.pop()) |command| {
             switch (command) {
-                .shutdown => try self.stop.notify(),
-                .connect, .disconnect, .create_stream, .destroy_stream, .send_data => {
+                .shutdown => |cmd| {
+                    // Notify callback before stopping
+                    if (cmd.metadata.callback) |callback| {
+                        callback({}, cmd.metadata.context);
+                    }
+                    try self.stop.notify();
+                },
+                else => {
                     try self.processCommand(command);
                 },
             }
@@ -199,94 +259,72 @@ pub const ClientThread = struct {
 
     fn processCommand(self: *ClientThread, command: Command) !void {
         switch (command) {
-            .connect => |connect_data| {
-                try self.client.connect(connect_data.address, connect_data.port);
-
-                // TODO: Get actual connection ID from JamSnpClient
-                _ = self.event_queue.push(.{
-                    .type = .connected,
-                }, .{ .instant = {} });
+            .connect => |cmd| {
+                _ = self.client.connect(cmd.data.address, cmd.data.port) catch |err| {
+                    // Call the callback with error
+                    cmd.metadata.callWithResult(err);
+                    // FIXME: add the connection failed event
+                };
             },
-            .disconnect => |disconnect_data| {
-                // TODO: Implement using JamSnpClient
-                _ = self.event_queue.push(.{
-                    .type = .disconnected,
-                    .connection_id = disconnect_data.connection_id,
-                }, .{ .instant = {} });
+            .disconnect => |_| {
+                // FIXME: add te disconnect call
             },
-            .create_stream => |create_stream_data| {
+            .create_stream => |_| {
                 // Find the connection by ID
                 // For now, assuming we have a connection map
                 // TODO: Implement actual connection lookup
 
                 // Create the stream using JamSnpClient
                 // TODO: Replace with actual implementation
-                const stream_id: StreamId = StreamId.fromRaw(1); // Placeholder
 
-                // Generate stream_created event
-                _ = self.event_queue.push(.{
-                    .type = .stream_created,
-                    .connection_id = create_stream_data.connection_id,
-                    .stream_id = stream_id,
-                }, .{ .instant = {} });
             },
-            .destroy_stream => |destroy_stream_data| {
+            .destroy_stream => |_| {
                 // Find the stream by ID
                 // TODO: Implement actual stream lookup
 
                 // Close the stream
                 // TODO: Implement actual stream closing
-
-                // Generate stream_destroyed event
-                _ = self.event_queue.push(.{
-                    .type = .stream_destroyed,
-                    .connection_id = destroy_stream_data.connection_id,
-                    .stream_id = destroy_stream_data.stream_id,
-                }, .{ .instant = {} });
             },
-            .send_data => |send_data| {
+            .send_data => |_| {
                 // Find the stream by ID
                 // TODO: Implement actual stream lookup
 
                 // Write data to the stream
                 // TODO: Implement actual data writing
 
-                // For now, just acknowledge the data was sent
-                _ = send_data;
             },
-            .stream_want_read => |want_read| {
+            .stream_want_read => |_| {
                 // Find the stream by ID
                 // TODO: Implement actual stream lookup
 
                 // Set want-read on the stream
                 // TODO: Implement actual want-read setting
-                _ = want_read;
+
             },
-            .stream_want_write => |want_write| {
+            .stream_want_write => |_| {
                 // Find the stream by ID
                 // TODO: Implement actual stream lookup
 
                 // Set want-write on the stream
                 // TODO: Implement actual want-write setting
-                _ = want_write;
             },
-            .stream_flush => |flush| {
+            .stream_flush => |_| {
                 // Find the stream by ID
                 // TODO: Implement actual stream lookup
 
                 // Flush the stream
                 // TODO: Implement actual stream flushing
-                _ = flush;
+
             },
-            .stream_shutdown => |shutdown| {
+            .stream_shutdown => |_| {
                 // Find the stream by ID
                 // TODO: Implement actual stream lookup
 
                 // Shutdown the stream
                 // TODO: Implement actual stream shutdown
-                _ = shutdown;
+
             },
-            .shutdown => {},
+            .shutdown => |_| {},
         }
     }
 
@@ -338,50 +376,102 @@ pub const Client = struct {
 
     // Connect to a remote endpoint
     pub fn connect(self: *Client, address: []const u8, port: u16) !void {
+        return self.connectWithCallback(address, port, null, null);
+    }
+
+    // Connect with callback for completion notification
+    pub fn connectWithCallback(
+        self: *Client,
+        address: []const u8,
+        port: u16,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .connect = .{
-            .address = address,
-            .port = port,
+            .data = .{
+                .address = address,
+                .port = port,
+            },
+            .metadata = .{
+                .callback = callback orelse defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
         try self.thread.wakeup.notify();
     }
+
+    // Default callback for operations
+    fn defaultCallback(_: ?*anyopaque, _: ?*anyopaque) void {}
 
     pub fn disconnect(self: *Client, connection_id: ConnectionId) !void {
+        return self.disconnectWithCallback(connection_id, null, null);
+    }
+
+    pub fn disconnectWithCallback(
+        self: *Client,
+        connection_id: ConnectionId,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .disconnect = .{
-            .connection_id = connection_id,
+            .data = .{
+                .connection_id = connection_id,
+            },
+            .metadata = .{
+                .callback = callback orelse defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
         try self.thread.wakeup.notify();
     }
 
-    pub fn createStream(self: *Client, connection_id: ConnectionId) !StreamHandle {
+    pub fn createStream(self: *Client, stream: StreamHandle) !void {
+        return self.destroyStreamWithCallback(stream, null, null);
+    }
+
+    pub fn createStreamWithCallback(
+        self: *Client,
+        connection_id: ConnectionId,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .create_stream = .{
-            .connection_id = connection_id,
+            .data = .{
+                .connection_id = connection_id,
+            },
+            .metadata = .{
+                .callback = callback orelse defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
         try self.thread.wakeup.notify();
-
-        // TODO: Implement proper waiting for stream creation
-        // This could be done with a condition variable or by polling the event queue
-
-        // For now, we'll return a placeholder handle
-        // In a more complete implementation, we would wait for a stream_created event
-        return StreamHandle{
-            .thread = self.thread,
-            .stream_id = StreamId.fromRaw(1), // Placeholder
-            .connection_id = connection_id,
-            .is_readable = false,
-            .is_writable = false,
-        };
     }
 
     pub fn destroyStream(self: *Client, stream: StreamHandle) !void {
+        return self.destroyStreamWithCallback(stream, null, null);
+    }
+
+    pub fn destroyStreamWithCallback(
+        self: *Client,
+        stream: StreamHandle,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .destroy_stream = .{
-            .connection_id = stream.connection_id,
-            .stream_id = stream.stream_id,
+            .data = .{
+                .connection_id = stream.connection_id,
+                .stream_id = stream.stream_id,
+            },
+            .metadata = .{
+                .callback = callback orelse defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
@@ -389,7 +479,20 @@ pub const Client = struct {
     }
 
     pub fn shutdown(self: *const Client) !void {
-        const command = ClientThread.Command{ .shutdown = {} };
+        return self.shutdownWithCallback(null, null);
+    }
+
+    pub fn shutdownWithCallback(
+        self: *const Client,
+        callback: ?CommandCallback(void),
+        context: ?*anyopaque,
+    ) !void {
+        const command = ClientThread.Command{ .shutdown = .{
+            .metadata = .{
+                .callback = callback,
+                .context = context,
+            },
+        } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
         try self.thread.wakeup.notify();
@@ -417,10 +520,25 @@ pub const StreamHandle = struct {
     is_writable: bool = false,
 
     pub fn sendData(self: *StreamHandle, data: []u8) !void {
+        return self.sendDataWithCallback(data, null, null);
+    }
+
+    pub fn sendDataWithCallback(
+        self: *StreamHandle,
+        data: []u8,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .send_data = .{
-            .connection_id = self.connection_id,
-            .stream_id = self.stream_id,
-            .data = data,
+            .data = .{
+                .connection_id = self.connection_id,
+                .stream_id = self.stream_id,
+                .data = data,
+            },
+            .metadata = .{
+                .callback = callback orelse Client.defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
@@ -428,10 +546,25 @@ pub const StreamHandle = struct {
     }
 
     pub fn wantRead(self: *StreamHandle, want: bool) !void {
+        return self.wantReadWithCallback(want, null, null);
+    }
+
+    pub fn wantReadWithCallback(
+        self: *StreamHandle,
+        want: bool,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .stream_want_read = .{
-            .connection_id = self.connection_id,
-            .stream_id = self.stream_id,
-            .want = want,
+            .data = .{
+                .connection_id = self.connection_id,
+                .stream_id = self.stream_id,
+                .want = want,
+            },
+            .metadata = .{
+                .callback = callback orelse Client.defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
@@ -439,10 +572,25 @@ pub const StreamHandle = struct {
     }
 
     pub fn wantWrite(self: *StreamHandle, want: bool) !void {
+        return self.wantWriteWithCallback(want, null, null);
+    }
+
+    pub fn wantWriteWithCallback(
+        self: *StreamHandle,
+        want: bool,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .stream_want_write = .{
-            .connection_id = self.connection_id,
-            .stream_id = self.stream_id,
-            .want = want,
+            .data = .{
+                .connection_id = self.connection_id,
+                .stream_id = self.stream_id,
+                .want = want,
+            },
+            .metadata = .{
+                .callback = callback orelse Client.defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
@@ -450,9 +598,23 @@ pub const StreamHandle = struct {
     }
 
     pub fn flush(self: *StreamHandle) !void {
+        return self.flushWithCallback(null, null);
+    }
+
+    pub fn flushWithCallback(
+        self: *StreamHandle,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .stream_flush = .{
-            .connection_id = self.connection_id,
-            .stream_id = self.stream_id,
+            .data = .{
+                .connection_id = self.connection_id,
+                .stream_id = self.stream_id,
+            },
+            .metadata = .{
+                .callback = callback orelse Client.defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
@@ -460,10 +622,25 @@ pub const StreamHandle = struct {
     }
 
     pub fn shutdown(self: *StreamHandle, how: c_int) !void {
+        return self.shutdownWithCallback(how, null, null);
+    }
+
+    pub fn shutdownWithCallback(
+        self: *StreamHandle,
+        how: c_int,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .stream_shutdown = .{
-            .connection_id = self.connection_id,
-            .stream_id = self.stream_id,
-            .how = how,
+            .data = .{
+                .connection_id = self.connection_id,
+                .stream_id = self.stream_id,
+                .how = how,
+            },
+            .metadata = .{
+                .callback = callback orelse Client.defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });
@@ -471,9 +648,23 @@ pub const StreamHandle = struct {
     }
 
     pub fn close(self: *StreamHandle) !void {
+        return self.closeWithCallback(null, null);
+    }
+
+    pub fn closeWithCallback(
+        self: *StreamHandle,
+        callback: ?CommandCallback,
+        context: ?*anyopaque,
+    ) !void {
         const command = ClientThread.Command{ .destroy_stream = .{
-            .connection_id = self.connection_id,
-            .stream_id = self.stream_id,
+            .data = .{
+                .connection_id = self.connection_id,
+                .stream_id = self.stream_id,
+            },
+            .metadata = .{
+                .callback = callback orelse Client.defaultCallback,
+                .context = context,
+            },
         } };
 
         _ = self.thread.mailbox.push(command, .{ .instant = {} });

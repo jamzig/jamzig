@@ -1,4 +1,5 @@
 const std = @import("std");
+const uuid = @import("uuid");
 const lsquic = @import("lsquic");
 const ssl = @import("ssl");
 const common = @import("common.zig");
@@ -12,6 +13,9 @@ const toSocketAddress = @import("../ext.zig").toSocketAddress;
 
 const trace = @import("../../tracing.zig").scoped(.network);
 
+pub const ConnectionId = uuid.Uuid;
+pub const StreamId = uuid.Uuid;
+
 pub const JamSnpClient = struct {
     pub const EventType = enum {
         connection_established,
@@ -22,31 +26,48 @@ pub const JamSnpClient = struct {
         data_received,
     };
 
-    pub const Event = union(EventType) {
-        connection_established: struct {
-            connection: *Connection,
-            endpoint: network.EndPoint,
+    pub const ConnectionEstablished = struct {
+        connection: ConnectionId,
+        endpoint: network.EndPoint,
+    };
+
+    pub const ConnectionFailed = struct {
+        endpoint: network.EndPoint,
+        @"error": anyerror,
+    };
+
+    pub const ConnectionClosed = struct {
+        connection: ConnectionId,
+    };
+
+    pub const StreamCreated = struct {
+        connection: ConnectionId,
+        stream: StreamId,
+    };
+
+    pub const StreamClosed = struct {
+        connection: ConnectionId,
+        stream: StreamId,
+    };
+
+    pub const DataReceived = struct {
+        connection: ConnectionId,
+        stream: StreamId,
+        data: union(enum) {
+            ok: []const u8,
+            done: void,
+            wouldblock: void,
+            @"error": i32, // Stores the error code, which can be negative
         },
-        connection_failed: struct {
-            endpoint: network.EndPoint,
-            @"error": anyerror,
-        },
-        connection_closed: struct {
-            connection: *Connection,
-        },
-        stream_created: struct {
-            connection: *Connection,
-            stream: *Stream,
-        },
-        stream_closed: struct {
-            connection: *Connection,
-            stream: *Stream,
-        },
-        data_received: struct {
-            connection: *Connection,
-            stream: *Stream,
-            data: []const u8,
-        },
+    };
+
+    pub const Event = union(enum) {
+        connection_established: ConnectionEstablished,
+        connection_failed: ConnectionFailed,
+        connection_closed: ConnectionClosed,
+        stream_created: StreamCreated,
+        stream_closed: StreamClosed,
+        data_received: DataReceived,
     };
 
     /// Event handler function type
@@ -63,6 +84,10 @@ pub const JamSnpClient = struct {
     socket: network.Socket,
 
     alpn: []const u8,
+
+    /// Bookkeeping for connections and streams
+    connections: std.AutoHashMap(ConnectionId, *Connection),
+    streams: std.AutoHashMap(StreamId, *Stream),
 
     loop: ?*xev.Loop = null,
     loop_owned: bool = false,
@@ -197,6 +222,9 @@ pub const JamSnpClient = struct {
             .chain_genesis_hash = chain_genesis_hash,
             .is_builder = is_builder,
 
+            .connections = std.AutoHashMap(ConnectionId, *Connection).init(allocator),
+            .streams = std.AutoHashMap(StreamId, *Stream).init(allocator),
+
             .socket = socket,
             .alpn = alpn_id,
 
@@ -314,7 +342,7 @@ pub const JamSnpClient = struct {
             span.debug("Calling event handler", .{});
             handler.callback(&event, handler.context);
         } else {
-            span.debug("No event handler registered", .{});
+            span.warn("No event handler registered", .{});
         }
     }
 
@@ -440,7 +468,7 @@ pub const JamSnpClient = struct {
         span.debug("JamSnpClient deinitialization complete", .{});
     }
 
-    pub fn connect(self: *JamSnpClient, peer_addr: []const u8, peer_port: u16) !void {
+    pub fn connect(self: *JamSnpClient, peer_addr: []const u8, peer_port: u16) !ConnectionId {
         const span = trace.span(.connect);
         defer span.deinit();
         span.debug("Connecting to {s}:{d}", .{ peer_addr, peer_port });
@@ -476,27 +504,8 @@ pub const JamSnpClient = struct {
 
         // Create a connection
         span.trace("Creating connection context", .{});
-        const connection = self.allocator.create(Connection) catch |err| {
-            span.err("Failed to allocate connection: {s}", .{@errorName(err)});
-
-            // Notify about the connection failure
-            const event = Event{
-                .connection_failed = .{
-                    .endpoint = peer_endpoint,
-                    .@"error" = err,
-                },
-            };
-            self.notifyEvent(event);
-
-            return err;
-        };
-        errdefer self.allocator.destroy(connection);
-
-        connection.* = .{
-            .lsquic_connection = undefined,
-            .client = self,
-            .endpoint = peer_endpoint,
-        };
+        const conn = try Connection.create(self.allocator, self, peer_endpoint);
+        errdefer conn.destroy(self.allocator);
 
         // Create QUIC connection
         span.debug("Creating QUIC connection", .{});
@@ -507,7 +516,7 @@ pub const JamSnpClient = struct {
             @ptrCast(&toSocketAddress(peer_endpoint)),
 
             self.ssl_ctx, // peer_ctx
-            @ptrCast(connection), // conn_ctx
+            @ptrCast(conn), // conn_ctx
             null,
             0, // base_plpmtu - use default
             null,
@@ -516,22 +525,41 @@ pub const JamSnpClient = struct {
             0, // token
         ) orelse {
             span.err("lsquic_engine_connect failed", .{});
-            const event = Event{
-                .connection_failed = .{
-                    .endpoint = peer_endpoint,
-                    .@"error" = error.ConnectionFailed,
-                },
-            };
-            self.notifyEvent(event);
-
             return error.ConnectionFailed;
         };
+
+        // If we where able to create the connection we need to add
+        // it to the connections map
+        try self.connections.put(conn.id, conn);
+
+        return conn.id;
     }
 
     pub const Connection = struct {
+        id: ConnectionId,
         lsquic_connection: *lsquic.lsquic_conn_t,
         endpoint: network.EndPoint,
         client: *JamSnpClient,
+
+        // Allocates the object and sets the minimal fields still needs to attach the lsquic_connection
+        pub fn create(alloc: std.mem.Allocator, client: *JamSnpClient, endpoint: network.EndPoint) !*Connection {
+            // Allocate the connection object
+            const connection = try alloc.create(Connection);
+
+            connection.* = .{
+                .id = uuid.v4.new(),
+                .lsquic_connection = undefined,
+                .endpoint = endpoint,
+                .client = client,
+            };
+
+            return connection;
+        }
+
+        pub fn destroy(self: *Connection, alloc: std.mem.Allocator) void {
+            self.* = undefined;
+            alloc.destroy(self);
+        }
 
         pub fn createStream(self: *Connection, alloc: std.mem.Allocator) !*Stream {
             const span = trace.span(.create_stream);
@@ -564,18 +592,16 @@ pub const JamSnpClient = struct {
         ) callconv(.C) *lsquic.lsquic_conn_ctx_t {
             const span = trace.span(.on_new_conn);
             defer span.deinit();
-            span.debug("New connection callback", .{});
 
             const conn_ctx = lsquic.lsquic_conn_get_ctx(maybe_lsquic_connection).?;
             const connection: *Connection = @alignCast(@ptrCast(conn_ctx));
             span.debug("Connected to {}", .{connection.endpoint});
 
             connection.lsquic_connection = maybe_lsquic_connection.?;
-            span.debug("Connection initialized", .{});
 
             const event = Event{
                 .connection_established = .{
-                    .connection = connection,
+                    .connection = connection.id,
                     .endpoint = connection.endpoint,
                 },
             };
@@ -594,15 +620,12 @@ pub const JamSnpClient = struct {
 
             const event = Event{
                 .connection_closed = .{
-                    .connection = conn,
+                    .connection = conn.id,
                 },
             };
             conn.client.notifyEvent(event);
 
-            span.debug("Clearing connection context", .{});
             lsquic.lsquic_conn_set_ctx(maybe_lsquic_connection, null);
-
-            span.debug("Destroying connection", .{});
             conn.client.allocator.destroy(conn);
             span.debug("Connection cleanup complete", .{});
         }
@@ -637,26 +660,18 @@ pub const JamSnpClient = struct {
         span.debug("Packet processing complete", .{});
     }
 
-    fn getStreamInterface() lsquic.lsquic_stream_if {
-        return .{
-            // Mandatory callbacks
-            .on_new_conn = Connection.onNewConn,
-            .on_conn_closed = Connection.onConnClosed,
-            .on_new_stream = Stream.onNewStream,
-            .on_read = Stream.onRead,
-            .on_write = Stream.onWrite,
-            .on_close = Stream.onClose,
-            // Optional callbacks
-            // .on_hsk_done = null,
-            // .on_goaway_received = null,
-            // .on_new_token = null,
-            // .on_sess_resume_info = null,
-        };
-    }
-
     const Stream = struct {
-        lsquic_stream: *lsquic.lsquic_stream_t,
+        id: StreamId,
         connection: *Connection,
+        lsquic_stream: *lsquic.lsquic_stream_t,
+
+        want_write: bool = false,
+        write_buffer: ?[]u8 = null,
+        write_buffer_pos: usize = 0,
+
+        want_read: bool = false,
+        read_buffer: ?[]u8 = null,
+        read_buffer_pos: usize = 0,
 
         pub fn wantRead(self: *Stream, want: bool) void {
             const span = trace.span(.stream_want_read);
@@ -678,20 +693,36 @@ pub const JamSnpClient = struct {
             _ = lsquic.lsquic_stream_wantwrite(self.lsquic_stream, want_val);
         }
 
-        pub fn write(self: *Stream, data: []const u8) !usize {
+        pub fn read(self: *Stream, buffer: []u8) !void {
+            const span = trace.span(.stream_read);
+            defer span.deinit();
+            span.debug("Reading from stream", .{});
+
+            if (self.read_buffer) |_| {
+                span.err("Stream is already reading, cannot read again", .{});
+                return error.StreamAlreadyReading;
+            }
+
+            self.read_buffer = buffer;
+            self.read_buffer_pos = 0;
+
+            self.wantRead(true);
+        }
+
+        pub fn write(self: *Stream, data: []const u8) !void {
             const span = trace.span(.stream_write);
             defer span.deinit();
             span.debug("Writing {d} bytes to stream", .{data.len});
 
-            const written = lsquic.lsquic_stream_write(self.lsquic_stream, data.ptr, data.len);
-            if (written < 0) {
-                const err = std.posix.errno(-@as(i32, @intCast(written)));
-                span.err("Failed to write to stream: {s}", .{@errorName(err)});
-                return error.StreamWriteFailed;
+            if (self.write_buffer) |_| {
+                span.err("Stream is already writing, cannot write again", .{});
+                return error.StreamAlreadyWriting;
             }
 
-            span.debug("Successfully wrote {d} bytes", .{written});
-            return @intCast(written);
+            self.write_buffer = data;
+            self.write_buffer_pos = 0;
+
+            self.wantWrite(true);
         }
 
         pub fn flush(self: *Stream) !void {
@@ -753,20 +784,19 @@ pub const JamSnpClient = struct {
             };
 
             stream.* = .{
+                .id = uuid.v4.new(),
                 .lsquic_stream = maybe_lsquic_stream.?,
                 .connection = connection,
             };
 
             const event = Event{
                 .stream_created = .{
-                    .connection = connection,
-                    .stream = stream,
+                    .connection = connection.id,
+                    .stream = stream.id,
                 },
             };
             connection.client.notifyEvent(event);
 
-            span.debug("Setting stream to want-write", .{});
-            _ = lsquic.lsquic_stream_wantwrite(maybe_lsquic_stream, 1);
             span.debug("Stream initialization complete", .{});
             return @ptrCast(stream);
         }
@@ -781,34 +811,67 @@ pub const JamSnpClient = struct {
             const stream: *Stream = @alignCast(@ptrCast(maybe_stream_ctx.?));
 
             // Read data from the stream
-            var buf: [4096]u8 = undefined;
-            const read_size = lsquic.lsquic_stream_read(maybe_lsquic_stream, &buf, buf.len);
+            const data = stream.read_buffer.?[stream.read_buffer_pos..];
+            const read_size = lsquic.lsquic_stream_read(maybe_lsquic_stream, data.ptr, data.len);
 
-            if (read_size > 0) {
-                span.debug("Read {d} bytes from stream", .{read_size});
-
-                // Allocate memory for the data and copy it
-                // FIXME: allocate a buffer on read and forward the buffer, or the caller should own the memory
-                // as we want this to be zero-allocation
-                const data = stream.connection.client.allocator.dupe(u8, buf[0..@intCast(read_size)]) catch {
-                    span.err("Failed to allocate memory for stream data", .{});
-                    return;
-                };
-
-                // NOTE: The event handler is responsible for freeing the data memory
+            if (read_size == 0) {
+                // End of stream reached
                 const event = Event{
                     .data_received = .{
-                        .connection = stream.connection,
-                        .stream = stream,
-                        .data = data,
+                        .connection = stream.connection.id,
+                        .stream = stream.id,
+                        .data = .done,
                     },
                 };
                 stream.connection.client.notifyEvent(event);
-            } else if (read_size == 0) {
                 // End of stream
                 span.debug("End of stream reached", .{});
+                // If
+
             } else {
-                span.err("Error reading from stream: {d}", .{read_size});
+                switch (std.posix.errno(read_size)) {
+                    std.posix.E.AGAIN => { // TODO: check if this AGAIN is correct
+                        const event = Event{
+                            .data_received = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                                .data = .wouldblock,
+                            },
+                        };
+                        stream.connection.client.notifyEvent(event);
+                        span.debug("Read would block, returning wouldblock event", .{});
+                    },
+                    else => |err| { // Error occurred
+                        const event = Event{
+                            .data_received = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                                .data = .{ .@"error" = @intFromEnum(err) },
+                            },
+                        };
+                        stream.connection.client.notifyEvent(event);
+                        span.err("Error reading from stream: {d}", .{read_size});
+                    },
+                }
+            }
+
+            span.debug("Read {d} bytes from stream", .{read_size});
+
+            // we read our full buffer, we we can reset the buffer
+            if (read_size == data.len) {
+                const event = Event{
+                    .data_received = .{
+                        .connection = stream.connection.id,
+                        .stream = stream.id,
+                        .data = .{ .ok = stream.read_buffer.? },
+                    },
+                };
+                stream.connection.client.notifyEvent(event);
+
+                // we can reset the buffer and we set wantRead to false
+                stream.read_buffer = null;
+                stream.read_buffer_pos = 0;
+                stream.wantRead(false);
             }
         }
 
@@ -822,25 +885,41 @@ pub const JamSnpClient = struct {
 
             const stream: *Stream = @alignCast(@ptrCast(maybe_stream.?));
 
-            _ = stream;
+            // A positive value: The number of bytes successfully written to
+            // the stream. Zero (0): The write operation could not be performed
+            // at the moment, and you should try again later. This typically
+            // happens when the congestion window is full or when there are
+            // resource constraints. A negative value (-1): An error occurred.
+            // You should check errno to determine the specific error.
+            const data = stream.write_buffer.?[stream.write_buffer_pos..];
 
-            // if (stream.packet.size != lsquic.lsquic_stream_write(
-            //     maybe_lsquic_stream,
-            //     &stream.packet.data,
-            //     stream.packet.size,
-            // )) {
-            //     @panic("failed to write complete packet to stream");
-            // }
+            const written = lsquic.lsquic_stream_write(stream.lsquic_stream, data.ptr, data.len);
+            if (written == 0) {
+                span.trace("No data written to stream", .{});
+                return;
+            } else if (written == -@as(i32, @intFromEnum(std.posix.E.AGAIN))) {
+                span.trace("Stream write would block, returning", .{});
+                return;
+            } else if (written < 0) {
+                span.err("Stream write failed with error: {d}", .{written});
+                // FIXME: handle this error, figure out how
+                return;
+            }
 
-            span.debug("Flushing stream", .{});
-            _ = lsquic.lsquic_stream_flush(maybe_lsquic_stream);
+            stream.write_buffer_pos += @intCast(written);
 
-            span.debug("Disabling write interest", .{});
-            _ = lsquic.lsquic_stream_wantwrite(maybe_lsquic_stream, 0);
+            if (stream.write_buffer_pos >= stream.write_buffer.?.len) {
+                span.debug("Stream write handling complete. Buffer length: {}", .{stream.write_buffer.?.len});
 
-            span.debug("Closing stream", .{});
-            _ = lsquic.lsquic_stream_close(maybe_lsquic_stream);
-            span.debug("Stream write handling complete", .{});
+                stream.write_buffer = null;
+                stream.write_buffer_pos = 0;
+
+                span.trace("Flushing stream", .{});
+                _ = lsquic.lsquic_stream_flush(maybe_lsquic_stream);
+
+                span.trace("Disabling write interest", .{});
+                stream.wantWrite(false);
+            }
         }
 
         fn onClose(
@@ -856,8 +935,8 @@ pub const JamSnpClient = struct {
             // Notify about the stream being closed
             const event = Event{
                 .stream_closed = .{
-                    .connection = stream.connection,
-                    .stream = stream,
+                    .connection = stream.connection.id,
+                    .stream = stream.id,
                 },
             };
             stream.connection.client.notifyEvent(event);
