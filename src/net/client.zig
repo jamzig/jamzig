@@ -48,7 +48,7 @@ pub const ClientThread = struct {
     event_queue: *Mailbox(Client.Event, 64),
 
     pub const Command = union(enum) {
-        pub const ConnectPayload = struct {
+        pub const Connect = struct {
             const Data = struct {
                 address: []const u8,
                 port: u16,
@@ -58,7 +58,7 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(anyerror!ConnectionId),
         };
 
-        pub const DisconnectPayload = struct {
+        pub const Disconnect = struct {
             const Data = struct {
                 connection_id: ConnectionId,
             };
@@ -67,7 +67,7 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(void),
         };
 
-        pub const CreateStreamPayload = struct {
+        pub const CreateStream = struct {
             const Data = struct {
                 connection_id: ConnectionId,
             };
@@ -76,7 +76,7 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(void),
         };
 
-        pub const DestroyStreamPayload = struct {
+        pub const DestroyStream = struct {
             const Data = struct {
                 connection_id: ConnectionId,
                 stream_id: StreamId,
@@ -86,7 +86,7 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(void),
         };
 
-        pub const SendDataPayload = struct {
+        pub const SendData = struct {
             const Data = struct {
                 connection_id: ConnectionId,
                 stream_id: StreamId,
@@ -97,7 +97,7 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(void),
         };
 
-        pub const StreamWantReadPayload = struct {
+        pub const StreamWantRead = struct {
             const Data = struct {
                 connection_id: ConnectionId,
                 stream_id: StreamId,
@@ -108,7 +108,7 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(void),
         };
 
-        pub const StreamWantWritePayload = struct {
+        pub const StreamWantWrite = struct {
             const Data = struct {
                 connection_id: ConnectionId,
                 stream_id: StreamId,
@@ -119,7 +119,7 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(void),
         };
 
-        pub const StreamFlushPayload = struct {
+        pub const StreamFlush = struct {
             const Data = struct {
                 connection_id: ConnectionId,
                 stream_id: StreamId,
@@ -129,7 +129,7 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(void),
         };
 
-        pub const StreamShutdownPayload = struct {
+        pub const StreamShutdown = struct {
             const Data = struct {
                 connection_id: ConnectionId,
                 stream_id: StreamId,
@@ -140,20 +140,56 @@ pub const ClientThread = struct {
             metadata: CommandMetadata(void),
         };
 
-        pub const ShutdownPayload = struct {
+        pub const Shutdown = struct {
             metadata: CommandMetadata(void),
         };
 
-        connect: ConnectPayload,
-        disconnect: DisconnectPayload,
-        create_stream: CreateStreamPayload,
-        destroy_stream: DestroyStreamPayload,
-        send_data: SendDataPayload,
-        stream_want_read: StreamWantReadPayload,
-        stream_want_write: StreamWantWritePayload,
-        stream_flush: StreamFlushPayload,
-        stream_shutdown: StreamShutdownPayload,
-        shutdown: ShutdownPayload,
+        connect: Connect,
+        disconnect: Disconnect,
+        create_stream: CreateStream,
+        destroy_stream: DestroyStream,
+        send_data: SendData,
+        stream_want_read: StreamWantRead,
+        stream_want_write: StreamWantWrite,
+        stream_flush: StreamFlush,
+        stream_shutdown: StreamShutdown,
+        shutdown: Shutdown,
+    };
+
+    pub const CommandResult = struct {
+        pub fn Result(T: type) type {
+            return struct {
+                result: T,
+                metadata: *const CommandMetadata(T),
+            };
+        }
+
+        connect: Result(anyerror!ConnectionId),
+        disconnect: Result(void),
+        create_stream: Result(void),
+        destroy_stream: Result(void),
+        send_data: Result(void),
+        stream_want_read: Result(void),
+        stream_want_write: Result(void),
+        stream_flush: Result(void),
+        stream_shutdown: Result(void),
+        shutdown: Result(void),
+
+        /// Helper method to invoke the appropriate callback based on the result type
+        pub fn invokeCallback(self: CommandResult) void {
+            switch (self) {
+                .connect => |result| result.metadata.callWithResult(result.result),
+                .disconnect => |result| result.metadata.callWithResult(result.result),
+                .create_stream => |result| result.metadata.callWithResult(result.result),
+                .destroy_stream => |result| result.metadata.callWithResult(result.result),
+                .send_data => |result| result.metadata.callWithResult(result.result),
+                .stream_want_read => |result| result.metadata.callWithResult(result.result),
+                .stream_want_write => |result| result.metadata.callWithResult(result.result),
+                .stream_flush => |result| result.metadata.callWithResult(result.result),
+                .stream_shutdown => |result| result.metadata.callWithResult(result.result),
+                .shutdown => |result| result.metadata.callWithResult(result.result),
+            }
+        }
     };
 
     pub fn initThread(alloc: std.mem.Allocator, client: *JamSnpClient) !*ClientThread {
