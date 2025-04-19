@@ -28,6 +28,8 @@ pub const JamSnpClient = struct {
     pub const DataEndOfStreamCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, data_read: []const u8, context: ?*anyopaque) void;
     pub const DataErrorCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, error_code: i32, context: ?*anyopaque) void;
     pub const DataWouldBlockCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
+    pub const DataWriteProgressCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize, context: ?*anyopaque) void;
+    pub const DataWriteCompletedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, total_bytes_written: usize, context: ?*anyopaque) void;
 
     // Callback handlers
     pub const CallbackHandler = struct {
@@ -93,6 +95,9 @@ pub const JamSnpClient = struct {
     data_end_of_stream_handler: CallbackHandler = .{ .callback = null, .context = null },
     data_error_handler: CallbackHandler = .{ .callback = null, .context = null },
     data_wouldblock_handler: CallbackHandler = .{ .callback = null, .context = null },
+    data_write_started_handler: CallbackHandler = .{ .callback = null, .context = null },
+    data_write_progress_handler: CallbackHandler = .{ .callback = null, .context = null },
+    data_write_completed_handler: CallbackHandler = .{ .callback = null, .context = null },
 
     pub fn initWithLoop(
         allocator: std.mem.Allocator,
@@ -386,6 +391,28 @@ pub const JamSnpClient = struct {
         };
     }
 
+    pub fn setDataWriteProgressCallback(self: *@This(), callback: DataWriteProgressCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_data_write_progress_callback);
+        defer span.deinit();
+        span.debug("Setting data write progress callback", .{});
+
+        self.data_write_progress_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
+    pub fn setDataWriteCompletedCallback(self: *@This(), callback: DataWriteCompletedCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_data_write_completed_callback);
+        defer span.deinit();
+        span.debug("Setting data write completed callback", .{});
+
+        self.data_write_completed_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
     // Callback invocation methods
     fn invokeConnectionEstablishedCallback(self: *@This(), connection: ConnectionId, endpoint: network.EndPoint) void {
         const span = trace.span(.invoke_connection_established_callback);
@@ -504,6 +531,32 @@ pub const JamSnpClient = struct {
         }
     }
 
+    fn invokeDataWriteProgressCallback(self: *@This(), connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize) void {
+        const span = trace.span(.invoke_data_write_progress_callback);
+        defer span.deinit();
+
+        if (self.data_write_progress_handler.callback) |callback_ptr| {
+            const callback: DataWriteProgressCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking data write progress callback", .{});
+            callback(connection, stream, bytes_written, total_size, self.data_write_progress_handler.context);
+        } else {
+            span.trace("No data write progress callback registered", .{});
+        }
+    }
+
+    fn invokeDataWriteCompletedCallback(self: *@This(), connection: ConnectionId, stream: StreamId, total_bytes_written: usize) void {
+        const span = trace.span(.invoke_data_write_completed_callback);
+        defer span.deinit();
+
+        if (self.data_write_completed_handler.callback) |callback_ptr| {
+            const callback: DataWriteCompletedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking data write completed callback", .{});
+            callback(connection, stream, total_bytes_written, self.data_write_completed_handler.context);
+        } else {
+            span.trace("No data write completed callback registered", .{});
+        }
+    }
+
     pub fn deinit(self: *JamSnpClient) void {
         const span = trace.span(.deinit);
         defer span.deinit();
@@ -518,6 +571,9 @@ pub const JamSnpClient = struct {
         self.data_end_of_stream_handler = .{ .callback = null, .context = null };
         self.data_error_handler = .{ .callback = null, .context = null };
         self.data_wouldblock_handler = .{ .callback = null, .context = null };
+        self.data_write_started_handler = .{ .callback = null, .context = null };
+        self.data_write_progress_handler = .{ .callback = null, .context = null };
+        self.data_write_completed_handler = .{ .callback = null, .context = null };
 
         lsquic.lsquic_engine_destroy(self.lsquic_engine);
         ssl.SSL_CTX_free(self.ssl_ctx);
@@ -758,6 +814,9 @@ pub const JamSnpClient = struct {
             self.write_buffer = data;
             self.write_buffer_pos = 0;
 
+            // Invoke the write started callback
+            self.connection.client.invokeDataWriteStartedCallback(self.connection.id, self.id, data.len);
+
             self.wantWrite(true);
         }
 
@@ -900,6 +959,7 @@ pub const JamSnpClient = struct {
             // resource constraints. A negative value (-1): An error occurred.
             // You should check errno to determine the specific error.
             const data = stream.write_buffer.?[stream.write_buffer_pos..];
+            const total_size = stream.write_buffer.?.len;
 
             const written = lsquic.lsquic_stream_write(stream.lsquic_stream, data.ptr, data.len);
             if (written == 0) {
@@ -916,8 +976,14 @@ pub const JamSnpClient = struct {
 
             stream.write_buffer_pos += @intCast(written);
 
-            if (stream.write_buffer_pos >= stream.write_buffer.?.len) {
-                span.debug("Stream write handling complete. Buffer length: {}", .{stream.write_buffer.?.len});
+            // Report write progress
+            stream.connection.client.invokeDataWriteProgressCallback(stream.connection.id, stream.id, stream.write_buffer_pos, total_size);
+
+            if (stream.write_buffer_pos >= total_size) {
+                span.debug("Stream write handling complete. Buffer length: {}", .{total_size});
+
+                // Report write completion
+                stream.connection.client.invokeDataWriteCompletedCallback(stream.connection.id, stream.id, stream.write_buffer_pos);
 
                 stream.write_buffer = null;
                 stream.write_buffer_pos = 0;
