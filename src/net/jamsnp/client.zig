@@ -17,65 +17,21 @@ pub const ConnectionId = uuid.Uuid;
 pub const StreamId = uuid.Uuid;
 
 pub const JamSnpClient = struct {
-    pub const EventType = enum {
-        connection_established,
-        connection_failed,
-        connection_closed,
-        stream_created,
-        stream_closed,
-        data_received,
-    };
 
-    pub const ConnectionEstablished = struct {
-        connection: ConnectionId,
-        endpoint: network.EndPoint,
-    };
+    // Define callback function types
+    pub const ConnectionEstablishedCallbackFn = *const fn (connection: ConnectionId, endpoint: network.EndPoint, context: ?*anyopaque) void;
+    pub const ConnectionFailedCallbackFn = *const fn (endpoint: network.EndPoint, err: anyerror, context: ?*anyopaque) void;
+    pub const ConnectionClosedCallbackFn = *const fn (connection: ConnectionId, context: ?*anyopaque) void;
+    pub const StreamCreatedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
+    pub const StreamClosedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
+    pub const DataReceivedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, data: []const u8, context: ?*anyopaque) void;
+    pub const DataEndOfStreamCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, data_read: []const u8, context: ?*anyopaque) void;
+    pub const DataErrorCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, error_code: i32, context: ?*anyopaque) void;
+    pub const DataWouldBlockCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 
-    pub const ConnectionFailed = struct {
-        endpoint: network.EndPoint,
-        @"error": anyerror,
-    };
-
-    pub const ConnectionClosed = struct {
-        connection: ConnectionId,
-    };
-
-    pub const StreamCreated = struct {
-        connection: ConnectionId,
-        stream: StreamId,
-    };
-
-    pub const StreamClosed = struct {
-        connection: ConnectionId,
-        stream: StreamId,
-    };
-
-    pub const DataReceived = struct {
-        connection: ConnectionId,
-        stream: StreamId,
-        data: union(enum) {
-            ok: []const u8,
-            done: void,
-            wouldblock: void,
-            @"error": i32, // Stores the error code, which can be negative
-        },
-    };
-
-    pub const Event = union(enum) {
-        connection_established: ConnectionEstablished,
-        connection_failed: ConnectionFailed,
-        connection_closed: ConnectionClosed,
-        stream_created: StreamCreated,
-        stream_closed: StreamClosed,
-        data_received: DataReceived,
-    };
-
-    /// Event handler function type
-    pub const EventCallbackFn = *const fn (event: *const Event, context: ?*anyopaque) void;
-
-    /// Event handler registration
-    pub const EventHandler = struct {
-        callback: EventCallbackFn,
+    // Callback handlers
+    pub const CallbackHandler = struct {
+        callback: ?*const anyopaque,
         context: ?*anyopaque,
     };
 
@@ -127,7 +83,16 @@ pub const JamSnpClient = struct {
     chain_genesis_hash: []const u8,
     is_builder: bool,
 
-    event_handler: ?EventHandler = null,
+    // Callback handlers for different events
+    connection_established_handler: CallbackHandler = .{ .callback = null, .context = null },
+    connection_failed_handler: CallbackHandler = .{ .callback = null, .context = null },
+    connection_closed_handler: CallbackHandler = .{ .callback = null, .context = null },
+    stream_created_handler: CallbackHandler = .{ .callback = null, .context = null },
+    stream_closed_handler: CallbackHandler = .{ .callback = null, .context = null },
+    data_received_handler: CallbackHandler = .{ .callback = null, .context = null },
+    data_end_of_stream_handler: CallbackHandler = .{ .callback = null, .context = null },
+    data_error_handler: CallbackHandler = .{ .callback = null, .context = null },
+    data_wouldblock_handler: CallbackHandler = .{ .callback = null, .context = null },
 
     pub fn initWithLoop(
         allocator: std.mem.Allocator,
@@ -321,132 +286,238 @@ pub const JamSnpClient = struct {
         span.debug("Event loop completed", .{});
     }
 
-    pub fn setEventCallback(self: *@This(), callback: EventCallbackFn, context: ?*anyopaque) void {
-        const span = trace.span(.set_event_callback);
+    // Callback registration methods
+    pub fn setConnectionEstablishedCallback(self: *@This(), callback: ConnectionEstablishedCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_connection_established_callback);
         defer span.deinit();
-        span.debug("Setting event callback", .{});
+        span.debug("Setting connection established callback", .{});
 
-        self.event_handler = .{
-            .callback = callback,
+        self.connection_established_handler = .{
+            .callback = @ptrCast(callback),
             .context = context,
         };
     }
 
-    /// Notify registered event handler of an event
-    fn notifyEvent(self: *@This(), event: Event) void {
-        const span = trace.span(.notify_event);
+    pub fn setConnectionFailedCallback(self: *@This(), callback: ConnectionFailedCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_connection_failed_callback);
         defer span.deinit();
-        span.debug("Notifying event of type {s}", .{@tagName(event)});
+        span.debug("Setting connection failed callback", .{});
 
-        if (self.event_handler) |handler| {
-            span.debug("Calling event handler", .{});
-            handler.callback(&event, handler.context);
-        } else {
-            span.warn("No event handler registered", .{});
-        }
-    }
-
-    fn onTick(
-        maybe_self: ?*@This(),
-        xev_loop: *xev.Loop,
-        xev_completion: *xev.Completion,
-        xev_timer_result: xev.Timer.RunError!void,
-    ) xev.CallbackAction {
-        const span = trace.span(.on_client_tick);
-        defer span.deinit();
-
-        errdefer |err| {
-            span.err("onTick failed with error: {s}", .{@errorName(err)});
-            std.debug.panic("onTick failed with: {s}", .{@errorName(err)});
-        }
-        try xev_timer_result;
-
-        const self = maybe_self.?;
-        span.trace("Processing connections", .{});
-        lsquic.lsquic_engine_process_conns(self.lsquic_engine);
-
-        // Delta is in 1/1_000_000 so we divide by 100 to get ms
-        var delta: c_int = undefined;
-
-        var timeout_in_ms: u64 = 100;
-        span.trace("Checking for earliest connection activity", .{});
-        if (lsquic.lsquic_engine_earliest_adv_tick(self.lsquic_engine, &delta) != 0) {
-            if (delta > 0) {
-                timeout_in_ms = @intCast(@divTrunc(delta, 1000));
-                span.trace("Next tick scheduled in {d}ms", .{timeout_in_ms});
-            }
-        }
-
-        span.trace("Scheduling next tick in {d}ms", .{timeout_in_ms});
-        self.tick.run(
-            xev_loop,
-            xev_completion,
-            timeout_in_ms,
-            @This(),
-            self,
-            onTick,
-        );
-
-        return .disarm;
-    }
-
-    fn onPacketsIn(
-        maybe_self: ?*@This(),
-        _: *xev.Loop,
-        _: *xev.Completion,
-        _: *xev.UDP.State,
-        peer_address: std.net.Address,
-        _: xev.UDP,
-        xev_read_buffer: xev.ReadBuffer,
-        xev_read_result: xev.ReadError!usize,
-    ) xev.CallbackAction {
-        const span = trace.span(.on_packets_in);
-        defer span.deinit();
-
-        errdefer |err| {
-            span.err("onPacketsIn failed with error: {s}", .{@errorName(err)});
-            std.debug.panic("onPacketsIn failed with: {s}", .{@errorName(err)});
-        }
-
-        const bytes = try xev_read_result;
-        span.trace("Received {d} bytes from {}", .{ bytes, peer_address });
-        span.trace("Packet data: {any}", .{std.fmt.fmtSliceHexLower(xev_read_buffer.slice[0..bytes])});
-
-        const self = maybe_self.?;
-
-        span.trace("Getting local address", .{});
-        const local_address = self.socket.getLocalEndPoint() catch |err| {
-            span.err("Failed to get local address: {s}", .{@errorName(err)});
-            @panic("Failed to get local address");
+        self.connection_failed_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
         };
-
-        span.trace("Local address: {}", .{local_address});
-
-        span.trace("Passing packet to lsquic engine", .{});
-        if (lsquic.lsquic_engine_packet_in(
-            self.lsquic_engine,
-            xev_read_buffer.slice.ptr,
-            bytes,
-            @ptrCast(&self.socket.internal),
-            @ptrCast(&peer_address.any),
-
-            self,
-            0,
-        ) != 0) {
-            span.err("lsquic_engine_packet_in failed", .{});
-            @panic("lsquic_engine_packet_in failed");
-        }
-
-        span.trace("Successfully processed incoming packet", .{});
-        return .rearm;
     }
 
-    // TODO: since its on the heap lets use destroy
+    pub fn setConnectionClosedCallback(self: *@This(), callback: ConnectionClosedCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_connection_closed_callback);
+        defer span.deinit();
+        span.debug("Setting connection closed callback", .{});
+
+        self.connection_closed_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
+    pub fn setStreamCreatedCallback(self: *@This(), callback: StreamCreatedCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_stream_created_callback);
+        defer span.deinit();
+        span.debug("Setting stream created callback", .{});
+
+        self.stream_created_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
+    pub fn setStreamClosedCallback(self: *@This(), callback: StreamClosedCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_stream_closed_callback);
+        defer span.deinit();
+        span.debug("Setting stream closed callback", .{});
+
+        self.stream_closed_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
+    pub fn setDataReceivedCallback(self: *@This(), callback: DataReceivedCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_data_received_callback);
+        defer span.deinit();
+        span.debug("Setting data received callback", .{});
+
+        self.data_received_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
+    pub fn setDataFinishedCallback(self: *@This(), callback: DataEndOfStreamCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_data_finished_callback);
+        defer span.deinit();
+        span.debug("Setting data finished callback", .{});
+
+        self.data_end_of_stream_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
+    pub fn setDataErrorCallback(self: *@This(), callback: DataErrorCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_data_error_callback);
+        defer span.deinit();
+        span.debug("Setting data error callback", .{});
+
+        self.data_error_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
+    pub fn setDataWouldBlockCallback(self: *@This(), callback: DataWouldBlockCallbackFn, context: ?*anyopaque) void {
+        const span = trace.span(.set_data_wouldblock_callback);
+        defer span.deinit();
+        span.debug("Setting data wouldblock callback", .{});
+
+        self.data_wouldblock_handler = .{
+            .callback = @ptrCast(callback),
+            .context = context,
+        };
+    }
+
+    // Callback invocation methods
+    fn invokeConnectionEstablishedCallback(self: *@This(), connection: ConnectionId, endpoint: network.EndPoint) void {
+        const span = trace.span(.invoke_connection_established_callback);
+        defer span.deinit();
+
+        if (self.connection_established_handler.callback) |callback_ptr| {
+            const callback: ConnectionEstablishedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking connection established callback", .{});
+            callback(connection, endpoint, self.connection_established_handler.context);
+        } else {
+            span.warn("No connection established callback registered", .{});
+        }
+    }
+
+    fn invokeConnectionFailedCallback(self: *@This(), endpoint: network.EndPoint, err: anyerror) void {
+        const span = trace.span(.invoke_connection_failed_callback);
+        defer span.deinit();
+
+        if (self.connection_failed_handler.callback) |callback_ptr| {
+            const callback: ConnectionFailedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking connection failed callback", .{});
+            callback(endpoint, err, self.connection_failed_handler.context);
+        } else {
+            span.warn("No connection failed callback registered", .{});
+        }
+    }
+
+    fn invokeConnectionClosedCallback(self: *@This(), connection: ConnectionId) void {
+        const span = trace.span(.invoke_connection_closed_callback);
+        defer span.deinit();
+
+        if (self.connection_closed_handler.callback) |callback_ptr| {
+            const callback: ConnectionClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking connection closed callback", .{});
+            callback(connection, self.connection_closed_handler.context);
+        } else {
+            span.warn("No connection closed callback registered", .{});
+        }
+    }
+
+    fn invokeStreamCreatedCallback(self: *@This(), connection: ConnectionId, stream: StreamId) void {
+        const span = trace.span(.invoke_stream_created_callback);
+        defer span.deinit();
+
+        if (self.stream_created_handler.callback) |callback_ptr| {
+            const callback: StreamCreatedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking stream created callback", .{});
+            callback(connection, stream, self.stream_created_handler.context);
+        } else {
+            span.warn("No stream created callback registered", .{});
+        }
+    }
+
+    fn invokeStreamClosedCallback(self: *@This(), connection: ConnectionId, stream: StreamId) void {
+        const span = trace.span(.invoke_stream_closed_callback);
+        defer span.deinit();
+
+        if (self.stream_closed_handler.callback) |callback_ptr| {
+            const callback: StreamClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking stream closed callback", .{});
+            callback(connection, stream, self.stream_closed_handler.context);
+        } else {
+            span.warn("No stream closed callback registered", .{});
+        }
+    }
+
+    fn invokeDataReceivedCallback(self: *@This(), connection: ConnectionId, stream: StreamId, data: []const u8) void {
+        const span = trace.span(.invoke_data_received_callback);
+        defer span.deinit();
+
+        if (self.data_received_handler.callback) |callback_ptr| {
+            const callback: DataReceivedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking data received callback", .{});
+            callback(connection, stream, data, self.data_received_handler.context);
+        } else {
+            span.warn("No data received callback registered", .{});
+        }
+    }
+
+    fn invokeDataEndOfStreamCallback(self: *@This(), connection: ConnectionId, stream: StreamId, data_read: []const u8) void {
+        const span = trace.span(.invoke_data_end_of_stream_callback);
+        defer span.deinit();
+
+        if (self.data_end_of_stream_handler.callback) |callback_ptr| {
+            const callback: DataEndOfStreamCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking data finished callback", .{});
+            callback(connection, stream, data_read, self.data_end_of_stream_handler.context);
+        } else {
+            span.warn("No data finished callback registered", .{});
+        }
+    }
+
+    fn invokeDataErrorCallback(self: *@This(), connection: ConnectionId, stream: StreamId, error_code: i32) void {
+        const span = trace.span(.invoke_data_error_callback);
+        defer span.deinit();
+
+        if (self.data_error_handler.callback) |callback_ptr| {
+            const callback: DataErrorCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking data error callback", .{});
+            callback(connection, stream, error_code, self.data_error_handler.context);
+        } else {
+            span.warn("No data error callback registered", .{});
+        }
+    }
+
+    fn invokeDataWouldBlockCallback(self: *@This(), connection: ConnectionId, stream: StreamId) void {
+        const span = trace.span(.invoke_data_wouldblock_callback);
+        defer span.deinit();
+
+        if (self.data_wouldblock_handler.callback) |callback_ptr| {
+            const callback: DataWouldBlockCallbackFn = @ptrCast(@alignCast(callback_ptr));
+            span.debug("Invoking data wouldblock callback", .{});
+            callback(connection, stream, self.data_wouldblock_handler.context);
+        } else {
+            span.warn("No data wouldblock callback registered", .{});
+        }
+    }
+
     pub fn deinit(self: *JamSnpClient) void {
         const span = trace.span(.deinit);
         defer span.deinit();
 
-        self.event_handler = null;
+        // Clear all callbacks to prevent use-after-free
+        self.connection_established_handler = .{ .callback = null, .context = null };
+        self.connection_failed_handler = .{ .callback = null, .context = null };
+        self.connection_closed_handler = .{ .callback = null, .context = null };
+        self.stream_created_handler = .{ .callback = null, .context = null };
+        self.stream_closed_handler = .{ .callback = null, .context = null };
+        self.data_received_handler = .{ .callback = null, .context = null };
+        self.data_end_of_stream_handler = .{ .callback = null, .context = null };
+        self.data_error_handler = .{ .callback = null, .context = null };
+        self.data_wouldblock_handler = .{ .callback = null, .context = null };
 
         lsquic.lsquic_engine_destroy(self.lsquic_engine);
         ssl.SSL_CTX_free(self.ssl_ctx);
@@ -464,6 +535,9 @@ pub const JamSnpClient = struct {
         self.allocator.free(self.alpn);
 
         self.allocator.destroy(self);
+
+        self.connections.deinit();
+        self.streams.deinit();
 
         span.debug("JamSnpClient deinitialization complete", .{});
     }
@@ -599,13 +673,8 @@ pub const JamSnpClient = struct {
 
             connection.lsquic_connection = maybe_lsquic_connection.?;
 
-            const event = Event{
-                .connection_established = .{
-                    .connection = connection.id,
-                    .endpoint = connection.endpoint,
-                },
-            };
-            connection.client.notifyEvent(event);
+            // Invoke the connection established callback
+            connection.client.invokeConnectionEstablishedCallback(connection.id, connection.endpoint);
 
             return @ptrCast(connection);
         }
@@ -618,12 +687,8 @@ pub const JamSnpClient = struct {
             const conn_ctx = lsquic.lsquic_conn_get_ctx(maybe_lsquic_connection).?;
             const conn: *Connection = @alignCast(@ptrCast(conn_ctx));
 
-            const event = Event{
-                .connection_closed = .{
-                    .connection = conn.id,
-                },
-            };
-            conn.client.notifyEvent(event);
+            // Invoke the connection closed callback
+            conn.client.invokeConnectionClosedCallback(conn.id);
 
             lsquic.lsquic_conn_set_ctx(maybe_lsquic_connection, null);
             conn.client.allocator.destroy(conn);
@@ -631,36 +696,7 @@ pub const JamSnpClient = struct {
         }
     };
 
-    /// Handle incoming packets
-    pub fn processPacket(self: *JamSnpClient, packet: []const u8, peer_addr: std.posix.sockaddr, local_addr: std.posix.sockaddr) !void {
-        const span = trace.span(.process_packet);
-        defer span.deinit();
-        span.debug("Processing incoming packet of {d} bytes", .{packet.len});
-        span.trace("Packet data: {any}", .{std.fmt.fmtSliceHexLower(packet)});
-
-        span.debug("Passing packet to lsquic engine", .{});
-        const result = lsquic.lsquic_engine_packet_in(
-            self.lsquic_engine,
-            packet.ptr,
-            packet.len,
-            &local_addr,
-            &peer_addr,
-            self, // peer_ctx
-            0, // ecn
-        );
-
-        if (result < 0) {
-            span.err("lsquic_engine_packet_in failed with result: {d}", .{result});
-            return error.PacketProcessingFailed;
-        }
-
-        // Process connection after receiving packet
-        span.debug("Processing connections", .{});
-        lsquic.lsquic_engine_process_conns(self.lsquic_engine);
-        span.debug("Packet processing complete", .{});
-    }
-
-    const Stream = struct {
+    pub const Stream = struct {
         id: StreamId,
         connection: *Connection,
         lsquic_stream: *lsquic.lsquic_stream_t,
@@ -789,13 +825,8 @@ pub const JamSnpClient = struct {
                 .connection = connection,
             };
 
-            const event = Event{
-                .stream_created = .{
-                    .connection = connection.id,
-                    .stream = stream.id,
-                },
-            };
-            connection.client.notifyEvent(event);
+            // Invoke the stream created callback
+            connection.client.invokeStreamCreatedCallback(connection.id, stream.id);
 
             span.debug("Stream initialization complete", .{});
             return @ptrCast(stream);
@@ -816,62 +847,39 @@ pub const JamSnpClient = struct {
 
             if (read_size == 0) {
                 // End of stream reached
-                const event = Event{
-                    .data_received = .{
-                        .connection = stream.connection.id,
-                        .stream = stream.id,
-                        .data = .done,
-                    },
-                };
-                stream.connection.client.notifyEvent(event);
-                // End of stream
+                stream.connection.client.invokeDataEndOfStreamCallback(stream.connection.id, stream.id, stream.read_buffer.?[0..stream.read_buffer_pos]);
                 span.debug("End of stream reached", .{});
-                // If
-
-            } else {
+            } else if (read_size < 0) {
                 switch (std.posix.errno(read_size)) {
-                    std.posix.E.AGAIN => { // TODO: check if this AGAIN is correct
-                        const event = Event{
-                            .data_received = .{
-                                .connection = stream.connection.id,
-                                .stream = stream.id,
-                                .data = .wouldblock,
-                            },
-                        };
-                        stream.connection.client.notifyEvent(event);
-                        span.debug("Read would block, returning wouldblock event", .{});
+                    std.posix.E.AGAIN => {
+                        // TODO: check if this AGAIN is correct
+                        // FIXME: how to handle many recurring events like this
+                        stream.connection.client.invokeDataWouldBlockCallback(stream.connection.id, stream.id);
+                        span.debug("Read would block", .{});
                     },
                     else => |err| { // Error occurred
-                        const event = Event{
-                            .data_received = .{
-                                .connection = stream.connection.id,
-                                .stream = stream.id,
-                                .data = .{ .@"error" = @intFromEnum(err) },
-                            },
-                        };
-                        stream.connection.client.notifyEvent(event);
+                        stream.connection.client.invokeDataErrorCallback(stream.connection.id, stream.id, @intFromEnum(err));
                         span.err("Error reading from stream: {d}", .{read_size});
                     },
                 }
-            }
+            } else {
+                span.debug("Read {d} bytes from stream", .{read_size});
 
-            span.debug("Read {d} bytes from stream", .{read_size});
+                // We read data successfully, invoke the data received callback
+                if (read_size > 0) {
+                    // Reset the buffer if we read all requested data
+                    if (read_size == data.len) {
+                        // Trigger the read callback
+                        stream.connection.client.invokeDataReceivedCallback(stream.connection.id, stream.id, stream.read_buffer.?);
 
-            // we read our full buffer, we we can reset the buffer
-            if (read_size == data.len) {
-                const event = Event{
-                    .data_received = .{
-                        .connection = stream.connection.id,
-                        .stream = stream.id,
-                        .data = .{ .ok = stream.read_buffer.? },
-                    },
-                };
-                stream.connection.client.notifyEvent(event);
-
-                // we can reset the buffer and we set wantRead to false
-                stream.read_buffer = null;
-                stream.read_buffer_pos = 0;
-                stream.wantRead(false);
+                        stream.read_buffer = null;
+                        stream.read_buffer_pos = 0;
+                        stream.wantRead(false);
+                    } else {
+                        // Otherwise, update the position for the next read
+                        stream.read_buffer_pos += @intCast(read_size);
+                    }
+                }
             }
         }
 
@@ -932,20 +940,109 @@ pub const JamSnpClient = struct {
 
             const stream: *Stream = @alignCast(@ptrCast(maybe_stream.?));
 
-            // Notify about the stream being closed
-            const event = Event{
-                .stream_closed = .{
-                    .connection = stream.connection.id,
-                    .stream = stream.id,
-                },
-            };
-            stream.connection.client.notifyEvent(event);
+            // Invoke the stream closed callback
+            stream.connection.client.invokeStreamClosedCallback(stream.connection.id, stream.id);
 
             span.debug("Destroying stream", .{});
             stream.connection.client.allocator.destroy(stream);
             span.debug("Stream cleanup complete", .{});
         }
     };
+
+    fn onTick(
+        maybe_self: ?*@This(),
+        xev_loop: *xev.Loop,
+        xev_completion: *xev.Completion,
+        xev_timer_result: xev.Timer.RunError!void,
+    ) xev.CallbackAction {
+        const span = trace.span(.on_client_tick);
+        defer span.deinit();
+
+        errdefer |err| {
+            span.err("onTick failed with error: {s}", .{@errorName(err)});
+            std.debug.panic("onTick failed with: {s}", .{@errorName(err)});
+        }
+        try xev_timer_result;
+
+        const self = maybe_self.?;
+        span.trace("Processing connections", .{});
+        lsquic.lsquic_engine_process_conns(self.lsquic_engine);
+
+        // Delta is in 1/1_000_000 so we divide by 100 to get ms
+        var delta: c_int = undefined;
+
+        var timeout_in_ms: u64 = 100;
+        span.trace("Checking for earliest connection activity", .{});
+        if (lsquic.lsquic_engine_earliest_adv_tick(self.lsquic_engine, &delta) != 0) {
+            if (delta > 0) {
+                timeout_in_ms = @intCast(@divTrunc(delta, 1000));
+                span.trace("Next tick scheduled in {d}ms", .{timeout_in_ms});
+            }
+        }
+
+        span.trace("Scheduling next tick in {d}ms", .{timeout_in_ms});
+        self.tick.run(
+            xev_loop,
+            xev_completion,
+            timeout_in_ms,
+            @This(),
+            self,
+            onTick,
+        );
+
+        return .disarm;
+    }
+
+    fn onPacketsIn(
+        maybe_self: ?*@This(),
+        _: *xev.Loop,
+        _: *xev.Completion,
+        _: *xev.UDP.State,
+        peer_address: std.net.Address,
+        _: xev.UDP,
+        xev_read_buffer: xev.ReadBuffer,
+        xev_read_result: xev.ReadError!usize,
+    ) xev.CallbackAction {
+        const span = trace.span(.on_packets_in);
+        defer span.deinit();
+
+        errdefer |err| {
+            span.err("onPacketsIn failed with error: {s}", .{@errorName(err)});
+            std.debug.panic("onPacketsIn failed with: {s}", .{@errorName(err)});
+        }
+
+        const bytes = try xev_read_result;
+        span.trace("Received {d} bytes from {}", .{ bytes, peer_address });
+        span.trace("Packet data: {any}", .{std.fmt.fmtSliceHexLower(xev_read_buffer.slice[0..bytes])});
+
+        const self = maybe_self.?;
+
+        span.trace("Getting local address", .{});
+        const local_address = self.socket.getLocalEndPoint() catch |err| {
+            span.err("Failed to get local address: {s}", .{@errorName(err)});
+            @panic("Failed to get local address");
+        };
+
+        span.trace("Local address: {}", .{local_address});
+
+        span.trace("Passing packet to lsquic engine", .{});
+        if (lsquic.lsquic_engine_packet_in(
+            self.lsquic_engine,
+            xev_read_buffer.slice.ptr,
+            bytes,
+            @ptrCast(&self.socket.internal),
+            @ptrCast(&peer_address.any),
+
+            self,
+            0,
+        ) != 0) {
+            span.err("lsquic_engine_packet_in failed", .{});
+            @panic("lsquic_engine_packet_in failed");
+        }
+
+        span.trace("Successfully processed incoming packet", .{});
+        return .rearm;
+    }
 
     fn getSslContext(peer_ctx: ?*anyopaque, _: ?*const lsquic.struct_sockaddr) callconv(.C) ?*lsquic.struct_ssl_ctx_st {
         return @ptrCast(peer_ctx.?);
