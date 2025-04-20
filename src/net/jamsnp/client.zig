@@ -132,13 +132,9 @@ pub const JamSnpClient = struct {
     chain_genesis_hash: []const u8,
     is_builder: bool,
 
-    // Single HashMap for Callback Handlers
-    // Note on HashMap for Callbacks: Using a HashMap centralizes callback handling
-    // and reduces boilerplate vs. individual fields. The performance overhead
-    // of the map lookup is expected to be negligible relative to overall client
-    // operations (network, crypto, lsquic processing) for this small key set
-    // FIXME: convert this to an array
-    callback_handlers: std.AutoHashMap(EventType, CallbackHandler),
+    // Using an array instead of HashMap for callbacks provides better performance
+    // as it avoids hash calculation and memory allocation overhead
+    callback_handlers: [@typeInfo(EventType).@"enum".fields.len]CallbackHandler = [_]CallbackHandler{.{ .callback = null, .context = null }} ** @typeInfo(EventType).@"enum".fields.len,
 
     pub fn initWithLoop(
         allocator: std.mem.Allocator,
@@ -254,7 +250,7 @@ pub const JamSnpClient = struct {
             },
             .ssl_ctx = ssl_ctx,
             // Initialize the new handlers map
-            .callback_handlers = std.AutoHashMap(EventType, CallbackHandler).init(allocator),
+            .callback_handlers = [_]CallbackHandler{.{ .callback = null, .context = null }} ** @typeInfo(EventType).@"enum".fields.len,
         };
 
         // Create lsquic engine
@@ -345,15 +341,14 @@ pub const JamSnpClient = struct {
     /// Sets the callback function and context for a specific event type.
     /// The caller is responsible for ensuring the `callback_fn_ptr` points to a
     /// function with the correct signature corresponding to the `event_type`
-    pub fn setCallback(self: *@This(), event_type: EventType, callback_fn_ptr: ?*const anyopaque, context: ?*anyopaque) !void {
+    pub fn setCallback(self: *@This(), event_type: EventType, callback_fn_ptr: ?*const anyopaque, context: ?*anyopaque) void {
         const span = trace.span(.set_callback);
         defer span.deinit();
         span.debug("Setting callback for event {s}", .{@tagName(event_type)});
-        // Put the handler into the map
-        try self.callback_handlers.put(event_type, .{
+        self.callback_handlers[@intFromEnum(event_type)] = .{
             .callback = callback_fn_ptr,
             .context = context,
-        });
+        };
     }
 
     // -- Refactored Callback Invocation
@@ -364,67 +359,64 @@ pub const JamSnpClient = struct {
         defer span.deinit();
         std.debug.assert(event_tag == @as(EventType, @enumFromInt(@intFromEnum(args)))); // Ensure tag matches union
 
-        if (self.callback_handlers.get(event_tag)) |handler| {
-            if (handler.callback) |callback_ptr| {
-                span.debug("Invoking callback for event {s}", .{@tagName(event_tag)});
+        const handler = &self.callback_handlers[@intFromEnum(event_tag)];
+        if (handler.callback) |callback_ptr| {
+            span.debug("Invoking callback for event {s}", .{@tagName(event_tag)});
 
-                // Switch on the event type to cast to the correct function signature and call it
-                switch (args) {
-                    .ConnectionEstablished => |ev_args| {
-                        const callback: ConnectionEstablishedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.endpoint, handler.context);
-                    },
-                    .ConnectionFailed => |ev_args| {
-                        const callback: ConnectionFailedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.endpoint, ev_args.err, handler.context);
-                    },
-                    .ConnectionClosed => |ev_args| {
-                        const callback: ConnectionClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, handler.context);
-                    },
-                    .StreamCreated => |ev_args| {
-                        const callback: StreamCreatedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, handler.context);
-                    },
-                    .StreamClosed => |ev_args| {
-                        const callback: StreamClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, handler.context);
-                    },
-                    .DataReceived => |ev_args| {
-                        const callback: DataReceivedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, ev_args.data, handler.context);
-                    },
-                    .DataEndOfStream => |ev_args| {
-                        const callback: DataEndOfStreamCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, ev_args.data_read, handler.context);
-                    },
-                    .DataReadError => |ev_args| {
-                        const callback: DataErrorCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, ev_args.error_code, handler.context);
-                    },
-                    .DataWouldBlock => |ev_args| {
-                        const callback: DataWouldBlockCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, handler.context);
-                    },
-                    .DataWriteProgress => |ev_args| {
-                        const callback: DataWriteProgressCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, ev_args.bytes_written, ev_args.total_size, handler.context);
-                    },
-                    .DataWriteCompleted => |ev_args| {
-                        const callback: DataWriteCompletedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, ev_args.total_bytes_written, handler.context);
-                    },
-                    .DataWriteError => |ev_args| {
-                        const callback: DataErrorCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                        callback(ev_args.connection, ev_args.stream, ev_args.error_code, handler.context);
-                    },
-                }
-            } else {
-                // Only log trace/debug if no callback is set, warning might be too noisy
-                span.trace("No callback registered for event type {s}", .{@tagName(event_tag)});
+            // Switch on the event type to cast to the correct function signature and call it
+            switch (args) {
+                .ConnectionEstablished => |ev_args| {
+                    const callback: ConnectionEstablishedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.endpoint, handler.context);
+                },
+                .ConnectionFailed => |ev_args| {
+                    const callback: ConnectionFailedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.endpoint, ev_args.err, handler.context);
+                },
+                .ConnectionClosed => |ev_args| {
+                    const callback: ConnectionClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, handler.context);
+                },
+                .StreamCreated => |ev_args| {
+                    const callback: StreamCreatedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, handler.context);
+                },
+                .StreamClosed => |ev_args| {
+                    const callback: StreamClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, handler.context);
+                },
+                .DataReceived => |ev_args| {
+                    const callback: DataReceivedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, ev_args.data, handler.context);
+                },
+                .DataEndOfStream => |ev_args| {
+                    const callback: DataEndOfStreamCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, ev_args.data_read, handler.context);
+                },
+                .DataReadError => |ev_args| {
+                    const callback: DataErrorCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, ev_args.error_code, handler.context);
+                },
+                .DataWouldBlock => |ev_args| {
+                    const callback: DataWouldBlockCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, handler.context);
+                },
+                .DataWriteProgress => |ev_args| {
+                    const callback: DataWriteProgressCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, ev_args.bytes_written, ev_args.total_size, handler.context);
+                },
+                .DataWriteCompleted => |ev_args| {
+                    const callback: DataWriteCompletedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, ev_args.total_bytes_written, handler.context);
+                },
+                .DataWriteError => |ev_args| {
+                    const callback: DataErrorCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.connection, ev_args.stream, ev_args.error_code, handler.context);
+                },
             }
         } else {
-            span.trace("No handler entry found for event type {s}", .{@tagName(event_tag)});
+            // Only log trace/debug if no callback is set, warning might be too noisy
+            span.trace("No callback registered for event type {s}", .{@tagName(event_tag)});
         }
     }
 
@@ -483,11 +475,10 @@ pub const JamSnpClient = struct {
         self.connections.deinit();
 
         // Cleanup callback handlers
-        var it = self.callback_handlers.valueIterator();
-        while (it.next()) |handler_ptr| {
-            handler_ptr.* = .{ .callback = null, .context = null };
+        // but good practice to clear references)
+        for (&self.callback_handlers) |*handler| {
+            handler.* = .{ .callback = null, .context = null };
         }
-        self.callback_handlers.deinit();
 
         // Destroy the client object itself LAST
         span.debug("Destroying JamSnpClient object", .{});
