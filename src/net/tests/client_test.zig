@@ -2,8 +2,8 @@ const std = @import("std");
 const testing = std.testing;
 const xev = @import("xev");
 
-const client = @import("client.zig");
-const jamsnp_client = @import("jamsnp/client.zig"); // Renamed import
+const client = @import("../client.zig");
+const jamsnp_client = @import("../jamsnp/client.zig"); // Renamed import
 const ClientThread = client.ClientThread;
 const Client = client.Client;
 const JamSnpClient = jamsnp_client.JamSnpClient;

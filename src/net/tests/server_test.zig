@@ -2,8 +2,8 @@ const std = @import("std");
 const testing = std.testing;
 const xev = @import("xev");
 
-const server = @import("server.zig"); // Import the new server module
-const jamsnp_server = @import("jamsnp/server.zig");
+const server = @import("../server.zig"); // Import the new server module
+const jamsnp_server = @import("../jamsnp/server.zig");
 
 const ServerThread = server.ServerThread;
 const Server = server.Server;

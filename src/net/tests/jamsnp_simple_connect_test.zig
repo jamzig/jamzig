@@ -1,9 +1,9 @@
 const std = @import("std");
 const ssl = @import("ssl");
 const lsquic = @import("lsquic");
-const jamsnp_server = @import("jamsnp/server.zig");
-const jamsnp_client = @import("jamsnp/client.zig");
-const common = @import("jamsnp/common.zig");
+const jamsnp_server = @import("../jamsnp/server.zig");
+const jamsnp_client = @import("../jamsnp/client.zig");
+const common = @import("../jamsnp/common.zig");
 const network = @import("network");
 
 const JamSnpServer = jamsnp_server.JamSnpServer;

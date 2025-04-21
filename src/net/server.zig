@@ -26,7 +26,8 @@ const Mailbox = @import("../datastruct/blocking_queue.zig").BlockingQueue;
 pub const ServerThreadBuilder = struct {
     _alloc: ?std.mem.Allocator = null,
     _genesis_hash: ?[]const u8 = null,
-    _key_path: ?[]const u8 = null,
+    _key_pair: ?std.crypto.sign.Ed25519.KeyPair = null,
+    _allow_builders: ?bool = false,
 
     pub fn init() ServerThreadBuilder {
         return .{};
@@ -42,18 +43,24 @@ pub const ServerThreadBuilder = struct {
         return self;
     }
 
-    pub fn keyPath(self: *ServerThreadBuilder, path: []const u8) *ServerThreadBuilder {
-        self._key_path = path;
+    pub fn keypair(self: *ServerThreadBuilder, key_pair: std.crypto.sign.Ed25519.KeyPair) *ServerThreadBuilder {
+        self._key_pair = key_pair;
+        return self;
+    }
+
+    pub fn allowBuilders(self: *ServerThreadBuilder, allow_builders: bool) *ServerThreadBuilder {
+        self._allow_builders = allow_builders;
         return self;
     }
 
     /// Builds the ServerThread.
     pub fn build(self: *const ServerThreadBuilder) !*ServerThread {
         const alloc = self._alloc orelse return error.AllocatorNotSet;
-        const cert_path = self._genesis_hash orelse return error.CertificatePathNotSet; // Example validation
-        const key_path = self._key_path orelse return error.KeyPathNotSet; // Example validation
+        const genesis_hash = self._genesis_hash orelse return error.GenesisHashNotSet;
+        const key_pair = self._key_pair orelse return error.KeyPairNotSet;
+        const allow_builders = self._allow_builders orelse return error.AllowBuildersNotSet;
 
-        var jserver = try JamSnpServer.initWithoutLoop(alloc, cert_path, key_path);
+        var jserver = try JamSnpServer.initWithoutLoop(alloc, key_pair, genesis_hash, allow_builders);
         errdefer jserver.deinit();
 
         return ServerThread.init(alloc, jserver);
