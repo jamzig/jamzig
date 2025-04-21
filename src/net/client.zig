@@ -6,8 +6,10 @@
 
 const std = @import("std");
 const xev = @import("xev");
+const crypto = std.crypto;
 
 const jamsnp_client = @import("jamsnp/client.zig");
+
 const shared = @import("jamsnp/shared_types.zig");
 const client_stream = @import("client/stream.zig");
 
@@ -17,6 +19,59 @@ const JamSnpClient = jamsnp_client.JamSnpClient;
 const StreamHandle = client_stream.StreamHandle;
 
 const Mailbox = @import("../datastruct/blocking_queue.zig").BlockingQueue;
+
+/// Builder for creating a ClientThread instance.
+/// Ensures that the underlying JamSnpClient is also initialized.
+pub const ClientThreadBuilder = struct {
+    _allocator: ?std.mem.Allocator = null,
+    _keypair: ?crypto.sign.Ed25519.KeyPair = null,
+    _genesis_hash: ?[]const u8 = null,
+    _is_builder: bool = false,
+
+    pub fn init() ClientThreadBuilder {
+        return .{};
+    }
+
+    pub fn allocator(self: *ClientThreadBuilder, alloc: std.mem.Allocator) *ClientThreadBuilder {
+        self._allocator = alloc;
+        return self;
+    }
+
+    pub fn keypair(self: *ClientThreadBuilder, kp: crypto.sign.Ed25519.KeyPair) *ClientThreadBuilder {
+        self._keypair = kp;
+        return self;
+    }
+
+    pub fn genesisHash(self: *ClientThreadBuilder, hash: []const u8) *ClientThreadBuilder {
+        self._genesis_hash = hash;
+        return self;
+    }
+
+    pub fn isBuilder(self: *ClientThreadBuilder, is_builder: bool) *ClientThreadBuilder {
+        self._is_builder = is_builder;
+        return self;
+    }
+
+    /// Builds the ClientThread.
+    /// This involves initializing the JamSnpClient first, then the ClientThread itself.
+    pub fn build(self: *const ClientThreadBuilder) !*ClientThread {
+        const alloc = self._allocator orelse return error.AllocatorNotSet;
+        const kp = self._keypair orelse return error.KeypairNotSet;
+        const gh = self._genesis_hash orelse return error.GenesisHashNotSet;
+
+        // Note: We create it here, so the ClientThread takes ownership.
+        var jclient = try JamSnpClient.initWithoutLoop(
+            alloc,
+            kp,
+            gh,
+            self._is_builder,
+        );
+        errdefer jclient.deinit();
+
+        // 2. Initialize ClientThread
+        return ClientThread.init(alloc, jclient);
+    }
+};
 
 /// Callback type for command completion
 pub fn CommandCallback(T: type) type {
@@ -194,9 +249,11 @@ pub const ClientThread = struct {
         }
     };
 
-    pub fn init(alloc: std.mem.Allocator, client: *JamSnpClient) !*ClientThread {
+    /// Initializes the ClientThread with an existing JamSnpClient instance.
+    /// Called by the ClientThreadBuilder.
+    fn init(alloc: std.mem.Allocator, client: *JamSnpClient) !*ClientThread {
         var thread = try alloc.create(ClientThread);
-        errdefer alloc.destroy(thread);
+        errdefer alloc.destroy(thread); // Only destroy thread struct if init fails
 
         thread.loop = try xev.Loop.init(.{});
         errdefer thread.loop.deinit();
@@ -215,16 +272,13 @@ pub const ClientThread = struct {
 
         thread.alloc = alloc;
 
-        if (client.loop) |_| {
-            return error.ClientLoopAlreadyInitialized;
-        }
-
-        client.attachToLoop(&thread.loop);
+        try client.attachToLoop(&thread.loop);
         thread.client = client;
 
         return thread;
     }
 
+    /// Deinitializes the ClientThread and the JamSnpClient it owns.
     pub fn deinit(self: *ClientThread) void {
         self.event_queue.destroy(self.alloc);
         self.mailbox.destroy(self.alloc);

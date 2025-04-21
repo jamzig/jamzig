@@ -257,7 +257,11 @@ pub const JamSnpClient = struct {
         self.buildLoop();
     }
 
-    pub fn attachToLoop(self: *@This(), loop: *xev.Loop) void {
+    pub fn attachToLoop(self: *@This(), loop: *xev.Loop) !void {
+        if (self.loop) |_| {
+            return error.ClientLoopAlreadyInitialized;
+        }
+
         self.loop = loop;
         self.loop_owned = false;
         self.buildLoop();

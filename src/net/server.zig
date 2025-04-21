@@ -5,6 +5,7 @@
 const std = @import("std");
 const xev = @import("xev");
 const network = @import("network");
+
 const posix = std.posix;
 
 const jamsnp_server = @import("jamsnp/server.zig");
@@ -19,6 +20,45 @@ const ServerConnection = server_conn.Connection;
 const ServerStream = server_stream.Stream;
 
 const Mailbox = @import("../datastruct/blocking_queue.zig").BlockingQueue;
+
+/// Builder for creating a ServerThread instance.
+/// Ensures that the underlying JamSnpServer is also initialized.
+pub const ServerThreadBuilder = struct {
+    _alloc: ?std.mem.Allocator = null,
+    _genesis_hash: ?[]const u8 = null,
+    _key_path: ?[]const u8 = null,
+
+    pub fn init() ServerThreadBuilder {
+        return .{};
+    }
+
+    pub fn allocator(self: *ServerThreadBuilder, alloc: std.mem.Allocator) *ServerThreadBuilder {
+        self._alloc = alloc;
+        return self;
+    }
+
+    pub fn genesisHash(self: *ServerThreadBuilder, genesis_hash: []const u8) *ServerThreadBuilder {
+        self._genesis_hash = genesis_hash;
+        return self;
+    }
+
+    pub fn keyPath(self: *ServerThreadBuilder, path: []const u8) *ServerThreadBuilder {
+        self._key_path = path;
+        return self;
+    }
+
+    /// Builds the ServerThread.
+    pub fn build(self: *const ServerThreadBuilder) !*ServerThread {
+        const alloc = self._alloc orelse return error.AllocatorNotSet;
+        const cert_path = self._genesis_hash orelse return error.CertificatePathNotSet; // Example validation
+        const key_path = self._key_path orelse return error.KeyPathNotSet; // Example validation
+
+        var jserver = try JamSnpServer.initWithoutLoop(alloc, cert_path, key_path);
+        errdefer jserver.deinit();
+
+        return ServerThread.init(alloc, jserver);
+    }
+};
 
 pub fn CommandCallback(T: type) type {
     return *const fn (result: T, context: ?*anyopaque) void;
@@ -172,9 +212,11 @@ pub const ServerThread = struct {
         }
     };
 
+    /// Initializes the ServerThread with an existing JamSnpServer instance.
+    /// Called by the ServerThreadBuilder.
     pub fn init(alloc: std.mem.Allocator, server_instance: *JamSnpServer) !*ServerThread {
         var thread = try alloc.create(ServerThread);
-        errdefer alloc.destroy(thread);
+        errdefer alloc.destroy(thread); // Only destroy thread struct if init fails
 
         thread.loop = try xev.Loop.init(.{});
         errdefer thread.loop.deinit();
@@ -194,8 +236,9 @@ pub const ServerThread = struct {
         thread.alloc = alloc;
 
         // Attach server to thread's loop
-        // This function needs to be added to jamsnp/server.zig
+        // Ensure this function exists in JamSnpServer and handles potential errors or state.
         server_instance.attachToLoop(&thread.loop);
+
         thread.server = server_instance;
 
         // Register internal callbacks to bridge JamSnpServer events to Server.Event
