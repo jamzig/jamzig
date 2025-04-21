@@ -21,6 +21,7 @@ pub const EventType = shared.EventType;
 pub const CallbackHandler = shared.CallbackHandler;
 
 // Use specific callback types from shared
+pub const ListenerCreatedCallbackFn = shared.ListenerCreatedCallbackFn;
 pub const ClientConnectedCallbackFn = shared.ClientConnectedCallbackFn;
 pub const ClientDisconnectedCallbackFn = shared.ConnectionClosedCallbackFn;
 pub const StreamCreatedCallbackFn = shared.StreamCreatedCallbackFn;
@@ -34,6 +35,7 @@ pub const DataWriteProgressCallbackFn = shared.DataWriteProgressCallbackFn;
 
 // Argument Union for invokeCallback (using shared types)
 const EventArgs = union(EventType) {
+    ListenerCreated: struct { endpoint: network.EndPoint },
     ClientConnected: struct { connection: ConnectionId, endpoint: network.EndPoint },
     ConnectionEstablished: struct { connection: ConnectionId, endpoint: network.EndPoint },
     ConnectionFailed: struct { endpoint: network.EndPoint, err: anyerror },
@@ -388,6 +390,10 @@ pub const JamSnpServer = struct {
         if (handler.callback) |callback_ptr| {
             span.debug("Invoking server callback for event {s}", .{@tagName(event_tag)});
             switch (args) {
+                .ListenerCreated => |ev_args| {
+                    const callback: ListenerCreatedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                    callback(ev_args.endpoint, handler.context);
+                },
                 .ClientConnected => |ev_args| {
                     const callback: ClientConnectedCallbackFn = @ptrCast(@alignCast(callback_ptr));
                     callback(ev_args.connection, ev_args.endpoint, handler.context);

@@ -139,6 +139,47 @@ pub fn BlockingQueue(
             return self.data[n];
         }
 
+        /// Pop a value from the queue, blocking forever using a sleep loop until a value is available.
+        pub fn blockingPop(self: *Self) T {
+            const sleep_interval_ns: u64 = 10 * std.time.ns_per_ms; // Sleep for 10ms between checks
+            while (true) {
+                if (self.pop()) |value| {
+                    return value;
+                }
+                // Queue is empty, wait and retry
+                std.time.sleep(sleep_interval_ns);
+            }
+        }
+
+        /// Pop a value from the queue, blocking using a sleep loop until a value is available or timeout occurs.
+        /// Returns null if the timeout occurs before a value is available.
+        pub fn timedBlockingPop(self: *Self, timeout_ms: u64) ?T {
+            const start_time = std.time.nanoTimestamp();
+            const timeout_ns = timeout_ms * std.time.ns_per_ms;
+            const sleep_interval_ns: u64 = 10 * std.time.ns_per_ms; // Sleep for 10ms between checks
+
+            while (true) {
+                // Try to pop first
+                if (self.pop()) |value| {
+                    return value;
+                }
+
+                // Check timeout *after* trying to pop, to ensure we check at least once even with 0 timeout
+                const current_time = std.time.nanoTimestamp();
+                const elapsed_ns = current_time - start_time;
+                if (elapsed_ns >= timeout_ns) {
+                    return null; // Timeout exceeded
+                }
+
+                // Determine remaining time and sleep interval
+                const remaining_ns = timeout_ns - elapsed_ns;
+                const actual_sleep_ns = @min(sleep_interval_ns, remaining_ns);
+
+                // Queue is empty, wait and retry
+                std.time.sleep(@intCast(actual_sleep_ns));
+            }
+        }
+
         /// Pop all values from the queue. This will hold the big mutex
         /// until `deinit` is called on the return value. This is used if
         /// you know you're going to "pop" and utilize all the values
