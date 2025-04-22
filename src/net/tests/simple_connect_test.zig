@@ -9,8 +9,30 @@ pub const TestServer = struct {
     server: net_server.Server,
     thread_handle: std.Thread,
 
+    /// Wait for a specific event type from the server with a timeout
+    pub fn expectEvent(
+        self: *TestServer,
+        timeout_ms: u64,
+        event_type: std.meta.FieldEnum(net_server.Server.Event),
+    ) !net_server.Server.Event {
+        const maybe_event = self.server.timedWaitEvent(timeout_ms);
+        if (maybe_event) |event| {
+            if (@as(std.meta.FieldEnum(net_server.Server.Event), event) != event_type) {
+                std.debug.print("Expected event type {}, but got {}\n", .{ event_type, event });
+                return error.InvalidEventType;
+            }
+            std.debug.print("Received expected event: {}\n", .{event});
+            return event;
+        } else {
+            return error.Timeout;
+        }
+    }
+
     pub fn join(self: *TestServer) void {
-        self.server.shutdown() catch {};
+        // Ensure shutdown is called before joining the thread
+        self.server.shutdown() catch |err| {
+            std.log.err("Error shutting down server: {s}", .{@errorName(err)});
+        };
         self.thread_handle.join();
     }
 
@@ -63,8 +85,30 @@ pub const TestClient = struct {
     client: net_client.Client,
     thread_handle: std.Thread,
 
+    /// Wait for a specific event type from the client with a timeout
+    pub fn expectEvent(
+        self: *TestClient,
+        timeout_ms: u64,
+        event_type: std.meta.FieldEnum(net_client.Client.Event),
+    ) !net_client.Client.Event {
+        const maybe_event = self.client.timedWaitEvent(timeout_ms);
+        if (maybe_event) |event| {
+            if (@as(std.meta.FieldEnum(net_client.Client.Event), event) != event_type) {
+                std.debug.print("Expected client event type {}, but got {}\n", .{ event_type, event });
+                return error.InvalidEventType;
+            }
+            std.debug.print("Received expected client event: {}\n", .{event});
+            return event;
+        } else {
+            return error.Timeout;
+        }
+    }
+
     pub fn join(self: *TestClient) void {
-        self.client.shutdown() catch {};
+        // Ensure shutdown is called before joining the thread
+        self.client.shutdown() catch |err| {
+            std.log.err("Error shutting down client: {s}", .{@errorName(err)});
+        };
         self.thread_handle.join();
     }
 
@@ -114,7 +158,7 @@ fn createTestClient(allocator: std.mem.Allocator) !TestClient {
 
 test "server creation and listen" {
     const allocator = std.testing.allocator;
-    const timeout_ms: u64 = 5000; // 1 second timeout
+    const timeout_ms: u64 = 5000; // 5 second timeout
 
     // Create and start server
     var test_server = try createTestServer(allocator);
@@ -126,7 +170,7 @@ test "server creation and listen" {
     try test_server.server.listen(listen_address, listen_port);
 
     // Expect listening event
-    const listening_event = expectEvent(&test_server.server, timeout_ms, .listening) catch |err| {
+    const listening_event = test_server.expectEvent(timeout_ms, .listening) catch |err| {
         std.log.err("Failed to receive listen event: {s}", .{@errorName(err)});
         return err;
     };
@@ -143,50 +187,18 @@ test "server creation and listen" {
     try test_client.client.connect(server_endpoint);
 
     // Wait for connection event on client
-    const connected_event = expectClientEvent(&test_client.client, timeout_ms, .connected) catch |err| {
+    const connected_event = test_client.expectEvent(timeout_ms, .connected) catch |err| {
         std.log.err("Failed to receive connected event: {s}", .{@errorName(err)});
         return err;
     };
     std.log.info("Client connected with connection ID: {}", .{connected_event.connected.connection_id});
 
-    // TODO: wait for server event as well
-    // TODO: threads are not closing properly
+    // Wait for the incoming connection event on the server
+    const server_connection_event = test_server.expectEvent(timeout_ms, .client_connected) catch |err| {
+        std.log.err("Failed to receive server connection event: {s}", .{@errorName(err)});
+        return err;
+    };
+    std.log.info("Server received connection with ID: {}", .{server_connection_event.client_connected.connection_id});
 
     std.log.info("Server connect test completed successfully.", .{});
-}
-
-pub fn expectEvent(
-    server: *net_server.Server,
-    timeout_ms: u64,
-    event_type: std.meta.FieldEnum(net_server.Server.Event),
-) !net_server.Server.Event {
-    const maybe_event = server.timedWaitEvent(timeout_ms);
-    if (maybe_event) |event| {
-        if (@as(std.meta.FieldEnum(net_server.Server.Event), event) != event_type) {
-            std.debug.print("Expected event type {}, but got {}\n", .{ event_type, event });
-            return error.InvalidEventType;
-        }
-        std.debug.print("Received expected event: {}\n", .{event});
-        return event;
-    } else {
-        return error.Timeout;
-    }
-}
-
-pub fn expectClientEvent(
-    client: *net_client.Client,
-    timeout_ms: u64,
-    event_type: std.meta.FieldEnum(net_client.Client.Event),
-) !net_client.Client.Event {
-    const maybe_event = client.timedWaitEvent(timeout_ms);
-    if (maybe_event) |event| {
-        if (@as(std.meta.FieldEnum(net_client.Client.Event), event) != event_type) {
-            std.debug.print("Expected client event type {}, but got {}\n", .{ event_type, event });
-            return error.InvalidEventType;
-        }
-        std.debug.print("Received expected client event: {}\n", .{event});
-        return event;
-    } else {
-        return error.Timeout;
-    }
 }
