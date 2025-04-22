@@ -640,29 +640,25 @@ pub const Client = struct {
     }
 
     // Connect to a remote endpoint
-    pub fn connect(self: *Client, address: []const u8, port: u16) !void {
-        return self.connectWithCallback(address, port, null, null);
+    pub fn connect(self: *Client, endpoint: network.EndPoint) !void {
+        return self.connectWithCallback(endpoint, null, null);
     }
 
     // Connect with callback for completion notification
     pub fn connectWithCallback(
         self: *Client,
-        address: []const u8,
-        port: u16,
+        endpoint: network.EndPoint,
         callback: ?CommandCallback(anyerror!ConnectionId),
         context: ?*anyopaque,
     ) !void {
         const command = ClientThread.Command{ .connect = .{
-            .data = .{
-                .address = address,
-                .port = port,
-            },
+            .data = endpoint,
             .metadata = .{
                 .callback = callback,
                 .context = context,
             },
         } };
-        if (!self.thread.mailbox.push(command, .{ .instant = {} })) {
+        if (self.thread.mailbox.push(command, .instant) == 0) {
             return error.MailboxFull;
         }
         try self.thread.wakeup.notify();
