@@ -65,7 +65,7 @@ pub fn Connection(T: type) type {
             // Retrieve the connection context we passed to lsquic_engine_connect
             const conn_ctx = lsquic.lsquic_conn_get_ctx(maybe_lsquic_connection).?;
             const connection: *Connection(T) = @alignCast(@ptrCast(conn_ctx));
-            span.debug("LSQUIC connection created for endpoint: {}, Assigning ID: {}", .{ connection.endpoint, connection.id });
+            span.debug("LSQUIC Client connection created for endpoint: {}, Assigning ID: {}", .{ connection.endpoint, connection.id });
 
             // Store the lsquic connection pointer
             connection.lsquic_connection = maybe_lsquic_connection orelse {
@@ -76,7 +76,7 @@ pub fn Connection(T: type) type {
                 return null;
             };
 
-            connection.owner.invokeCallback(.ConnectionEstablished, .{
+            shared.invokeCallback(&connection.owner.callback_handlers, .ConnectionEstablished, .{
                 .ConnectionEstablished = .{
                     .connection = connection.id,
                     .endpoint = connection.endpoint,
@@ -94,11 +94,9 @@ pub fn Connection(T: type) type {
             const span = trace.span(.on_new_conn);
             defer span.deinit();
 
-            std.debug.print("onConnectionCreated called with ctx: {?*}\n", .{ctx});
-
             const owner = @as(*T, @ptrCast(@alignCast(ctx.?)));
             const lsquic_conn_ptr = maybe_lsquic_connection orelse {
-                span.err("onNewConn called with null lsquic connection!", .{});
+                span.err("onServerConnectionCreated called with null lsquic connection!", .{});
                 return null;
             };
 
@@ -134,6 +132,13 @@ pub fn Connection(T: type) type {
                 span.err("Failed to add connection {} to map: {s}", .{ connection.id, @errorName(err) });
                 return null; // Let errdefer clean up, signal error
             };
+
+            shared.invokeCallback(&owner.callback_handlers, .ClientConnected, .{
+                .ClientConnected = .{
+                    .connection = connection.id,
+                    .endpoint = connection.endpoint,
+                },
+            });
 
             span.debug("Connection context created successfully for ID: {}", .{connection.id});
             // Return our context struct pointer

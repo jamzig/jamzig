@@ -430,6 +430,7 @@ pub const ServerThread = struct {
     fn internalClientConnectedCallback(connection_id: ConnectionId, peer_addr: std.net.Address, context: ?*anyopaque) void {
         const self: *ServerThread = @ptrCast(@alignCast(context.?));
         const event = Server.Event{ .client_connected = .{ .connection_id = connection_id, .peer_addr = peer_addr } };
+        std.debug.print("Server client connected: {} at {}", .{ connection_id, peer_addr });
         _ = self.event_queue.push(event, .instant); // Ignore push error (queue full?)
     }
 
