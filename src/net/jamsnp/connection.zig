@@ -161,7 +161,7 @@ pub fn Connection(T: type) type {
             span.debug("Connection closed callback triggered for ID: {}", .{conn_id});
 
             // Invoke user callback *before* removing/destroying
-            owner.invokeCallback(.ConnectionClosed, .{
+            shared.invokeCallback(&owner.callback_handlers, .ConnectionClosed, .{
                 .ConnectionClosed = .{ .connection = conn_id },
             });
 

@@ -187,7 +187,7 @@ pub fn Stream(T: type) type {
             };
 
             // Invoke the user-facing callback via the client
-            connection.owner.invokeCallback(.StreamCreated, .{
+            shared.invokeCallback(&connection.owner.callback_handlers, .StreamCreated, .{
                 .StreamCreated = .{
                     .connection = connection.id,
                     .stream = stream.id,
@@ -230,7 +230,7 @@ pub fn Stream(T: type) type {
 
             if (read_size == 0) {
                 span.debug("End of stream reached for stream ID: {}", .{stream.id});
-                stream.connection.owner.invokeCallback(.DataEndOfStream, .{
+                shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataEndOfStream, .{
                     .DataEndOfStream = .{
                         .connection = stream.connection.id,
                         .stream = stream.id,
@@ -244,7 +244,7 @@ pub fn Stream(T: type) type {
                 switch (std.posix.errno(read_size)) {
                     std.posix.E.AGAIN => {
                         span.debug("Read would block for stream ID: {}", .{stream.id});
-                        stream.connection.owner.invokeCallback(.DataWouldBlock, .{
+                        shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWouldBlock, .{
                             .DataWouldBlock = .{
                                 .connection = stream.connection.id,
                                 .stream = stream.id,
@@ -254,7 +254,7 @@ pub fn Stream(T: type) type {
                     },
                     else => |err| {
                         span.err("Error reading from stream ID {}: {s}", .{ stream.id, @tagName(err) });
-                        stream.connection.owner.invokeCallback(.DataReadError, .{
+                        shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataReadError, .{
                             .DataReadError = .{
                                 .connection = stream.connection.id,
                                 .stream = stream.id,
@@ -274,7 +274,7 @@ pub fn Stream(T: type) type {
                 stream.read_buffer_pos += bytes_read;
                 const data_just_read = stream.read_buffer.?[prev_pos..stream.read_buffer_pos];
 
-                stream.connection.owner.invokeCallback(.DataReceived, .{
+                shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataReceived, .{
                     .DataReceived = .{
                         .connection = stream.connection.id,
                         .stream = stream.id,
@@ -337,7 +337,7 @@ pub fn Stream(T: type) type {
                 } else {
                     const err_code = -written;
                     span.err("Stream write failed for stream ID {} with error code: {d}", .{ stream.id, err_code });
-                    stream.connection.owner.invokeCallback(.DataWriteError, .{
+                    shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteError, .{
                         .DataWriteError = .{
                             .connection = stream.connection.id,
                             .stream = stream.id,
@@ -356,7 +356,7 @@ pub fn Stream(T: type) type {
             span.debug("Written {d} bytes to stream ID: {}", .{ bytes_written, stream.id });
             stream.write_buffer_pos += bytes_written;
 
-            stream.connection.owner.invokeCallback(.DataWriteProgress, .{
+            shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteProgress, .{
                 .DataWriteProgress = .{
                     .connection = stream.connection.id,
                     .stream = stream.id,
@@ -368,7 +368,7 @@ pub fn Stream(T: type) type {
             if (stream.write_buffer_pos >= total_size) {
                 span.debug("Write complete for user buffer (total {d} bytes) on stream ID: {}", .{ total_size, stream.id });
 
-                stream.connection.owner.invokeCallback(.DataWriteCompleted, .{
+                shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteCompleted, .{
                     .DataWriteCompleted = .{
                         .connection = stream.connection.id,
                         .stream = stream.id,
@@ -400,7 +400,7 @@ pub fn Stream(T: type) type {
             span.debug("Processing internal stream closure for ID: {}", .{stream.id});
 
             // Invoke the user-facing callback
-            stream.connection.owner.invokeCallback(.StreamClosed, .{
+            shared.invokeCallback(&stream.connection.owner.callback_handlers, .StreamClosed, .{
                 .StreamClosed = .{
                     .connection = stream.connection.id,
                     .stream = stream.id,
