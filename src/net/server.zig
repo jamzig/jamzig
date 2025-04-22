@@ -106,7 +106,7 @@ pub const ServerThread = struct {
                 port: u16,
             };
             data: Data,
-            metadata: CommandMetadata(anyerror!void),
+            metadata: CommandMetadata(anyerror!network.EndPoint),
         };
         pub const DisconnectClient = struct {
             const Data = struct {
@@ -187,39 +187,6 @@ pub const ServerThread = struct {
         stream_shutdown: StreamShutdown,
     };
 
-    pub const CommandResult = union(enum) {
-        pub fn Result(T: type) type {
-            return struct {
-                result: T,
-                metadata: CommandMetadata(T),
-            };
-        }
-
-        listen: Result(anyerror!void),
-        disconnect_client: Result(anyerror!void),
-        create_stream: Result(anyerror!void),
-        destroy_stream: Result(anyerror!void),
-        send_data: Result(anyerror!void),
-        stream_want_read: Result(anyerror!void),
-        stream_want_write: Result(anyerror!void),
-        stream_flush: Result(anyerror!void),
-        stream_shutdown: Result(anyerror!void),
-
-        pub fn invokeCallback(self: CommandResult) void {
-            switch (self) {
-                .listen => |r| r.metadata.callWithResult(r.result),
-                .disconnect_client => |r| r.metadata.callWithResult(r.result),
-                .create_stream => |r| r.metadata.callWithResult(r.result),
-                .destroy_stream => |r| r.metadata.callWithResult(r.result),
-                .send_data => |r| r.metadata.callWithResult(r.result),
-                .stream_want_read => |r| r.metadata.callWithResult(r.result),
-                .stream_want_write => |r| r.metadata.callWithResult(r.result),
-                .stream_flush => |r| r.metadata.callWithResult(r.result),
-                .stream_shutdown => |r| r.metadata.callWithResult(r.result),
-            }
-        }
-    };
-
     /// Initializes the ServerThread with an existing JamSnpServer instance.
     /// Called by the ServerThreadBuilder.
     pub fn init(alloc: std.mem.Allocator, server_instance: *JamSnpServer) !*ServerThread {
@@ -257,7 +224,6 @@ pub const ServerThread = struct {
 
     fn registerServerCallbacks(self: *ServerThread) void {
         // Pass 'self' as context so callbacks can access the thread state (event_queue)
-        self.server.setCallback(.ListenerCreated, internalListenerCreatedCallback, self);
         self.server.setCallback(.ClientConnected, internalClientConnectedCallback, self);
         self.server.setCallback(.ConnectionEstablished, internalClientDisconnectedCallback, self);
         self.server.setCallback(.StreamCreated, internalStreamCreatedByClientCallback, self);
@@ -351,9 +317,9 @@ pub const ServerThread = struct {
                     // Assuming listen returns the bound endpoint on success eventually via event/callback
                     // For now, just signal command success.
                     // A dedicated 'Listening' event pushed by internalListenCallback would be better.
-                    try self.pushEvent(
-                        .{ .listening = .{ .local_endpoint = local_end_point } },
-                    );
+                    try self.pushEvent(.{
+                        .listening = .{ .local_endpoint = local_end_point, .result = .{ .metadata = cmd.metadata, .result = local_end_point } },
+                    });
                 } else |err| {
                     // Handle error (log, notify, etc.)
                     std.log.err("Error listening: {any}", .{err});
@@ -664,17 +630,45 @@ pub const Server = struct {
     };
 
     pub const Event = union(enum) {
+        pub fn Result(T: type) type {
+            return struct {
+                result: T,
+                metadata: CommandMetadata(T),
+
+                pub fn invokeCallback(self: *const Result(T)) void {
+                    self.metadata.callWithResult(self.result);
+                }
+            };
+        }
+
         // -- Server events
-        listening: struct { local_endpoint: network.EndPoint },
+        listening: struct {
+            local_endpoint: network.EndPoint,
+            result: Result(anyerror!network.EndPoint),
+        },
 
         // -- Connection events
-        client_connected: struct { connection_id: ConnectionId, peer_addr: std.net.Address },
-        client_disconnected: struct { connection_id: ConnectionId },
+        client_connected: struct {
+            connection_id: ConnectionId,
+            peer_addr: std.net.Address,
+        },
+        client_disconnected: struct {
+            connection_id: ConnectionId,
+        },
 
         // -- Streams
-        stream_created_by_client: struct { connection_id: ConnectionId, stream_id: StreamId },
-        stream_created_by_server: struct { connection_id: ConnectionId, stream_id: StreamId },
-        stream_closed: struct { connection_id: ConnectionId, stream_id: StreamId },
+        stream_created_by_client: struct {
+            connection_id: ConnectionId,
+            stream_id: StreamId,
+        },
+        stream_created_by_server: struct {
+            connection_id: ConnectionId,
+            stream_id: StreamId,
+        },
+        stream_closed: struct {
+            connection_id: ConnectionId,
+            stream_id: StreamId,
+        },
 
         // -- Data events
         data_received: struct {
@@ -705,7 +699,19 @@ pub const Server = struct {
             connection_id: ConnectionId,
             stream_id: StreamId,
         },
-        @"error": struct { message: []const u8, details: ?anyerror }, // General error event
+        @"error": struct {
+            message: []const u8,
+            details: ?anyerror,
+        },
+
+        pub fn invokeCallback(self: Event) void {
+            switch (self) {
+                .listening => |e| e.result.invokeCallback(),
+                else => {
+                    @panic("Event callback not implemented for this event type");
+                },
+            }
+        }
     };
 
     // --- API Methods ---
@@ -718,7 +724,7 @@ pub const Server = struct {
         self: *Server,
         address: []const u8,
         port: u16,
-        callback: ?CommandCallback(anyerror!void),
+        callback: ?CommandCallback(anyerror!network.EndPoint),
         context: ?*anyopaque,
     ) !void {
         const command = ServerThread.Command{ .listen = .{

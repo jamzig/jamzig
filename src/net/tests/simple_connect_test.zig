@@ -39,24 +39,26 @@ test "server creation and listen" {
     const listen_address = "::1"; // Use IPv6 loopback
     const listen_port: u16 = 0; // Use port 0 to get an ephemeral port assigned by the OS
 
-    server.listen(listen_address, listen_port) catch |err| {
+    server.listenWithCallback(listen_address, listen_port, struct {
+        pub fn callback(result: anyerror!network.EndPoint, _: ?*anyopaque) void {
+            if (result) |endpoint| {
+                std.log.info("Server is now listening on {s}", .{endpoint});
+            } else |err| {
+                std.log.err("Error in server callback: {s}", .{@errorName(err)});
+            }
+        }
+    }.callback, null) catch |err| {
         std.log.err("Failed to start listening: {s}", .{@errorName(err)});
         return err;
     };
 
-    // 4. Wait for an event with a timeout after listening starts
-    // Note: This test currently waits for *any* event. A more robust test
-    // would require simulating a client connection and specifically waiting
-    // for the '.client_connected' event.
+    // Wait for the listening event
     const timeout_ms: u64 = 1000; // 1 second timeout
     const maybe_event = server.timedWaitEvent(timeout_ms);
 
     if (maybe_event) |event| {
-        // TODO: Add more specific event checking if needed, e.g., wait for .client_connected
         std.log.info("Received server event: {any}", .{event});
-        // For this simple test, receiving any event within the timeout might be sufficient
-        // depending on expected server behavior immediately after listening.
-        // If '.client_connected' is the target, this test needs an external client trigger.
+        event.invokeCallback();
     } else {
         std.log.err("Test timed out waiting for event after {d}ms.", .{timeout_ms});
         try testing.expect(false); // Fail the test explicitly on timeout

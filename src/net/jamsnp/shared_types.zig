@@ -7,7 +7,6 @@ pub const StreamId = uuid.Uuid;
 
 // -- Client Callback Types
 pub const EventType = enum {
-    ListenerCreated,
     ClientConnected,
     ConnectionEstablished,
     ConnectionFailed,
@@ -23,7 +22,6 @@ pub const EventType = enum {
     DataWriteError,
 };
 
-pub const ListenerCreatedCallbackFn = *const fn (endpoint: network.EndPoint, context: ?*anyopaque) void;
 pub const ClientConnectedCallbackFn = *const fn (connection: ConnectionId, endpoint: network.EndPoint, context: ?*anyopaque) void;
 pub const ConnectionEstablishedCallbackFn = *const fn (connection: ConnectionId, endpoint: network.EndPoint, context: ?*anyopaque) void;
 pub const ConnectionFailedCallbackFn = *const fn (endpoint: network.EndPoint, err: anyerror, context: ?*anyopaque) void;
