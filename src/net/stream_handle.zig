@@ -26,7 +26,7 @@ pub const StreamHandle = struct {
     pub fn sendDataWithCallback(
         self: *StreamHandle,
         data: []const u8,
-        callback: ?CommandCallback(void),
+        callback: ?CommandCallback(anyerror!void),
         context: ?*anyopaque,
     ) !void {
         const command = ClientThread.Command{

@@ -5,12 +5,13 @@ const net_client = @import("../client.zig");
 const network = @import("network");
 const common = @import("common.zig");
 const lsquic = @import("lsquic");
+const StreamHandle = @import("../stream_handle.zig").StreamHandle;
 
 test "create stream and send data" {
     // @import("logging.zig").enableDetailedLsquicLogging();
 
     const allocator = std.testing.allocator;
-    const timeout_ms: u64 = 10_000; // 5 second timeout
+    const timeout_ms: u64 = 1_000;
 
     // -- Build our server
 
@@ -52,8 +53,34 @@ test "create stream and send data" {
     const server_connection_event = try test_server.expectEvent(timeout_ms, .client_connected);
     std.log.info("Server received connection with ID: {}", .{server_connection_event.client_connected.connection_id});
 
-    // Simple connect test completed
-    std.log.info("Server connect test completed successfully.", .{});
+    // --- Create a stream from client to server ---
+    try test_client.client.createStream(connected_event.connected.connection_id);
+
+    // Wait for the stream_created event on the client
+    const client_stream_event = try test_client.expectEvent(timeout_ms, .stream_created);
+    const stream_id = client_stream_event.stream_created.stream_id;
+    std.log.info("Client created stream with ID: {}", .{stream_id});
+
+    // Wait for the server to observe the new stream
+    const server_stream_event = try test_server.expectEvent(timeout_ms, .stream_created_by_client);
+    std.log.info("Server observed stream creation with ID: {}", .{server_stream_event.stream_created_by_client.stream_id});
+
+    // --- Send data over the stream ---
+    var stream_handle = StreamHandle{
+        .thread = test_client.thread,
+        .stream_id = stream_id,
+        .connection_id = connected_event.connected.connection_id,
+    };
+
+    const payload = "Hello, JamSnp!";
+    try stream_handle.sendData(payload);
+
+    // Wait for the server to receive the data
+    const data_event = try test_server.expectEvent(timeout_ms, .data_received);
+    try testing.expectEqual(@as(usize, payload.len), data_event.data_received.data.len);
+    try testing.expect(std.mem.eql(u8, payload, data_event.data_received.data));
+
+    std.log.info("Data transfer verified successfully.", .{});
 
     // Defer will shutdown the server and client and free resources
 }

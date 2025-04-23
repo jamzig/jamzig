@@ -56,6 +56,7 @@ pub fn Stream(T: type) type {
 
             // Buffers are managed by the caller
 
+            self.* = undefined;
             alloc.destroy(self);
         }
 
@@ -415,9 +416,10 @@ pub fn Stream(T: type) type {
             }
 
             // Destroy our internal stream context struct
+            const id = stream.id;
             stream.destroy(stream.connection.owner.allocator);
 
-            span.debug("Internal stream cleanup complete for formerly ID: {}", .{stream.id});
+            span.debug("Internal stream cleanup complete for formerly ID: {}", .{id});
         }
     };
 }

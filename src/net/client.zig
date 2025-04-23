@@ -869,7 +869,7 @@ pub const Client = struct {
                 .context = context,
             },
         } };
-        if (!self.thread.mailbox.push(command, .{ .instant = {} })) {
+        if (self.thread.mailbox.push(command, .{ .instant = {} }) == 0) {
             span.err("Mailbox full, cannot queue create stream command", .{});
             return error.MailboxFull;
         }
