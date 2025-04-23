@@ -91,7 +91,7 @@ pub fn Connection(T: type) type {
             ctx: ?*anyopaque, // *T
             maybe_lsquic_connection: ?*lsquic.lsquic_conn_t,
         ) callconv(.C) ?*lsquic.lsquic_conn_ctx_t {
-            const span = trace.span(.on_new_conn);
+            const span = trace.span(.on_server_connection_created);
             defer span.deinit();
 
             const owner = @as(*T, @ptrCast(@alignCast(ctx.?)));
@@ -108,7 +108,9 @@ pub fn Connection(T: type) type {
                 return null;
             };
 
-            const peer_addr = network.EndPoint.fromSocketAddress(@ptrCast(@alignCast(peer_sa)), @sizeOf(@TypeOf(peer_sa))) catch {
+            const peer_address = std.net.Address.initPosix(@ptrCast(@alignCast(peer_sa)));
+
+            const peer_addr = network.EndPoint.fromSocketAddress(&peer_address.any, peer_address.getOsSockLen()) catch {
                 span.err("Failed to convert sockaddr to EndPoint for new connection", .{});
                 return null;
             };
