@@ -107,8 +107,7 @@ pub const ClientThread = struct {
 
     // Keep track of pending command metadata to invoke callbacks upon completion event
     pending_connects: std.AutoHashMap(ConnectionId, CommandMetadata(anyerror!ConnectionId)),
-    // TODO: Add maps for other commands needing async callbacks if necessary (e.g., CreateStream)
-    // pending_stream_creates: std.AutoHashMap(ConnectionId, CommandMetadata(anyerror!StreamId)), // Example
+    pending_streams: std.fifo.LinearFifo(CommandMetadata(anyerror!StreamId), .Dynamic),
 
     pub const Command = union(enum) {
         pub const Connect = struct {
@@ -216,6 +215,7 @@ pub const ClientThread = struct {
         errdefer thread.event_queue.destroy(alloc);
 
         thread.pending_connects = std.AutoHashMap(ConnectionId, CommandMetadata(anyerror!ConnectionId)).init(alloc);
+        thread.pending_streams = std.fifo.LinearFifo(CommandMetadata(anyerror!StreamId), .Dynamic).init(alloc);
         // Initialize other pending command maps here if needed
 
         thread.alloc = alloc;
@@ -402,16 +402,14 @@ pub const ClientThread = struct {
 
                 // Find the connection by ID
                 if (self.client.connections.get(cmd.data.connection_id)) |conn| {
-                    // TODO: ClientConnection needs a createStream method
-                    conn.createStream() catch |err| {
-                        cmd_span.err("Failed to request stream creation on conn {}: {}", .{ cmd.data.connection_id, err });
-                        // If we were storing metadata, invoke callback with error here:
-                        // if (self.pending_stream_creates.fetchRemove(cmd.data.connection_id)) |meta| {
-                        //     meta.value.callWithResult(err);
-                        // }
-                        cmd.metadata.callWithResult(err); // Invoke directly for now
-                        return;
-                    };
+
+                    // Push the pending streams to the fifo, this has to be now, as createStream
+                    // calls lsquic which if there is enough capacity will call the callback immediately
+                    try self.pending_streams.writeItem(cmd.metadata);
+
+                    // Create the stream, this will call lsquic to create it, we need to
+                    // wait until the StreamCreated event to know the stream ID.
+                    conn.createStream();
                     cmd_span.debug("Stream creation requested successfully", .{});
                     // Success/failure is signaled by the StreamCreated event later
                     // Callback will be invoked in internalStreamCreatedCallback
@@ -621,6 +619,16 @@ pub const ClientThread = struct {
         span.debug("Stream created: connection={} stream={}", .{ connection_id, stream_id });
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
+
+        // FIXME: handle the null case in self.client.Stream.onNewStream
+        if (self.pending_streams.readItem()) |metadata| {
+            span.debug("Found pending stream command, invoking callback", .{});
+            metadata.callWithResult(stream_id); // Call command callback with success (StreamId)
+        } else {
+            // This should never happen.
+            span.warn("StreamCreated event for connection {} with no pending stream command", .{connection_id});
+        }
+
         try self.pushEvent(.{ .stream_created = .{ .connection_id = connection_id, .stream_id = stream_id } });
     }
 

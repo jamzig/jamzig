@@ -43,7 +43,7 @@ pub fn Connection(T: type) type {
             alloc.destroy(self);
         }
 
-        pub fn createStream(self: *Connection(T)) !void {
+        pub fn createStream(self: *Connection(T)) void {
             const span = trace.span(.create_stream);
             defer span.deinit();
             span.debug("Requesting new stream on connection ID: {}", .{self.id});

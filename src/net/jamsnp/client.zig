@@ -21,38 +21,6 @@ pub const StreamId = shared.StreamId;
 pub const EventType = shared.EventType; // Use renamed type
 pub const CallbackHandler = shared.CallbackHandler;
 
-// Use specific callback types from shared
-pub const ConnectionEstablishedCallbackFn = shared.ConnectionEstablishedCallbackFn;
-pub const ConnectionFailedCallbackFn = shared.ConnectionFailedCallbackFn;
-pub const ConnectionClosedCallbackFn = shared.ConnectionClosedCallbackFn;
-pub const ClientConnectedCallbackFn = shared.ClientConnectedCallbackFn;
-pub const ClientDisconnectedCallbackFn = shared.ConnectionClosedCallbackFn;
-pub const StreamCreatedCallbackFn = shared.StreamCreatedCallbackFn;
-pub const StreamClosedCallbackFn = shared.StreamClosedCallbackFn;
-pub const DataWriteCompletedCallbackFn = shared.DataWriteCompletedCallbackFn;
-pub const DataErrorCallbackFn = shared.DataErrorCallbackFn;
-pub const DataWouldBlockCallbackFn = shared.DataWouldBlockCallbackFn;
-pub const DataEndOfStreamCallbackFn = shared.DataEndOfStreamCallbackFn;
-pub const DataWriteProgressCallbackFn = shared.DataWriteProgressCallbackFn;
-pub const DataReceivedCallbackFn = shared.DataReceivedCallbackFn;
-
-// Argument Union for invokeCallback (using shared types)
-const EventArgs = union(EventType) {
-    ClientConnected: struct { connection: ConnectionId, endpoint: network.EndPoint },
-    ConnectionEstablished: struct { connection: ConnectionId, endpoint: network.EndPoint },
-    ConnectionFailed: struct { endpoint: network.EndPoint, err: anyerror },
-    ConnectionClosed: struct { connection: ConnectionId },
-    StreamCreated: struct { connection: ConnectionId, stream: StreamId },
-    StreamClosed: struct { connection: ConnectionId, stream: StreamId },
-    DataReceived: struct { connection: ConnectionId, stream: StreamId, data: []const u8 },
-    DataEndOfStream: struct { connection: ConnectionId, stream: StreamId, data_read: []const u8 },
-    DataReadError: struct { connection: ConnectionId, stream: StreamId, error_code: i32 },
-    DataWouldBlock: struct { connection: ConnectionId, stream: StreamId },
-    DataWriteProgress: struct { connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize },
-    DataWriteCompleted: struct { connection: ConnectionId, stream: StreamId, total_bytes_written: usize },
-    DataWriteError: struct { connection: ConnectionId, stream: StreamId, error_code: i32 },
-};
-
 // -- JamSnpClient Struct
 
 pub const JamSnpClient = struct {

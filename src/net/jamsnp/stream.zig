@@ -168,23 +168,23 @@ pub fn Stream(T: type) type {
             defer span.deinit();
             span.debug("LSQUIC stream created callback received", .{});
 
+            // FIXME: we should check the edge case where maybe_lsquic_stream is null
+            // in this case the connection was closed before we could create the stream
+            // and we should not create a stream context. and we should indicate this on the callback
+
             // Get the parent Connection context
             const lsquic_connection = lsquic.lsquic_stream_conn(maybe_lsquic_stream);
             const conn_ctx = lsquic.lsquic_conn_get_ctx(lsquic_connection).?; // Assume parent conn context is valid
             const connection: *Connection(T) = @alignCast(@ptrCast(conn_ctx));
 
-            span.debug("Creating internal Stream context for connection ID: {}", .{connection.id});
             // Use the internal Stream.create
             const stream = Stream(T).create(connection.owner.allocator, connection, maybe_lsquic_stream orelse unreachable) catch |err| {
-                span.err("Failed to allocate memory for internal Stream context: {s}", .{@errorName(err)});
                 std.debug.panic("OutOfMemory creating internal Stream context: {s}", .{@errorName(err)});
             };
 
             // Add stream to the client's map
             connection.owner.streams.put(stream.id, stream) catch |err| {
-                span.err("Failed to add internal stream {} to map: {s}", .{ stream.id, @errorName(err) });
-                stream.destroy(connection.owner.allocator); // Clean up allocated stream
-                std.debug.panic("Failed to add internal stream to map: {s}", .{@errorName(err)});
+                std.debug.panic("OutOfMemory adding stream to map: {s}", .{@errorName(err)});
             };
 
             // Invoke the user-facing callback via the client
