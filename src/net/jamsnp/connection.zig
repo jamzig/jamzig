@@ -18,15 +18,14 @@ pub fn Connection(T: type) type {
 
         // Create function is not typically called directly by user for server
         // It's created internally in onNewConn
-        pub fn create(alloc: std.mem.Allocator, server: *T, lsquic_conn: ?*lsquic.lsquic_conn_t, peer_endpoint: network.EndPoint) !*Connection(T) {
+        pub fn create(alloc: std.mem.Allocator, server: *T, lsquic_conn: ?*lsquic.lsquic_conn_t, peer_endpoint: network.EndPoint, connection_id: ConnectionId) !*Connection(T) {
             const span = trace.span(.connection_create);
             defer span.deinit();
             const connection = try alloc.create(Connection(T));
-            const new_id = uuid.v4.new();
             // TODO: prefix all debug messaeges with the ID
-            span.debug("Creating {s} connection context with ID: {} for peer: {}", .{ @typeName(T), new_id, peer_endpoint });
+            span.debug("Creating {s} connection context with ID: {} for peer: {}", .{ @typeName(T), connection_id, peer_endpoint });
             connection.* = .{
-                .id = new_id,
+                .id = connection_id,
                 .lsquic_connection = lsquic_conn,
                 .owner = server,
                 .endpoint = peer_endpoint,
@@ -117,12 +116,15 @@ pub fn Connection(T: type) type {
 
             span.debug("New connection callback triggered for peer {}", .{peer_addr});
 
+            const connection_id = uuid.v4.new();
+
             // Create connection context using the new create method
             const connection = Connection(T).create(
                 owner.allocator,
                 owner,
                 lsquic_conn_ptr,
                 peer_addr,
+                connection_id,
             ) catch |err| {
                 span.err("Failed to create connection context: {s}", .{@errorName(err)});
                 return null; // Signal error to lsquic

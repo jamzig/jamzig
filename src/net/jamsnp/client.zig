@@ -395,7 +395,7 @@ pub const JamSnpClient = struct {
         return self.connect(peer_endpoint);
     }
 
-    pub fn connect(self: *JamSnpClient, peer_endpoint: network.EndPoint) !ConnectionId {
+    pub fn connect(self: *JamSnpClient, peer_endpoint: network.EndPoint, connection_id: ConnectionId) !void {
         const span = trace.span(.connect);
         defer span.deinit();
         span.debug("Connecting to {s}", .{peer_endpoint});
@@ -420,7 +420,7 @@ pub const JamSnpClient = struct {
 
         // Create a connection context *before* calling lsquic_engine_connect
         span.trace("Creating connection context", .{});
-        const conn = try Connection(JamSnpClient).create(self.allocator, self, null, peer_endpoint); // Use refactored path
+        const conn = try Connection(JamSnpClient).create(self.allocator, self, null, peer_endpoint, connection_id); // Use refactored path
         errdefer conn.destroy(self.allocator); // destroy is now part of ClientConnection.Connection
 
         // Create QUIC connection
@@ -446,10 +446,9 @@ pub const JamSnpClient = struct {
         }
 
         // Add to connections map *after* successful call to lsquic_engine_connect
-        try self.connections.put(conn.id, conn);
+        try self.connections.put(connection_id, conn);
 
         span.debug("Connection request initiated successfully for ID: {}", .{conn.id});
-        return conn.id;
     }
 
     // -- Logging

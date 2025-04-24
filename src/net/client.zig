@@ -5,6 +5,7 @@
 //! corresponding result.
 
 const std = @import("std");
+const uuid = @import("uuid");
 const xev = @import("xev");
 const crypto = std.crypto;
 
@@ -114,7 +115,9 @@ pub const ClientThread = struct {
             const Data = network.EndPoint;
             data: Data,
             metadata: CommandMetadata(anyerror!ConnectionId),
+            connection_id: ConnectionId, // Add ConnectionId to Connect command
         };
+
         pub const Disconnect = struct {
             const Data = struct {
                 connection_id: ConnectionId,
@@ -365,16 +368,17 @@ pub const ClientThread = struct {
                 defer cmd_span.deinit();
                 cmd_span.debug("Connecting to endpoint: {}", .{cmd.data});
 
+                // Store this pending connection, need to be defined here, as the onConnectionCreated
+                // callback can ve called synchronously in lsquic
+                try self.pending_connects.put(cmd.connection_id, cmd.metadata);
+
                 // The actual result (success or failure) comes via ConnectionEstablished/ConnectionFailed events
-                const connection_id = self.client.connect(cmd.data) catch |err| {
+                self.client.connect(cmd.data, cmd.connection_id) catch |err| {
                     cmd_span.err("Connection attempt failed immediately: {}", .{err});
                     // If connect() itself fails immediately, invoke callback with error
                     try self.pushEvent(.{ .connection_failed = .{ .endpoint = cmd.data, .err = err } });
                     return error.ConnectFailed;
                 };
-
-                // Store this pending connection
-                try self.pending_connects.put(connection_id, cmd.metadata);
 
                 cmd_span.debug("Connection attempt initiated", .{});
             },
@@ -593,7 +597,10 @@ pub const ClientThread = struct {
         // Connection Failed event is triggered immediatly before adding to pending_connects
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
+        // The connection_id is not available in this callback, so we cannot use it for the event.
         try self.pushEvent(.{ .connection_failed = .{ .endpoint = endpoint, .err = err } });
+        // We should probably add the connection_id to this callback
+        // so we can use it here.
     }
 
     fn internalConnectionClosedCallback(connection_id: ConnectionId, context: ?*anyopaque) !void {
@@ -816,13 +823,19 @@ pub const Client = struct {
         defer span.deinit();
         span.debug("Connect requested to endpoint: {}", .{endpoint});
 
-        const command = ClientThread.Command{ .connect = .{
-            .data = endpoint,
-            .metadata = .{
-                .callback = callback,
-                .context = context,
+        // Generate ConnectionId here
+        const connection_id = uuid.v4.new();
+
+        const command = ClientThread.Command{
+            .connect = .{
+                .data = endpoint,
+                .metadata = .{
+                    .callback = callback,
+                    .context = context,
+                },
+                .connection_id = connection_id, // Include ConnectionId in command
             },
-        } };
+        };
         try self.pushCommand(command);
     }
 
