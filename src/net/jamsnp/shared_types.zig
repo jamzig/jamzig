@@ -7,6 +7,107 @@ const trace = @import("../../tracing.zig").scoped(.network);
 pub const ConnectionId = uuid.Uuid;
 pub const StreamId = uuid.Uuid;
 
+const std = @import("std");
+
+/// Stream kinds defined in the JAM Simple Networking Protocol (JAMSNP-S)
+/// UP streams are Unique Persistent, CE streams are Common Ephemeral.
+/// UP stream kinds start from 0, CE stream kinds start from 128.
+pub const StreamKind = enum(u8) {
+    /// UP 0: Block announcement
+    /// Opened between validator neighbors or if one node is not a validator
+    /// Initiator sends Handshake, both exchange Announcements
+    block_announcement = 0,
+
+    // --- Common Ephemeral (CE) Streams start from 128 ---
+
+    /// CE 128: Block request.
+    /// Request a sequence of blocks, ascending or descending.
+    block_request = 128,
+
+    /// CE 129: State request.
+    /// Request a range of a block's posterior state trie.
+    state_request = 129,
+
+    // CE 130 is skipped/unassigned in the provided document.
+
+    /// CE 131: Safrole ticket distribution (Validator to Proxy).
+    /// First step in ticket distribution.
+    safrole_ticket_distribution_to_proxy = 131,
+
+    /// CE 132: Safrole ticket distribution (Proxy to All).
+    /// Second step in ticket distribution.
+    safrole_ticket_distribution_from_proxy = 132,
+
+    /// CE 133: Work-package submission.
+    /// Builder submits work-package to Guarantor.
+    work_package_submission = 133,
+
+    /// CE 134: Work-package sharing.
+    /// Guarantor shares work-package with other assigned Guarantors.
+    work_package_sharing = 134,
+
+    /// CE 135: Work-report distribution.
+    /// Guarantor distributes guaranteed work-report to Validators.
+    work_report_distribution = 135,
+
+    /// CE 136: Work-report request.
+    /// Node requests a work-report by hash.
+    work_report_request = 136,
+
+    /// CE 137: Shard distribution.
+    /// Assurer requests EC shards from Guarantor.
+    shard_distribution = 137,
+
+    /// CE 138: Audit shard request.
+    /// Auditor requests work-package bundle shard from Assurer.
+    audit_shard_request = 138,
+
+    /// CE 139: Segment shard request (no justification).
+    /// Guarantor requests import segment shards from Assurer.
+    segment_shard_request_no_justification = 139,
+
+    /// CE 140: Segment shard request (with justification).
+    /// Guarantor requests import segment shards with justification from Assurer.
+    segment_shard_request_with_justification = 140,
+
+    /// CE 141: Assurance distribution.
+    /// Assurer distributes availability assurance to potential block authors.
+    assurance_distribution = 141,
+
+    /// CE 142: Preimage announcement.
+    /// Non-validator node announces possession of a requested preimage.
+    preimage_announcement = 142,
+
+    /// CE 143: Preimage request.
+    /// Node requests a preimage by hash.
+    preimage_request = 143,
+
+    /// CE 144: Audit announcement.
+    /// Auditor announces intent to audit specific work-reports.
+    audit_announcement = 144,
+
+    /// CE 145: Judgment publication.
+    /// Auditor announces judgment (valid/invalid) for a work-report.
+    judgment_publication = 145,
+
+    // Add any future stream kinds here...
+
+    /// Helper function to determine if a stream kind is Unique Persistent (UP).
+    pub fn isUniquePersistent(self: StreamKind) bool {
+        return @intFromEnum(self) < 128;
+    }
+
+    /// Helper function to determine if a stream kind is Common Ephemeral (CE).
+    pub fn isCommonEphemeral(self: StreamKind) bool {
+        return @intFromEnum(self) >= 128;
+    }
+
+    /// Tries to convert a raw u8 value to a StreamKind. Returns error.invalid if the value is not defined.
+    pub fn fromRaw(raw_value: u8) !StreamKind {
+        return std.meta.intToEnum(StreamKind, raw_value);
+    }
+};
+
 // -- Client Callback Types
 pub const EventType = enum {
     ClientConnected,
