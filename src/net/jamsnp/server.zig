@@ -49,7 +49,7 @@ pub const JamSnpServer = struct {
         .on_new_conn = Connection(JamSnpServer).onServerConnectionCreated,
         .on_conn_closed = Connection(JamSnpServer).onConnectionClosed,
         .on_new_stream = Stream(JamSnpServer).onServerStreamCreated,
-        .on_read = Stream(JamSnpServer).onStreamRead,
+        .on_read = Stream(JamSnpServer).onStreamReadServer,
         .on_write = Stream(JamSnpServer).onStreamWrite,
         .on_close = Stream(JamSnpServer).onStreamClosed,
         // Optional callbacks

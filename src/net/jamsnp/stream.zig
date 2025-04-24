@@ -17,10 +17,13 @@ pub fn Stream(T: type) type {
         connection: *Connection(T),
         lsquic_stream: *lsquic.lsquic_stream_t, // Set in onStreamCreated
 
+        kind: ?shared.StreamKind = null, // Set in onStreamCreated
+
         // Internal state for reading/writing (managed by lsquic callbacks)
         want_write: bool = false,
         write_buffer: ?[]const u8 = null, // Buffer provided by user via command
         write_buffer_pos: usize = 0,
+        owned_write_buffer: bool = false, // Flag to indicate if we own the write buffer memory
 
         want_read: bool = false,
         read_buffer: ?[]u8 = null, // Buffer provided by user via command
@@ -54,7 +57,14 @@ pub fn Stream(T: type) type {
             defer span.deinit();
             span.debug("Destroying internal Stream struct for ID: {}", .{self.id});
 
-            // Buffers are managed by the caller
+            // Free owned write buffer if it exists
+            if (self.owned_write_buffer and self.write_buffer != null) {
+                const buffer_to_free = self.write_buffer.?;
+                self.connection.owner.allocator.free(buffer_to_free);
+                span.debug("Freed owned write buffer during stream destruction for ID: {}", .{self.id});
+            }
+
+            // Other buffers are managed by the caller
 
             self.* = undefined;
             alloc.destroy(self);
@@ -119,6 +129,33 @@ pub fn Stream(T: type) type {
 
             self.write_buffer = data;
             self.write_buffer_pos = 0;
+            self.owned_write_buffer = false;
+            // wantWrite should be set by the command handler
+        }
+
+        /// Prepare the stream to write the provided data, but duplicate the data so the stream owns it.
+        /// The duplicated data will be freed when the stream is done with it.
+        pub fn setOwnedWriteBuffer(self: *Stream(T), data: []const u8) !void {
+            const span = trace.span(.stream_set_owned_write_buffer);
+            defer span.deinit();
+            span.debug("Setting owned write buffer ({d} bytes) for internal stream ID: {}", .{ data.len, self.id });
+
+            if (data.len == 0) {
+                span.warn("Owned write buffer set with zero-length data for stream ID: {}. Ignoring.", .{self.id});
+                return error.ZeroDataLen;
+            }
+
+            if (self.write_buffer != null) {
+                span.err("Stream ID {} is already writing, cannot issue new write.", .{self.id});
+                return error.StreamAlreadyWriting;
+            }
+
+            // Duplicate the data
+            const duped_data = try self.connection.owner.allocator.dupe(u8, data);
+
+            self.write_buffer = duped_data;
+            self.write_buffer_pos = 0;
+            self.owned_write_buffer = true;
             // wantWrite should be set by the command handler
         }
 
@@ -213,6 +250,57 @@ pub fn Stream(T: type) type {
             }
 
             return ctx;
+        }
+
+        pub fn onStreamReadServer(
+            maybe_lsquic_stream: ?*lsquic.lsquic_stream_t,
+            maybe_stream_ctx: ?*lsquic.lsquic_stream_ctx_t,
+        ) callconv(.C) void {
+            const span = trace.span(.on_stream_read_server);
+            defer span.deinit();
+
+            const stream_ctx = maybe_stream_ctx orelse {
+                span.err("onStreamReadServer called with null context!", .{});
+                return;
+            };
+            const stream: *Stream(T) = @alignCast(@ptrCast(stream_ctx)); // This is the internal Stream
+            span.debug("onStreamReadServer triggered for internal stream ID: {}", .{stream.id});
+
+            // Check if a read buffer has been provided via command
+            if (stream.kind == null) {
+                var kind_buffer: u8 = undefined;
+                const read_size = lsquic.lsquic_stream_read(maybe_lsquic_stream, @ptrCast(&kind_buffer), 1);
+                if (read_size == 1) {
+                    stream.kind = shared.StreamKind.fromRaw(kind_buffer) catch {
+                        span.err("Invalid stream kind read for stream ID {}: {d}", .{ stream.id, kind_buffer });
+                        stream.close() catch |err| std.debug.panic("Failed to close stream: {s}", .{@errorName(err)});
+                        return;
+                    };
+                    span.debug("Stream kind set to: {}", .{stream.kind.?});
+                    // We got our kind, no need to read again, this is the responsibility of the
+                    // protocol which will get activated based on the kind
+                    stream.wantRead(false);
+
+                    shared.invokeCallback(&stream.connection.owner.callback_handlers, .ServerStreamCreated, .{
+                        .ServerStreamCreated = .{
+                            .connection = stream.connection.id,
+                            .stream = stream.id,
+                            .kind = stream.kind.?,
+                        },
+                    });
+                    return;
+                } else if (read_size == 0) {
+                    span.warn("No data read for stream ID {}. Stream kind not set. Try again", .{stream.id});
+                    return;
+                } else {
+                    span.err("Error reading stream kind for stream ID: {}", .{stream.id});
+                    stream.close() catch |err| std.debug.panic("Failed to close stream: {s}", .{@errorName(err)});
+                    return;
+                }
+            }
+
+            // When we have already a kind, we can call the onStreamRead
+            onStreamRead(maybe_lsquic_stream, maybe_stream_ctx);
         }
 
         pub fn onStreamRead(
@@ -393,8 +481,16 @@ pub fn Stream(T: type) type {
                     },
                 });
 
+                // Free the buffer if we own it
+                if (stream.owned_write_buffer and stream.write_buffer != null) {
+                    const buffer_to_free = stream.write_buffer.?;
+                    stream.connection.owner.allocator.free(buffer_to_free);
+                    span.debug("Freed owned write buffer for stream ID: {}", .{stream.id});
+                }
+
                 stream.write_buffer = null;
                 stream.write_buffer_pos = 0;
+                stream.owned_write_buffer = false;
                 span.trace("Disabling write interest for stream ID {}", .{stream.id});
                 stream.wantWrite(false);
 

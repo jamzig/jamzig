@@ -7,8 +7,6 @@ const trace = @import("../../tracing.zig").scoped(.network);
 pub const ConnectionId = uuid.Uuid;
 pub const StreamId = uuid.Uuid;
 
-const std = @import("std");
-
 /// Stream kinds defined in the JAM Simple Networking Protocol (JAMSNP-S)
 /// UP streams are Unique Persistent, CE streams are Common Ephemeral.
 /// UP stream kinds start from 0, CE stream kinds start from 128.
@@ -115,6 +113,7 @@ pub const EventType = enum {
     ConnectionFailed,
     ConnectionClosed,
     StreamCreated,
+    ServerStreamCreated,
     StreamClosed,
     DataReceived,
     DataEndOfStream,
@@ -130,6 +129,7 @@ pub const ConnectionEstablishedCallbackFn = *const fn (connection: ConnectionId,
 pub const ConnectionFailedCallbackFn = *const fn (connection: ConnectionId, endpoint: network.EndPoint, err: anyerror, context: ?*anyopaque) void;
 pub const ConnectionClosedCallbackFn = *const fn (connection: ConnectionId, context: ?*anyopaque) void;
 pub const StreamCreatedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
+pub const ServerStreamCreatedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, kind: StreamKind, context: ?*anyopaque) void;
 pub const StreamClosedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 pub const DataReceivedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, data: []const u8, context: ?*anyopaque) void;
 pub const DataEndOfStreamCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, data_read: []const u8, context: ?*anyopaque) void;
@@ -156,6 +156,7 @@ const EventArgs = union(EventType) {
     ConnectionFailed: struct { endpoint: network.EndPoint, err: anyerror },
     ConnectionClosed: struct { connection: ConnectionId },
     StreamCreated: struct { connection: ConnectionId, stream: StreamId },
+    ServerStreamCreated: struct { connection: ConnectionId, stream: StreamId, kind: StreamKind },
     StreamClosed: struct { connection: ConnectionId, stream: StreamId },
     DataReceived: struct { connection: ConnectionId, stream: StreamId, data: []const u8 },
     DataEndOfStream: struct { connection: ConnectionId, stream: StreamId, data_read: []const u8 },
@@ -190,6 +191,10 @@ pub fn invokeCallback(callback_handlers: *const CallbackHandlers, event_tag: Eve
             .StreamCreated => |ev_args| {
                 const callback: StreamCreatedCallbackFn = @ptrCast(@alignCast(callback_ptr));
                 callback(ev_args.connection, ev_args.stream, handler.context);
+            },
+            .ServerStreamCreated => |ev_args| {
+                const callback: ServerStreamCreatedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                callback(ev_args.connection, ev_args.stream, ev_args.kind, handler.context);
             },
             .StreamClosed => |ev_args| {
                 const callback: StreamClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));

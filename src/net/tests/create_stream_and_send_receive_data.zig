@@ -5,7 +5,9 @@ const net_client = @import("../client.zig");
 const network = @import("network");
 const common = @import("common.zig");
 const lsquic = @import("lsquic");
+
 const StreamHandle = @import("../stream_handle.zig").StreamHandle;
+const StreamKind = @import("../jamsnp/shared_types.zig").StreamKind;
 
 test "create stream and send data" {
     // @import("logging.zig").enableDetailedLsquicLogging();
@@ -54,7 +56,7 @@ test "create stream and send data" {
     std.log.info("Server received connection with ID: {}", .{server_connection_event.client_connected.connection_id});
 
     // --- Create a stream from client to server ---
-    try test_client.client.createStream(connected_event.connected.connection_id);
+    try test_client.client.createStream(connected_event.connected.connection_id, StreamKind.block_announcement);
 
     // Wait for the stream_created event on the client
     const client_stream_event = try test_client.expectEvent(timeout_ms, .stream_created);

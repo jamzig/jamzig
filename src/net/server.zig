@@ -12,6 +12,7 @@ const shared = @import("jamsnp/shared_types.zig");
 
 const ConnectionId = shared.ConnectionId;
 const StreamId = shared.StreamId;
+const StreamKind = shared.StreamKind;
 const JamSnpServer = @import("jamsnp/server.zig").JamSnpServer;
 const ServerConnection = @import("jamsnp/connection.zig").Connection(JamSnpServer);
 const ServerStream = @import("jamsnp/stream.zig").Stream(JamSnpServer);
@@ -229,7 +230,7 @@ pub const ServerThread = struct {
         // Pass 'self' as context so callbacks can access the thread state (event_queue)
         self.server.setCallback(.ClientConnected, internalClientConnectedCallback, self);
         self.server.setCallback(.ConnectionEstablished, internalClientDisconnectedCallback, self);
-        self.server.setCallback(.StreamCreated, internalStreamCreatedByClientCallback, self);
+        self.server.setCallback(.ServerStreamCreated, internalServerStreamCreatedCallback, self);
         self.server.setCallback(.StreamClosed, internalStreamClosedByClientCallback, self);
         self.server.setCallback(.DataReceived, internalDataReceivedCallback, self);
         self.server.setCallback(.DataWriteCompleted, internalDataWriteCompletedCallback, self); // Server might need this?
@@ -562,13 +563,13 @@ pub const ServerThread = struct {
         _ = self.event_queue.push(event, .instant);
     }
 
-    fn internalStreamCreatedByClientCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) void {
+    fn internalServerStreamCreatedCallback(connection_id: ConnectionId, stream_id: StreamId, kind: StreamKind, context: ?*anyopaque) void {
         const span = trace.span(.stream_created_callback);
         defer span.deinit();
 
-        span.debug("Stream created by client: {d} on connection {d}", .{ stream_id, connection_id });
+        span.debug("Stream created by client: {d} on connection {d}. Kind {}", .{ stream_id, connection_id, kind });
         const self: *ServerThread = @ptrCast(@alignCast(context.?));
-        const event = Server.Event{ .stream_created_by_client = .{ .connection_id = connection_id, .stream_id = stream_id } };
+        const event = Server.Event{ .stream_created_by_client = .{ .connection_id = connection_id, .stream_id = stream_id, .kind = kind } };
         _ = self.event_queue.push(event, .instant);
     }
 
@@ -839,6 +840,7 @@ pub const Server = struct {
         stream_created_by_client: struct {
             connection_id: ConnectionId,
             stream_id: StreamId,
+            kind: StreamKind,
         },
         stream_created_by_server: struct {
             connection_id: ConnectionId,

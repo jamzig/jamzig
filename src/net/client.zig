@@ -15,6 +15,7 @@ const network = @import("network"); // Added for EndPoint
 const shared = @import("jamsnp/shared_types.zig");
 const ConnectionId = shared.ConnectionId;
 const StreamId = shared.StreamId;
+const StreamKind = shared.StreamKind;
 const JamSnpClient = jamsnp_client.JamSnpClient;
 const StreamHandle = @import("stream_handle.zig").StreamHandle;
 
@@ -108,7 +109,7 @@ pub const ClientThread = struct {
 
     // Keep track of pending command metadata to invoke callbacks upon completion event
     pending_connects: std.AutoHashMap(ConnectionId, CommandMetadata(anyerror!ConnectionId)),
-    pending_streams: std.fifo.LinearFifo(CommandMetadata(anyerror!StreamId), .Dynamic),
+    pending_streams: std.fifo.LinearFifo(Command.CreateStream, .Dynamic),
 
     pub const Command = union(enum) {
         pub const Connect = struct {
@@ -130,6 +131,9 @@ pub const ClientThread = struct {
         pub const CreateStream = struct {
             const Data = struct {
                 connection_id: ConnectionId,
+                // The initial byte sent to the server specifies the type of
+                // stream. This action initiates the stream on the server.
+                kind: StreamKind,
             };
             data: Data,
             metadata: CommandMetadata(anyerror!StreamId), // Callback returns StreamId
@@ -220,7 +224,7 @@ pub const ClientThread = struct {
         errdefer thread.event_queue.destroy(alloc);
 
         thread.pending_connects = std.AutoHashMap(ConnectionId, CommandMetadata(anyerror!ConnectionId)).init(alloc);
-        thread.pending_streams = std.fifo.LinearFifo(CommandMetadata(anyerror!StreamId), .Dynamic).init(alloc);
+        thread.pending_streams = std.fifo.LinearFifo(Command.CreateStream, .Dynamic).init(alloc);
         // Initialize other pending command maps here if needed
 
         thread.alloc = alloc;
@@ -378,7 +382,12 @@ pub const ClientThread = struct {
                 self.client.connect(cmd.data.endpoint, cmd.data.connection_id) catch |err| {
                     cmd_span.err("Connection attempt failed immediately: {}", .{err});
                     // If connect() itself fails immediately, invoke callback with error
-                    try self.pushEvent(.{ .connection_failed = .{ .endpoint = cmd.data.endpoint, .connection_id = cmd.data.connection_id, .err = err } });
+                    try self.pushEvent(.{ .connection_failed = .{
+                        .endpoint = cmd.data.endpoint,
+                        .connection_id = cmd.data.connection_id,
+                        .err = err,
+                        .metadata = cmd.metadata,
+                    } });
                     return error.ConnectFailed;
                 };
 
@@ -411,7 +420,7 @@ pub const ClientThread = struct {
 
                     // Push the pending streams to the fifo, this has to be now, as createStream
                     // calls lsquic which if there is enough capacity will call the callback immediately
-                    try self.pending_streams.writeItem(cmd.metadata);
+                    try self.pending_streams.writeItem(cmd);
 
                     // Create the stream, this will call lsquic to create it, we need to
                     // wait until the StreamCreated event to know the stream ID.
@@ -582,13 +591,12 @@ pub const ClientThread = struct {
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
         // Check if there was a pending connect command for this endpoint
         if (self.pending_connects.fetchRemove(connection_id)) |metadata| {
+            try self.pushEvent(.{ .connected = .{ .connection_id = connection_id, .endpoint = endpoint, .metadata = metadata.value } });
             span.debug("Found pending connect command, invoking callback", .{});
-            metadata.value.callWithResult(connection_id); // Call command callback with success (ConnectionId)
         } else {
             // This can happen if connection was established without an explicit API call? Or a race?
-            span.warn("ConnectionEstablished event for endpoint {} with no pending connect command", .{endpoint});
+            std.debug.panic("No pending connect on: {}", .{connection_id});
         }
-        try self.pushEvent(.{ .connected = .{ .connection_id = connection_id, .endpoint = endpoint } });
     }
 
     fn internalConnectionFailedCallback(connection_id: ConnectionId, endpoint: network.EndPoint, err: anyerror, context: ?*anyopaque) !void {
@@ -600,7 +608,11 @@ pub const ClientThread = struct {
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
         // The connection_id is not available in this callback, so we cannot use it for the event.
-        try self.pushEvent(.{ .connection_failed = .{ .endpoint = endpoint, .connection_id = connection_id, .err = err } });
+        if (self.pending_connects.fetchRemove(connection_id)) |metadata| {
+            try self.pushEvent(.{ .connection_failed = .{ .endpoint = endpoint, .connection_id = connection_id, .err = err, .metadata = metadata.value } });
+        } else {
+            std.debug.panic("No pending connect on: {}", .{connection_id});
+        }
         // We should probably add the connection_id to this callback
         // so we can use it here.
     }
@@ -630,15 +642,26 @@ pub const ClientThread = struct {
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
 
         // FIXME: handle the null case in self.client.Stream.onNewStream
-        if (self.pending_streams.readItem()) |metadata| {
-            span.debug("Found pending stream command, invoking callback", .{});
-            metadata.callWithResult(stream_id); // Call command callback with success (StreamId)
+        if (self.pending_streams.readItem()) |cmd| {
+            // Now write byte to our server to indicate the kind of stream we want to initialize
+
+            if (self.client.streams.get(stream_id)) |stream| {
+                // This sets the buffer for the next onWrite callback
+                try stream.setOwnedWriteBuffer(std.mem.asBytes(&cmd.data.kind));
+                // Trigger the write callback
+                stream.wantWrite(true);
+                span.debug("Data queued successfully", .{});
+            }
+
+            try self.pushEvent(.{ .stream_created = .{
+                .connection_id = connection_id,
+                .stream_id = stream_id,
+                .metadata = cmd.metadata,
+            } });
         } else {
             // This should never happen.
             span.warn("StreamCreated event for connection {} with no pending stream command", .{connection_id});
         }
-
-        try self.pushEvent(.{ .stream_created = .{ .connection_id = connection_id, .stream_id = stream_id } });
     }
 
     fn internalStreamClosedCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) !void {
@@ -732,11 +755,13 @@ pub const Client = struct {
         connected: struct {
             connection_id: ConnectionId,
             endpoint: network.EndPoint,
+            metadata: CommandMetadata(anyerror!ConnectionId),
         },
         connection_failed: struct {
             endpoint: network.EndPoint,
             connection_id: ConnectionId,
             err: anyerror,
+            metadata: CommandMetadata(anyerror!ConnectionId),
         },
         disconnected: struct {
             connection_id: ConnectionId,
@@ -744,6 +769,7 @@ pub const Client = struct {
         stream_created: struct { // Includes streams created by peer? Server only has stream_created_by_client
             connection_id: ConnectionId,
             stream_id: StreamId,
+            metadata: CommandMetadata(anyerror!StreamId),
         },
         stream_closed: struct {
             connection_id: ConnectionId,
@@ -868,13 +894,14 @@ pub const Client = struct {
     }
 
     // CreateStream assumes JamSnpClient/Connection implements it
-    pub fn createStream(self: *Client, connection_id: ConnectionId) !void {
-        return self.createStreamWithCallback(connection_id, null, null);
+    pub fn createStream(self: *Client, connection_id: ConnectionId, kind: StreamKind) !void {
+        return self.createStreamWithCallback(connection_id, kind, null, null);
     }
 
     pub fn createStreamWithCallback(
         self: *Client,
         connection_id: ConnectionId,
+        kind: StreamKind,
         callback: ?CommandCallback(anyerror!StreamId), // Callback returns StreamId
         context: ?*anyopaque,
     ) !void {
@@ -885,6 +912,7 @@ pub const Client = struct {
         const command = ClientThread.Command{ .create_stream = .{
             .data = .{
                 .connection_id = connection_id,
+                .kind = kind,
             },
             .metadata = .{
                 .callback = callback,
