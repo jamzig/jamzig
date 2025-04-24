@@ -106,7 +106,7 @@ pub const ClientThread = struct {
     event_queue: *Mailbox(Client.Event, 64), // Queue for events pushed by internal callbacks
 
     // Keep track of pending command metadata to invoke callbacks upon completion event
-    pending_connects: std.AutoHashMap(network.EndPoint, CommandMetadata(anyerror!ConnectionId)),
+    pending_connects: std.AutoHashMap(ConnectionId, CommandMetadata(anyerror!ConnectionId)),
     // TODO: Add maps for other commands needing async callbacks if necessary (e.g., CreateStream)
     // pending_stream_creates: std.AutoHashMap(ConnectionId, CommandMetadata(anyerror!StreamId)), // Example
 
@@ -194,9 +194,6 @@ pub const ClientThread = struct {
         stream_shutdown: StreamShutdown,
     };
 
-    // CommandResult is less relevant now as results come via events/callbacks
-    // pub const CommandResult = ...
-
     /// Initializes the ClientThread with an existing JamSnpClient instance.
     /// Called by the ClientThreadBuilder.
     pub fn init(alloc: std.mem.Allocator, client: *JamSnpClient) !*ClientThread {
@@ -218,7 +215,7 @@ pub const ClientThread = struct {
         thread.event_queue = try Mailbox(Client.Event, 64).create(alloc);
         errdefer thread.event_queue.destroy(alloc);
 
-        thread.pending_connects = std.AutoHashMap(network.EndPoint, CommandMetadata(anyerror!ConnectionId)).init(alloc);
+        thread.pending_connects = std.AutoHashMap(ConnectionId, CommandMetadata(anyerror!ConnectionId)).init(alloc);
         // Initialize other pending command maps here if needed
 
         thread.alloc = alloc;
@@ -369,11 +366,16 @@ pub const ClientThread = struct {
                 cmd_span.debug("Connecting to endpoint: {}", .{cmd.data});
 
                 // The actual result (success or failure) comes via ConnectionEstablished/ConnectionFailed events
-                _ = self.client.connect(cmd.data) catch |err| {
+                const connection_id = self.client.connect(cmd.data) catch |err| {
                     cmd_span.err("Connection attempt failed immediately: {}", .{err});
                     // If connect() itself fails immediately, invoke callback with error
                     try self.pushEvent(.{ .connection_failed = .{ .endpoint = cmd.data, .err = err } });
+                    return error.ConnectFailed;
                 };
+
+                // Store this pending connection
+                try self.pending_connects.put(connection_id, cmd.metadata);
+
                 cmd_span.debug("Connection attempt initiated", .{});
             },
             .disconnect => |cmd| {
@@ -575,7 +577,7 @@ pub const ClientThread = struct {
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
         // Check if there was a pending connect command for this endpoint
-        if (self.pending_connects.fetchRemove(endpoint)) |metadata| {
+        if (self.pending_connects.fetchRemove(connection_id)) |metadata| {
             span.debug("Found pending connect command, invoking callback", .{});
             metadata.value.callWithResult(connection_id); // Call command callback with success (ConnectionId)
         } else {
@@ -590,14 +592,9 @@ pub const ClientThread = struct {
         defer span.deinit();
         span.err("Connection failed: endpoint={} error={}", .{ endpoint, err });
 
+        // Connection Failed event is triggered immediatly before adding to pending_connects
+
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
-        // Check if there was a pending connect command for this endpoint
-        if (self.pending_connects.fetchRemove(endpoint)) |metadata| {
-            span.debug("Found pending connect command, invoking callback with error", .{});
-            metadata.value.callWithResult(err); // Call command callback with error
-        } else {
-            span.warn("ConnectionFailed event for endpoint {} with no pending connect command", .{endpoint});
-        }
         try self.pushEvent(.{ .connection_failed = .{ .endpoint = endpoint, .err = err } });
     }
 
@@ -607,6 +604,14 @@ pub const ClientThread = struct {
         span.debug("Connection closed: ID={}", .{connection_id});
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
+
+        // If we where trying to establish a connection but it closed we need to remove
+        // the pending connection
+        if (self.pending_connects.fetchRemove(connection_id)) |metadata| {
+            span.debug("Found pending connect command, invoking callback", .{});
+            metadata.value.callWithResult(connection_id); // Call command callback with success (ConnectionId)
+        }
+
         try self.pushEvent(.{ .disconnected = .{ .connection_id = connection_id } });
     }
 
