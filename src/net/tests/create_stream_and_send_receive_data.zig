@@ -11,6 +11,7 @@ const StreamKind = @import("../jamsnp/shared_types.zig").StreamKind;
 const shared = @import("../jamsnp/shared_types.zig");
 
 test "create stream and send message" {
+    // The test allocator is thread safe by default
     const allocator = std.testing.allocator;
     const timeout_ms: u64 = 1_000;
 
