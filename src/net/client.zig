@@ -155,6 +155,15 @@ pub const ClientThread = struct {
             data: Data,
             metadata: CommandMetadata(anyerror!void),
         };
+        pub const SendMessage = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+                stream_id: StreamId,
+                message: []const u8, // Caller owns
+            };
+            data: Data,
+            metadata: CommandMetadata(anyerror!void),
+        };
         pub const StreamWantRead = struct {
             const Data = struct {
                 connection_id: ConnectionId,
@@ -196,6 +205,7 @@ pub const ClientThread = struct {
         create_stream: CreateStream,
         destroy_stream: DestroyStream,
         send_data: SendData,
+        send_message: SendMessage,
         stream_want_read: StreamWantRead,
         stream_want_write: StreamWantWrite,
         stream_flush: StreamFlush,
@@ -478,6 +488,28 @@ pub const ClientThread = struct {
                     cmd.metadata.callWithResult(error.StreamNotFound);
                 }
             },
+            .send_message => |cmd| {
+                const cmd_span = span.child(.send_message);
+                defer cmd_span.deinit();
+                cmd_span.debug("Sending message on stream {} ({} bytes)", .{ cmd.data.stream_id, cmd.data.message.len });
+                cmd_span.trace("Message first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (cmd.data.message.len > 16) cmd.data.message[0..16] else cmd.data.message)});
+
+                if (self.client.streams.get(cmd.data.stream_id)) |stream| {
+                    // This creates a new buffer with length prefix and message data
+                    stream.setMessageBuffer(cmd.data.message) catch |err| {
+                        cmd_span.err("Failed to set message buffer for stream {}: {}", .{ cmd.data.stream_id, err });
+                        cmd.metadata.callWithResult(err);
+                        return; // Don't proceed if buffer setting fails
+                    };
+                    // Trigger the write callback
+                    stream.wantWrite(true);
+                    cmd_span.debug("Message queued successfully", .{});
+                    // Command success means message was buffered. Actual send success
+                    // comes via DataWriteCompleted/DataWriteError events.
+                } else {
+                    cmd_span.warn("SendMessage command for unknown stream ID: {}", .{cmd.data.stream_id});
+                }
+            },
             .stream_want_read => |cmd| {
                 const cmd_span = span.child(.stream_want_read);
                 defer cmd_span.deinit();
@@ -568,6 +600,7 @@ pub const ClientThread = struct {
         self.client.setCallback(.DataWriteCompleted, internalDataWriteCompletedCallback, self);
         self.client.setCallback(.DataWriteProgress, internalDataWriteProgressCallback, self);
         self.client.setCallback(.DataWriteError, internalDataWriteErrorCallback, self);
+        self.client.setCallback(.MessageReceived, internalMessageReceivedCallback, self);
     }
 
     fn pushEvent(self: *ClientThread, event: Client.Event) !void {
@@ -745,6 +778,21 @@ pub const ClientThread = struct {
         const err = error.StreamWriteError; // Placeholder
         try self.pushEvent(.{ .data_write_error = .{ .connection_id = connection_id, .stream_id = stream_id, .err = err, .raw_error_code = error_code } });
     }
+
+    fn internalMessageReceivedCallback(connection_id: ConnectionId, stream_id: StreamId, message: []const u8, context: ?*anyopaque) !void {
+        const span = trace.span(.message_received);
+        defer span.deinit();
+        span.debug("Message received: connection={} stream={} size={d} bytes", .{ connection_id, stream_id, message.len });
+        span.trace("Message first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (message.len > 16) message[0..16] else message)});
+
+        const self: *ClientThread = @ptrCast(@alignCast(context.?));
+
+        // We need to make a copy of the message since we take ownership in the event
+        const message_copy = try self.alloc.dupe(u8, message);
+        errdefer self.alloc.free(message_copy);
+
+        try self.pushEvent(.{ .message_received = .{ .connection_id = connection_id, .stream_id = stream_id, .message = message_copy } });
+    }
 };
 
 /// Client API for the JamSnpClient
@@ -791,6 +839,11 @@ pub const Client = struct {
             bytes_written: usize,
         },
         // data_write_progress: struct { ... }, // Optional
+        message_received: struct {
+            connection_id: ConnectionId,
+            stream_id: StreamId,
+            message: []const u8, // Complete message, owned by event
+        },
 
         // -- Error/Status Events --
         data_read_error: struct {
@@ -823,6 +876,7 @@ pub const Client = struct {
             switch (self) {
                 .data_received => |ev| allocator.free(ev.data),
                 .data_end_of_stream => |ev| allocator.free(ev.final_data),
+                .message_received => |ev| allocator.free(ev.message),
                 // Free message if allocated
                 // .@"error" => |ev| if (ev.message_is_allocated) allocator.free(ev.message),
                 else => {},

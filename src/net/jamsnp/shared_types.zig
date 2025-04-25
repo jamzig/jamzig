@@ -4,6 +4,9 @@ const network = @import("network");
 
 const trace = @import("../../tracing.zig").scoped(.network);
 
+/// Maximum size of a message that can be received (1MB)
+pub const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
 pub const ConnectionId = uuid.Uuid;
 pub const StreamId = uuid.Uuid;
 
@@ -108,7 +111,7 @@ pub const StreamKind = enum(u8) {
 
 // -- Client Callback Types
 pub const EventType = enum {
-    ClientConnected,
+        ClientConnected,
     ConnectionEstablished,
     ConnectionFailed,
     ConnectionClosed,
@@ -122,6 +125,8 @@ pub const EventType = enum {
     DataWriteProgress,
     DataWriteCompleted,
     DataWriteError,
+    /// A complete message has been received (length-prefixed)
+    MessageReceived,
 };
 
 pub const ClientConnectedCallbackFn = *const fn (connection: ConnectionId, endpoint: network.EndPoint, context: ?*anyopaque) void;
@@ -137,6 +142,8 @@ pub const DataErrorCallbackFn = *const fn (connection: ConnectionId, stream: Str
 pub const DataWouldBlockCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 pub const DataWriteProgressCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize, context: ?*anyopaque) void;
 pub const DataWriteCompletedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, total_bytes_written: usize, context: ?*anyopaque) void;
+/// Complete message received callback with the message data (length prefix already removed)
+pub const MessageReceivedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, message: []const u8, context: ?*anyopaque) void;
 
 // -- Common Callback Handler
 pub const CallbackHandler = struct {
@@ -165,6 +172,7 @@ const EventArgs = union(EventType) {
     DataWriteProgress: struct { connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize },
     DataWriteCompleted: struct { connection: ConnectionId, stream: StreamId, total_bytes_written: usize },
     DataWriteError: struct { connection: ConnectionId, stream: StreamId, error_code: i32 },
+    MessageReceived: struct { connection: ConnectionId, stream: StreamId, message: []const u8 },
 };
 
 pub fn invokeCallback(callback_handlers: *const CallbackHandlers, event_tag: EventType, args: EventArgs) void {
@@ -225,8 +233,12 @@ pub fn invokeCallback(callback_handlers: *const CallbackHandlers, event_tag: Eve
                 callback(ev_args.connection, ev_args.stream, ev_args.bytes_written, ev_args.total_size, handler.context);
             },
             .DataEndOfStream => |ev_args| {
-                const callback: DataEndOfStreamCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                                const callback: DataEndOfStreamCallbackFn = @ptrCast(@alignCast(callback_ptr));
                 callback(ev_args.connection, ev_args.stream, ev_args.data_read, handler.context);
+            },
+            .MessageReceived => |ev_args| {
+                const callback: MessageReceivedCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                callback(ev_args.connection, ev_args.stream, ev_args.message, handler.context);
             },
             .ConnectionFailed => |ev_args| {
                 // This seems to be server-specific, not used in client callbacks

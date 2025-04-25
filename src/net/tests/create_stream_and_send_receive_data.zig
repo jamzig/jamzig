@@ -8,18 +8,14 @@ const lsquic = @import("lsquic");
 
 const StreamHandle = @import("../stream_handle.zig").StreamHandle;
 const StreamKind = @import("../jamsnp/shared_types.zig").StreamKind;
+const shared = @import("../jamsnp/shared_types.zig");
 
-test "create stream and send data" {
-    // @import("logging.zig").enableDetailedLsquicLogging();
-
+test "create stream and send message" {
     const allocator = std.testing.allocator;
     const timeout_ms: u64 = 5_000;
 
     // -- Build our server
-
-    // Create and start server
     var test_server = try common.createTestServer(allocator);
-    // test_server.enableDetailedLogging();
     defer test_server.shutdownJoinAndDeinit();
 
     // Start listening on a port
@@ -38,10 +34,7 @@ test "create stream and send data" {
     std.log.info("Server is listening on {}", .{server_endpoint});
 
     // -- Connect with our client
-
-    // Create and start client
     var test_client = try common.createTestClient(allocator);
-    // test_client.enableDetailedLogging();
     defer test_client.shutdownJoinAndDeinit();
 
     // Connect client to server
@@ -63,26 +56,47 @@ test "create stream and send data" {
     const stream_id = client_stream_event.stream_created.stream_id;
     std.log.info("Client created stream with ID: {}", .{stream_id});
 
-    // QUIC server will create the stream on the first STREAM FRAME with Offset 0 received
-    // Since the client will send 1 byte indicating the stream kind this will trigger a stream_created_by client
+    // Wait for the stream creation event on the server side
     const server_stream_event = try test_server.expectEvent(timeout_ms, .stream_created_by_client);
     std.log.info("Server observed stream creation with ID: {}", .{server_stream_event.stream_created_by_client.stream_id});
 
-    // --- Send data over the stream ---
-    var stream_handle = try test_client.buildStreamHandle(
+    // --- Send message over the stream ---
+    var client_stream_handle = try test_client.buildStreamHandle(
         connected_event.connected.connection_id,
         stream_id,
     );
 
-    const payload = "Hello, JamSnp!";
-    try stream_handle.sendData(payload);
+    // Create a server stream handle for responses
+    var server_stream_handle = net_server.Server.StreamHandle{
+        .thread = test_server.thread,
+        .stream_id = server_stream_event.stream_created_by_client.stream_id,
+        .connection_id = server_stream_event.stream_created_by_client.connection_id,
+    };
 
-    // Wait for the server to receive the data
-    const data_event = try test_server.expectEvent(timeout_ms, .data_received);
-    try testing.expectEqual(@as(usize, payload.len), data_event.data_received.data.len);
-    try testing.expect(std.mem.eql(u8, payload, data_event.data_received.data));
+    // Create a test message
+    const message_content = "This is a test message with length prefix.";
+    try client_stream_handle.sendMessage(message_content);
 
-    std.log.info("Data transfer verified successfully.", .{});
+    // Wait for the server to receive the message
+    const message_event = try test_server.expectEvent(timeout_ms, .message_received);
 
-    // Defer will shutdown the server and client and free resources
+    // Verify message contents
+    try testing.expectEqual(@as(usize, message_content.len), message_event.message_received.message.len);
+    try testing.expect(std.mem.eql(u8, message_content, message_event.message_received.message));
+    std.log.info("Client->Server message verified: '{s}'", .{message_content});
+
+    // --- Send a response message from server to client ---
+    const response_content = "This is a response message from server to client.";
+    try server_stream_handle.sendMessage(response_content);
+
+    // Wait for the client to receive the response
+    const response_event = try test_client.expectEvent(timeout_ms, .message_received);
+
+    // Verify response contents
+    try testing.expectEqual(@as(usize, response_content.len), response_event.message_received.message.len);
+    try testing.expect(std.mem.eql(u8, response_content, response_event.message_received.message));
+    std.log.info("Server->Client message verified: '{s}'", .{response_content});
+
+    // Test complete - success!
+    std.log.info("Message-based communication verified successfully", .{});
 }

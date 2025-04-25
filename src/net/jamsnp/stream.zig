@@ -29,6 +29,18 @@ pub fn Stream(T: type) type {
         read_buffer: ?[]u8 = null, // Buffer provided by user via command
         read_buffer_pos: usize = 0,
 
+        // Message reading state
+        message_reading_state: enum {
+            idle, // Not currently reading a message
+            reading_length, // Reading the 4-byte length prefix
+            reading_body, // Reading the message body
+        } = .idle,
+        message_length_buffer: [4]u8 = undefined, // Buffer to store length prefix
+        message_length_read: usize = 0, // Bytes read into length buffer
+        message_length: ?u32 = null, // Parsed message length
+        message_buffer: ?[]u8 = null, // Allocated buffer for message
+        message_read: usize = 0, // Bytes read into message buffer
+
         fn create(alloc: std.mem.Allocator, connection: *Connection(T), lsquic_stream: *lsquic.lsquic_stream_t) !*Stream(T) {
             const span = trace.span(.stream_create_internal);
             defer span.deinit();
@@ -62,6 +74,12 @@ pub fn Stream(T: type) type {
                 const buffer_to_free = self.write_buffer.?;
                 self.connection.owner.allocator.free(buffer_to_free);
                 span.debug("Freed owned write buffer during stream destruction for ID: {}", .{self.id});
+            }
+
+            // Free message buffer if allocated
+            if (self.message_buffer) |buffer| {
+                self.connection.owner.allocator.free(buffer);
+                span.debug("Freed message buffer during stream destruction for ID: {}", .{self.id});
             }
 
             // Other buffers are managed by the caller
@@ -131,6 +149,37 @@ pub fn Stream(T: type) type {
             self.write_buffer_pos = 0;
             self.owned_write_buffer = false;
             // wantWrite should be set by the command handler
+        }
+
+        /// Prepare the stream to write a message with a length prefix.
+        /// Will allocate a new buffer containing the length prefix + message data.
+        pub fn setMessageBuffer(self: *Stream(T), message: []const u8) !void {
+            const span = trace.span(.stream_set_message_buffer);
+            defer span.deinit();
+            span.debug("Setting message buffer ({d} bytes) for internal stream ID: {}", .{ message.len, self.id });
+
+            if (self.write_buffer != null) {
+                span.err("Stream ID {} is already writing, cannot issue new write.", .{self.id});
+                return error.StreamAlreadyWriting;
+            }
+
+            // Allocate buffer for length prefix (4 bytes) + message
+            const total_size = 4 + message.len;
+            var buffer = try self.connection.owner.allocator.alloc(u8, total_size);
+            errdefer self.connection.owner.allocator.free(buffer);
+
+            // Write length prefix as little-endian u32
+            std.mem.writeInt(u32, buffer[0..4], @intCast(message.len), .little);
+
+            // Copy message data
+            @memcpy(buffer[4..], message);
+
+            // Set the buffer
+            self.write_buffer = buffer;
+            self.write_buffer_pos = 0;
+            self.owned_write_buffer = true; // We own this buffer and need to free it
+
+            span.debug("Message buffer set: {d} bytes length prefix + {d} bytes data", .{ 4, message.len });
         }
 
         /// Prepare the stream to write the provided data, but duplicate the data so the stream owns it.
@@ -279,7 +328,7 @@ pub fn Stream(T: type) type {
                     span.debug("Stream kind set to: {}", .{stream.kind.?});
                     // We got our kind, no need to read again, this is the responsibility of the
                     // protocol which will get activated based on the kind
-                    stream.wantRead(false);
+                    stream.wantRead(true); // FIXME: protocol should set this
 
                     shared.invokeCallback(&stream.connection.owner.callback_handlers, .ServerStreamCreated, .{
                         .ServerStreamCreated = .{
@@ -317,13 +366,55 @@ pub fn Stream(T: type) type {
             const stream: *Stream(T) = @alignCast(@ptrCast(stream_ctx)); // This is the internal Stream
             span.debug("onStreamRead triggered for internal stream ID: {}", .{stream.id});
 
-            // Check if a read buffer has been provided via command
+            // Handle message-based reading if no explicit read buffer was provided
             if (stream.read_buffer == null) {
-                span.warn("onStreamRead called for stream ID {} but no read buffer set via command. Disabling wantRead.", .{stream.id});
-                stream.wantRead(false);
-                return;
+                processMessageRead(maybe_lsquic_stream, stream) catch |err| {
+                    span.err("Error in message read processing for stream ID {}: {s}", .{ stream.id, @errorName(err) });
+                    // Handle specific errors and potentially notify via callback
+                    switch (err) {
+                        error.MessageTooLarge => {
+                            span.err("Message too large on stream ID {}, max allowed: {d}", .{ stream.id, shared.MAX_MESSAGE_SIZE });
+                            // We could add a specific error callback for this
+                            shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataReadError, .{
+                                .DataReadError = .{
+                                    .connection = stream.connection.id,
+                                    .stream = stream.id,
+                                    .error_code = 9999, // Custom error code for message too large
+                                },
+                            });
+                            // Close the stream - protocol violation
+                            stream.close() catch |close_err| {
+                                span.err("Failed to close stream after message size violation: {s}", .{@errorName(close_err)});
+                            };
+                        },
+                        error.OutOfMemory => {
+                            span.err("Out of memory when allocating for message on stream ID {}", .{stream.id});
+                            shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataReadError, .{
+                                .DataReadError = .{
+                                    .connection = stream.connection.id,
+                                    .stream = stream.id,
+                                    .error_code = 9998, // Custom error code for OOM
+                                },
+                            });
+                        },
+                        else => {
+                            // Generic error handling
+                            shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataReadError, .{
+                                .DataReadError = .{
+                                    .connection = stream.connection.id,
+                                    .stream = stream.id,
+                                    .error_code = 9997, // Custom error code for other errors
+                                },
+                            });
+                        },
+                    }
+                    // Reset message state after an error
+                    resetMessageState(stream);
+                };
+                return; // Message processing handled the read
             }
 
+            // Original raw data reading logic when a buffer is explicitly provided
             const buffer_available = stream.read_buffer.?[stream.read_buffer_pos..];
             if (buffer_available.len == 0) {
                 span.warn("onStreamRead called for stream ID {} but read buffer is full.", .{stream.id});
@@ -393,6 +484,229 @@ pub fn Stream(T: type) type {
                     stream.read_buffer_pos = 0;
                     stream.wantRead(false);
                     // TODO: Signal buffer full? Or rely on DataReceived?
+                }
+            }
+        }
+
+        /// Helper function to reset message reading state
+        fn resetMessageState(stream: *Stream(T)) void {
+            const span = trace.span(.reset_message_state);
+            defer span.deinit();
+
+            // Free any allocated message buffer
+            if (stream.message_buffer) |buffer| {
+                stream.connection.owner.allocator.free(buffer);
+                stream.message_buffer = null;
+            }
+
+            // Reset message state
+            stream.message_reading_state = .idle;
+            stream.message_length_read = 0;
+            stream.message_length = null;
+            stream.message_read = 0;
+
+            span.debug("Reset message state for stream ID: {}", .{stream.id});
+        }
+
+        /// Process reading message-based data
+        fn processMessageRead(maybe_lsquic_stream: ?*lsquic.lsquic_stream_t, stream: *Stream(T)) !void {
+            const span = trace.span(.process_message_read);
+            defer span.deinit();
+
+            const lsquic_stream = maybe_lsquic_stream orelse {
+                span.err("processMessageRead called with null lsquic_stream", .{});
+                return error.NullLsquicStream;
+            };
+
+            // Initialize message reading if idle
+            if (stream.message_reading_state == .idle) {
+                span.debug("Starting message reading on stream ID: {}", .{stream.id});
+                stream.message_reading_state = .reading_length;
+                stream.message_length_read = 0;
+            }
+
+            // Step 1: Read message length (4 bytes)
+            if (stream.message_reading_state == .reading_length) {
+                const length_remaining = 4 - stream.message_length_read;
+                const read_result = lsquic.lsquic_stream_read(lsquic_stream, &stream.message_length_buffer[stream.message_length_read], length_remaining);
+
+                if (read_result == 0) {
+                    // End of stream during length reading
+                    span.debug("End of stream reached while reading message length on stream ID: {}", .{stream.id});
+                    shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataEndOfStream, .{
+                        .DataEndOfStream = .{
+                            .connection = stream.connection.id,
+                            .stream = stream.id,
+                            .data_read = &[0]u8{}, // Empty slice
+                        },
+                    });
+                    stream.wantRead(false);
+                    return error.EndOfStream;
+                } else if (read_result < 0) {
+                    const err = std.posix.errno(read_result);
+                    if (err == std.posix.E.AGAIN) {
+                        // Would block, try again later
+                        span.debug("Read would block while reading message length on stream ID: {}", .{stream.id});
+                        shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWouldBlock, .{
+                            .DataWouldBlock = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                            },
+                        });
+                        return; // Keep wantRead true
+                    } else {
+                        // Real error
+                        span.err("Error reading message length from stream ID {}: {s}", .{ stream.id, @tagName(err) });
+                        shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataReadError, .{
+                            .DataReadError = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                                .error_code = @intFromEnum(err),
+                            },
+                        });
+                        stream.wantRead(false);
+                        return error.StreamReadError;
+                    }
+                }
+
+                // Successfully read some bytes of the length prefix
+                const bytes_read: usize = @intCast(read_result);
+                stream.message_length_read += bytes_read;
+
+                span.debug("Read {d}/{d} bytes of message length on stream ID: {}", .{ stream.message_length_read, 4, stream.id });
+
+                // Check if we've read the complete length prefix
+                if (stream.message_length_read == 4) {
+                    // Parse the length as little-endian u32
+                    const message_length = std.mem.readInt(u32, &stream.message_length_buffer, .little);
+
+                    // Validate message length against maximum allowed size
+                    if (message_length > shared.MAX_MESSAGE_SIZE) {
+                        span.err("Message length {d} exceeds maximum allowed size {d} on stream ID: {}", .{ message_length, shared.MAX_MESSAGE_SIZE, stream.id });
+                        return error.MessageTooLarge;
+                    }
+
+                    // If message length is valid, allocate buffer and prepare for body reading
+                    span.debug("Message length parsed: {d} bytes for stream ID: {}", .{ message_length, stream.id });
+
+                    // Handle edge case of zero-length message
+                    if (message_length == 0) {
+                        // Deliver empty message immediately
+                        span.debug("Zero-length message received on stream ID: {}", .{stream.id});
+                        shared.invokeCallback(&stream.connection.owner.callback_handlers, .MessageReceived, .{
+                            .MessageReceived = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                                .message = &[0]u8{}, // Empty slice
+                            },
+                        });
+                        // Reset message state for next message
+                        stream.message_reading_state = .idle;
+                        stream.message_length_read = 0;
+                        stream.message_length = null;
+                        return;
+                    }
+
+                    // Allocate buffer for the message body
+                    stream.message_buffer = stream.connection.owner.allocator.alloc(u8, message_length) catch {
+                        span.err("Failed to allocate {d} bytes for message buffer on stream ID: {}", .{ message_length, stream.id });
+                        return error.OutOfMemory;
+                    };
+
+                    // Update state to reading body
+                    stream.message_length = message_length;
+                    stream.message_reading_state = .reading_body;
+                    stream.message_read = 0;
+                }
+            }
+
+            // Step 2: Read message body
+            if (stream.message_reading_state == .reading_body) {
+                const message_length = stream.message_length orelse {
+                    span.err("Invalid state: message_reading_state is reading_body but message_length is null", .{});
+                    return error.InvalidState;
+                };
+
+                const message_buffer = stream.message_buffer orelse {
+                    span.err("Invalid state: message_reading_state is reading_body but message_buffer is null", .{});
+                    return error.InvalidState;
+                };
+
+                const bytes_remaining = message_length - stream.message_read;
+                const read_result = lsquic.lsquic_stream_read(lsquic_stream, message_buffer.ptr + stream.message_read, bytes_remaining);
+
+                if (read_result == 0) {
+                    // End of stream during body reading - unexpected termination
+                    span.err("End of stream reached while reading message body on stream ID: {}", .{stream.id});
+                    shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataEndOfStream, .{
+                        .DataEndOfStream = .{
+                            .connection = stream.connection.id,
+                            .stream = stream.id,
+                            .data_read = message_buffer[0..stream.message_read], // Partial message data
+                        },
+                    });
+                    // Free allocated buffer since we can't complete the message
+                    stream.connection.owner.allocator.free(message_buffer);
+                    stream.message_buffer = null;
+                    stream.wantRead(false);
+                    return error.EndOfStream;
+                } else if (read_result < 0) {
+                    const err = std.posix.errno(read_result);
+                    if (err == std.posix.E.AGAIN) {
+                        // Would block, try again later
+                        span.debug("Read would block while reading message body on stream ID: {}", .{stream.id});
+                        shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWouldBlock, .{
+                            .DataWouldBlock = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                            },
+                        });
+                        return; // Keep wantRead true
+                    } else {
+                        // Real error
+                        span.err("Error reading message body from stream ID {}: {s}", .{ stream.id, @tagName(err) });
+                        shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataReadError, .{
+                            .DataReadError = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                                .error_code = @intFromEnum(err),
+                            },
+                        });
+                        // Free allocated buffer on error
+                        stream.connection.owner.allocator.free(message_buffer);
+                        stream.message_buffer = null;
+                        stream.wantRead(false);
+                        return error.StreamReadError;
+                    }
+                }
+
+                // Successfully read some bytes of the message body
+                const bytes_read: usize = @intCast(read_result);
+                stream.message_read += bytes_read;
+
+                span.debug("Read {d}/{d} bytes of message body on stream ID: {}", .{ stream.message_read, message_length, stream.id });
+
+                // Check if message is complete
+                if (stream.message_read == message_length) {
+                    // Message fully read, deliver it
+                    span.debug("Complete message of {d} bytes received on stream ID: {}", .{ message_length, stream.id });
+
+                    // Trigger the message received callback with the full message
+                    shared.invokeCallback(&stream.connection.owner.callback_handlers, .MessageReceived, .{
+                        .MessageReceived = .{
+                            .connection = stream.connection.id,
+                            .stream = stream.id,
+                            .message = message_buffer,
+                        },
+                    });
+
+                    // Cleanup by freeing the buffer and resetting state
+                    stream.connection.owner.allocator.free(message_buffer);
+                    stream.message_buffer = null;
+                    stream.message_length = null;
+                    stream.message_reading_state = .idle;
+                    stream.message_read = 0;
+                    stream.message_length_read = 0;
                 }
             }
         }

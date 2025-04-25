@@ -144,6 +144,15 @@ pub const ServerThread = struct {
             data: Data,
             metadata: CommandMetadata(anyerror!void),
         };
+        pub const SendMessage = struct {
+            const Data = struct {
+                connection_id: ConnectionId,
+                stream_id: StreamId,
+                message: []const u8, // Caller owns
+            };
+            data: Data,
+            metadata: CommandMetadata(anyerror!void),
+        };
         pub const StreamWantRead = struct {
             const Data = struct {
                 connection_id: ConnectionId,
@@ -185,6 +194,7 @@ pub const ServerThread = struct {
         create_stream: CreateStream,
         destroy_stream: DestroyStream,
         send_data: SendData,
+        send_message: SendMessage,
         stream_want_read: StreamWantRead,
         stream_want_write: StreamWantWrite,
         stream_flush: StreamFlush,
@@ -237,6 +247,7 @@ pub const ServerThread = struct {
         self.server.setCallback(.DataReadError, internalDataReadErrorCallback, self);
         self.server.setCallback(.DataWriteError, internalDataWriteErrorCallback, self);
         self.server.setCallback(.DataWouldBlock, internalDataReadWouldBlockCallback, self);
+        self.server.setCallback(.MessageReceived, internalMessageReceivedCallback, self);
     }
 
     pub fn shutdown(self: *ServerThread) !void {
@@ -384,6 +395,10 @@ pub const ServerThread = struct {
                 _ = try self.sendDataImpl(cmd.data.stream_id, cmd.data.data);
                 // Success here just means queued/attempted. Actual completion via event?
             },
+            .send_message => |cmd| {
+                _ = try self.sendMessageImpl(cmd.data.stream_id, cmd.data.message);
+                // Success here just means queued/attempted. Actual completion via event?
+            },
             .stream_want_read => |cmd| {
                 _ = try self.streamWantReadImpl(cmd.data.stream_id, cmd.data.want);
             },
@@ -484,6 +499,20 @@ pub const ServerThread = struct {
         try stream.setWriteBuffer(data);
         stream.wantWrite(true);
         span.debug("Data queued for writing", .{});
+    }
+
+    fn sendMessageImpl(self: *ServerThread, stream_id: StreamId, message: []const u8) anyerror!void {
+        const span = trace.span(.send_message);
+        defer span.deinit();
+
+        span.debug("Sending message on stream: {}", .{stream_id});
+        span.trace("Message length: {d} bytes", .{message.len});
+        span.trace("Message first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (message.len > 16) message[0..16] else message)});
+
+        const stream = try self.findStream(stream_id);
+        try stream.setMessageBuffer(message);
+        stream.wantWrite(true);
+        span.debug("Message queued for writing", .{});
     }
 
     fn streamWantReadImpl(self: *ServerThread, stream_id: StreamId, want: bool) anyerror!void {
@@ -650,6 +679,30 @@ pub const ServerThread = struct {
         const event = Server.Event{ .data_write_would_block = .{ .connection_id = connection_id, .stream_id = stream_id } };
         _ = self.event_queue.push(event, .instant);
     }
+
+    fn internalMessageReceivedCallback(connection_id: ConnectionId, stream_id: StreamId, message: []const u8, context: ?*anyopaque) void {
+        const span = trace.span(.message_received_callback);
+        defer span.deinit();
+
+        span.debug("Message received on stream {d} (connection {d}), length: {d} bytes", .{ stream_id, connection_id, message.len });
+        span.trace("Message first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (message.len > 16) message[0..16] else message)});
+
+        const self: *ServerThread = @ptrCast(@alignCast(context.?));
+
+        // We need to make a copy of the message since we take ownership in the event
+        const message_copy = self.alloc.dupe(u8, message) catch |err| {
+            span.err("Failed to duplicate message data: {}", .{err});
+            return;
+        };
+
+        const event = Server.Event{ .message_received = .{ .connection_id = connection_id, .stream_id = stream_id, .message = message_copy } };
+
+        if (self.event_queue.push(event, .instant) == 0) {
+            // If push failed, free the allocated memory
+            span.err("Failed to push message_received event to queue", .{});
+            self.alloc.free(message_copy);
+        }
+    }
 };
 
 /// Server API for the JamSnpServer
@@ -679,6 +732,17 @@ pub const Server = struct {
             return self.sendDataWithCallback(data, null, null);
         }
 
+        /// Send a message with length prefix to the stream.
+        /// The message will be prefixed with a 4-byte little-endian u32 length.
+        pub fn sendMessage(self: *StreamHandle, message: []const u8) !void {
+            const span = trace.span(.stream_send_message);
+            defer span.deinit();
+
+            span.debug("Stream {d}: Sending message ({d} bytes)", .{ self.stream_id, message.len });
+            span.trace("Message first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (message.len > 16) message[0..16] else message)});
+            return self.sendMessageWithCallback(message, null, null);
+        }
+
         // The data is owned and the responsibility of the caller
         pub fn sendDataWithCallback(
             self: *StreamHandle,
@@ -692,6 +756,28 @@ pub const Server = struct {
                         .connection_id = self.connection_id,
                         .stream_id = self.stream_id,
                         .data = data,
+                    },
+                    .metadata = .{ .callback = callback, .context = context },
+                },
+            };
+            _ = self.thread.mailbox.push(command, .{ .instant = {} });
+            try self.thread.wakeup.notify();
+        }
+
+        /// Send a message with length prefix to the stream with a callback.
+        /// The message will be prefixed with a 4-byte little-endian u32 length.
+        pub fn sendMessageWithCallback(
+            self: *StreamHandle,
+            message: []const u8,
+            callback: ?CommandCallback(anyerror!void),
+            context: ?*anyopaque,
+        ) !void {
+            const command = ServerThread.Command{
+                .send_message = .{
+                    .data = .{
+                        .connection_id = self.connection_id,
+                        .stream_id = self.stream_id,
+                        .message = message,
                     },
                     .metadata = .{ .callback = callback, .context = context },
                 },
@@ -861,6 +947,11 @@ pub const Server = struct {
             connection_id: ConnectionId,
             stream_id: StreamId,
             total_bytes_written: usize,
+        },
+        message_received: struct {
+            connection_id: ConnectionId,
+            stream_id: StreamId,
+            message: []const u8, // Complete message, owned by event
         },
         data_read_error: struct {
             connection_id: ConnectionId,

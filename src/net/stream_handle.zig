@@ -32,13 +32,58 @@ pub const StreamHandle = struct {
     }
 
     pub fn sendData(self: *StreamHandle, data: []const u8) !void {
-        const span = trace.span(.send_data);
+                const span = trace.span(.send_data);
         defer span.deinit();
         span.debug("Sending data to stream", .{});
         span.trace("Connection ID: {d}, Stream ID: {d}, Data length: {d}", .{ self.connection_id, self.stream_id, data.len });
         span.trace("Data first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (data.len > 16) data[0..16] else data)});
 
         return self.sendDataWithCallback(data, null, null);
+    }
+    
+    /// Send a message with length prefix to the stream.
+    /// The message will be prefixed with a 4-byte little-endian u32 length.
+    pub fn sendMessage(self: *StreamHandle, message: []const u8) !void {
+        const span = trace.span(.send_message);
+        defer span.deinit();
+        span.debug("Sending message to stream", .{});
+        span.trace("Connection ID: {}, Stream ID: {}, Message length: {d}", .{ 
+            self.connection_id, self.stream_id, message.len 
+        });
+        
+        return self.sendMessageWithCallback(message, null, null);
+    }
+    
+    /// Send a message with length prefix to the stream with a callback.
+    /// The message will be prefixed with a 4-byte little-endian u32 length.
+    pub fn sendMessageWithCallback(
+        self: *StreamHandle,
+        message: []const u8,
+        callback: ?CommandCallback(anyerror!void),
+        context: ?*anyopaque,
+    ) !void {
+        const span = trace.span(.send_message_with_callback);
+        defer span.deinit();
+        span.debug("Sending message with callback to stream", .{});
+        span.trace("Connection ID: {}, Stream ID: {}, Message length: {d}", .{
+            self.connection_id, self.stream_id, message.len
+        });
+        
+        const command = ClientThread.Command{
+            .send_message = .{
+                .data = .{
+                    .connection_id = self.connection_id,
+                    .stream_id = self.stream_id,
+                    .message = message,
+                },
+                .metadata = .{
+                    .callback = callback,
+                    .context = context,
+                },
+            },
+        };
+
+        try self.pushCommand(command);
     }
 
     pub fn sendDataWithCallback(
