@@ -123,7 +123,7 @@ pub fn StreamHandle(T: type) type {
         pub fn wantReadWithCallback(
             self: *@This(),
             want: bool,
-            callback: ?CommandCallback(void),
+            callback: ?CommandCallback(anyerror!void),
             context: ?*anyopaque,
         ) !void {
             const span = trace.span(.want_read_with_callback);

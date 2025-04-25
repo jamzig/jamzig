@@ -765,11 +765,7 @@ pub const ClientThread = struct {
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
 
-        // We need to make a copy of the message since we take ownership in the event
-        const message_copy = try self.alloc.dupe(u8, message);
-        errdefer self.alloc.free(message_copy);
-
-        try self.pushEvent(.{ .message_received = .{ .connection_id = connection_id, .stream_id = stream_id, .message = message_copy } });
+        try self.pushEvent(.{ .message_received = .{ .connection_id = connection_id, .stream_id = stream_id, .message = message } });
     }
 };
 

@@ -99,6 +99,8 @@ test "create stream and send message" {
     _ = try test_server.expectEvent(timeout_ms, .data_write_completed);
     std.log.info("Server sent message with length({}): '{s}'", .{ response_content.len, response_content });
 
+    // Important, otherwise we are not reading anything
+    try client_stream_handle.wantRead(true);
     var client_message_rcv_event = try test_client.expectEvent(timeout_ms, .message_received);
     defer client_message_rcv_event.deinit(allocator); // free buffer passed to us
     std.log.info("Server received message with length({}): '{s}'", .{ client_message_rcv_event.message_received.message.len, client_message_rcv_event.message_received.message });
