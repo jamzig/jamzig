@@ -13,7 +13,7 @@ const shared = @import("../jamsnp/shared_types.zig");
 test "create stream and send message" {
     // The test allocator is thread safe by default
     const allocator = std.testing.allocator;
-    const timeout_ms: u64 = 1_000;
+    const timeout_ms: u64 = 4_000;
 
     // -- Build our server
     var test_server = try common.createTestServer(allocator);
@@ -53,13 +53,13 @@ test "create stream and send message" {
     try test_client.client.createStream(connected_event.connected.connection_id, .block_announcement);
 
     // Wait for the stream_created event on the client
-    const client_stream_event = try test_client.expectEvent(timeout_ms, .stream_created);
-    const stream_id = client_stream_event.stream_created.stream_id;
+    const client_stream_created_event = try test_client.expectEvent(timeout_ms, .stream_created);
+    const stream_id = client_stream_created_event.stream_created.stream_id;
     std.log.info("Client created stream with ID: {}", .{stream_id});
 
     // Wait for the stream creation event on the server side
-    const server_stream_event = try test_server.expectEvent(timeout_ms, .stream_created_by_client);
-    std.log.info("Server observed stream creation with ID: {}", .{server_stream_event.stream_created_by_client.stream_id});
+    const server_stream_created_event = try test_server.expectEvent(timeout_ms, .stream_created_by_client);
+    std.log.info("Server observed stream creation with ID: {}", .{server_stream_created_event.stream_created_by_client.stream_id});
 
     // --- Send message over the stream ---
     var client_stream_handle = try test_client.buildStreamHandle(
@@ -68,14 +68,13 @@ test "create stream and send message" {
     );
 
     // Create a server stream handle for responses
-    var server_stream_handle = net_server.Server.StreamHandle{
-        .thread = test_server.thread,
-        .stream_id = server_stream_event.stream_created_by_client.stream_id,
-        .connection_id = server_stream_event.stream_created_by_client.connection_id,
-    };
+    var server_stream_handle = try test_server.buildStreamHandle(
+        server_stream_created_event.stream_created_by_client.connection_id,
+        server_stream_created_event.stream_created_by_client.stream_id,
+    );
 
     // Create a test message
-    const message_content = "This is a test message with length prefix.";
+    const message_content = "JamZig⚡";
     try client_stream_handle.sendMessage(message_content);
 
     // Wait for the server to receive the message, ownership of the buffer

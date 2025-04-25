@@ -5,6 +5,8 @@ const net_server = @import("../server.zig");
 const net_client = @import("../client.zig");
 const network = @import("network");
 
+const StreamHandle = @import("../stream_handle.zig").StreamHandle;
+
 pub const TestServer = struct {
     thread: *net_server.ServerThread,
     server: net_server.Server,
@@ -33,7 +35,7 @@ pub const TestServer = struct {
         self: *TestServer,
         connection_id: net_server.ConnectionId,
         stream_id: net_server.StreamId,
-    ) !net_client.StreamHandle {
+    ) !StreamHandle(net_server.ServerThread) {
         return .{
             .thread = self.thread,
             .stream_id = stream_id,
@@ -125,7 +127,7 @@ pub const TestClient = struct {
         self: *TestClient,
         connection_id: net_client.ConnectionId,
         stream_id: net_client.StreamId,
-    ) !net_client.StreamHandle(net_client.ClientThread) {
+    ) !StreamHandle(net_client.ClientThread) {
         return .{
             .thread = self.thread,
             .stream_id = stream_id,
