@@ -23,7 +23,8 @@ pub fn Stream(T: type) type {
         want_write: bool = false,
         write_buffer: ?[]const u8 = null, // Buffer provided by user via command
         write_buffer_pos: usize = 0,
-        owned_write_buffer: bool = false, // Flag to indicate if we own the write buffer memory
+        write_buffer_owned: bool = false, // Flag to indicate if we own the write buffer memory
+        write_call_callbacks: bool = false, // Flag to indicate if we should send a write completed event
 
         want_read: bool = false,
         read_buffer: ?[]u8 = null, // Buffer provided by user via command
@@ -70,7 +71,7 @@ pub fn Stream(T: type) type {
             span.debug("Destroying internal Stream struct for ID: {}", .{self.id});
 
             // Free owned write buffer if it exists
-            if (self.owned_write_buffer and self.write_buffer != null) {
+            if (self.write_buffer_owned and self.write_buffer != null) {
                 const buffer_to_free = self.write_buffer.?;
                 self.connection.owner.allocator.free(buffer_to_free);
                 span.debug("Freed owned write buffer during stream destruction for ID: {}", .{self.id});
@@ -130,7 +131,7 @@ pub fn Stream(T: type) type {
         }
 
         /// Prepare the stream to write the provided data.
-        pub fn setWriteBuffer(self: *Stream(T), data: []const u8) !void {
+        pub fn setWriteBuffer(self: *Stream(T), data: []const u8, owned: bool, completed_event: bool) !void {
             const span = trace.span(.stream_set_write_buffer);
             defer span.deinit();
             span.debug("Setting write buffer ({d} bytes) for internal stream ID: {}", .{ data.len, self.id });
@@ -147,7 +148,8 @@ pub fn Stream(T: type) type {
 
             self.write_buffer = data;
             self.write_buffer_pos = 0;
-            self.owned_write_buffer = false;
+            self.write_buffer_owned = owned;
+            self.write_call_callbacks = completed_event; // Set to true if we want to send a write completed event
             // wantWrite should be set by the command handler
         }
 
@@ -177,35 +179,9 @@ pub fn Stream(T: type) type {
             // Set the buffer
             self.write_buffer = buffer;
             self.write_buffer_pos = 0;
-            self.owned_write_buffer = true; // We own this buffer and need to free it
+            self.write_buffer_owned = true; // We own this buffer and need to free it
 
             span.debug("Message buffer set: {d} bytes length prefix + {d} bytes data", .{ 4, message.len });
-        }
-
-        /// Prepare the stream to write the provided data, but duplicate the data so the stream owns it.
-        /// The duplicated data will be freed when the stream is done with it.
-        pub fn setOwnedWriteBuffer(self: *Stream(T), data: []const u8) !void {
-            const span = trace.span(.stream_set_owned_write_buffer);
-            defer span.deinit();
-            span.debug("Setting owned write buffer ({d} bytes) for internal stream ID: {}", .{ data.len, self.id });
-
-            if (data.len == 0) {
-                span.warn("Owned write buffer set with zero-length data for stream ID: {}. Ignoring.", .{self.id});
-                return error.ZeroDataLen;
-            }
-
-            if (self.write_buffer != null) {
-                span.err("Stream ID {} is already writing, cannot issue new write.", .{self.id});
-                return error.StreamAlreadyWriting;
-            }
-
-            // Duplicate the data
-            const duped_data = try self.connection.owner.allocator.dupe(u8, data);
-
-            self.write_buffer = duped_data;
-            self.write_buffer_pos = 0;
-            self.owned_write_buffer = true;
-            // wantWrite should be set by the command handler
         }
 
         pub fn flush(self: *Stream(T)) !void {
@@ -754,15 +730,17 @@ pub fn Stream(T: type) type {
                 } else {
                     const err_code = -written;
                     span.err("Stream write failed for stream ID {} with error code: {d}", .{ stream.id, err_code });
-                    shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteError, .{
-                        .DataWriteError = .{
-                            .connection = stream.connection.id,
-                            .stream = stream.id,
-                            .error_code = @intCast(err_code),
-                        },
-                    });
+                    if (stream.write_call_callbacks)
+                        shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteError, .{
+                            .DataWriteError = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                                .error_code = @intCast(err_code),
+                            },
+                        });
                     stream.write_buffer = null;
                     stream.write_buffer_pos = 0;
+                    stream.write_call_callbacks = false;
                     stream.wantWrite(false);
                     return;
                 }
@@ -773,28 +751,30 @@ pub fn Stream(T: type) type {
             span.debug("Written {d} bytes to stream ID: {}", .{ bytes_written, stream.id });
             stream.write_buffer_pos += bytes_written;
 
-            shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteProgress, .{
-                .DataWriteProgress = .{
-                    .connection = stream.connection.id,
-                    .stream = stream.id,
-                    .bytes_written = stream.write_buffer_pos,
-                    .total_size = total_size,
-                },
-            });
+            if (stream.write_call_callbacks)
+                shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteProgress, .{
+                    .DataWriteProgress = .{
+                        .connection = stream.connection.id,
+                        .stream = stream.id,
+                        .bytes_written = stream.write_buffer_pos,
+                        .total_size = total_size,
+                    },
+                });
 
             if (stream.write_buffer_pos >= total_size) {
                 span.debug("Write complete for user buffer (total {d} bytes) on stream ID: {}", .{ total_size, stream.id });
 
-                shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteCompleted, .{
-                    .DataWriteCompleted = .{
-                        .connection = stream.connection.id,
-                        .stream = stream.id,
-                        .total_bytes_written = stream.write_buffer_pos,
-                    },
-                });
+                if (stream.write_call_callbacks)
+                    shared.invokeCallback(&stream.connection.owner.callback_handlers, .DataWriteCompleted, .{
+                        .DataWriteCompleted = .{
+                            .connection = stream.connection.id,
+                            .stream = stream.id,
+                            .total_bytes_written = stream.write_buffer_pos,
+                        },
+                    });
 
                 // Free the buffer if we own it
-                if (stream.owned_write_buffer and stream.write_buffer != null) {
+                if (stream.write_buffer_owned and stream.write_buffer != null) {
                     const buffer_to_free = stream.write_buffer.?;
                     stream.connection.owner.allocator.free(buffer_to_free);
                     span.debug("Freed owned write buffer for stream ID: {}", .{stream.id});
@@ -802,7 +782,7 @@ pub fn Stream(T: type) type {
 
                 stream.write_buffer = null;
                 stream.write_buffer_pos = 0;
-                stream.owned_write_buffer = false;
+                stream.write_buffer_owned = false;
                 span.trace("Disabling write interest for stream ID {}", .{stream.id});
                 stream.wantWrite(false);
 

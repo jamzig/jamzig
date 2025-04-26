@@ -480,7 +480,7 @@ pub const ServerThread = struct {
         span.trace("Data: {any}", .{std.fmt.fmtSliceHexLower(data)});
 
         const stream = try self.findStream(stream_id);
-        try stream.setWriteBuffer(data);
+        try stream.setWriteBuffer(data, true, true);
         stream.wantWrite(true);
         span.debug("Data queued for writing", .{});
     }

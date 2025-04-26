@@ -138,7 +138,7 @@ pub const ClientThread = struct {
             const Data = struct {
                 connection_id: ConnectionId,
                 stream_id: StreamId,
-                data: []const u8, // Caller owns
+                data: []const u8,
             };
             data: Data,
             metadata: CommandMetadata(anyerror!void),
@@ -147,7 +147,7 @@ pub const ClientThread = struct {
             const Data = struct {
                 connection_id: ConnectionId,
                 stream_id: StreamId,
-                message: []const u8, // Caller owns
+                message: []const u8,
             };
             data: Data,
             metadata: CommandMetadata(anyerror!void),
@@ -451,7 +451,7 @@ pub const ClientThread = struct {
 
                 if (self.client.streams.get(cmd.data.stream_id)) |stream| {
                     // This sets the buffer for the next onWrite callback
-                    stream.setWriteBuffer(cmd.data.data) catch |err| {
+                    stream.setWriteBuffer(cmd.data.data, true, true) catch |err| {
                         cmd_span.err("Failed to set write buffer for stream {}: {}", .{ cmd.data.stream_id, err });
                         // FIXME: generate an event here
                         return; // Don't proceed if buffer setting fails
@@ -659,9 +659,10 @@ pub const ClientThread = struct {
             // Now write byte to our server to indicate the kind of stream we want to initialize
 
             if (self.client.streams.get(stream_id)) |stream| {
-                // This sets the buffer for the next onWrite callback
-                try stream.setOwnedWriteBuffer(std.mem.asBytes(&cmd.data.kind));
-                // Trigger the write callback
+
+                // Set the write buffer and trigger lsquic to send it by setting
+                // wantWrite to true
+                try stream.setWriteBuffer(try self.alloc.dupe(u8, std.mem.asBytes(&cmd.data.kind)), true, false);
                 stream.wantWrite(true);
                 span.debug("Data queued successfully", .{});
             }
@@ -674,6 +675,7 @@ pub const ClientThread = struct {
         } else {
             // This should never happen.
             span.warn("StreamCreated event for connection {} with no pending stream command", .{connection_id});
+            std.debug.panic("StreamCreated event for connection {} with no pending stream command", .{connection_id});
         }
     }
 

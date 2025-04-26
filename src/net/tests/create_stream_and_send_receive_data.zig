@@ -55,8 +55,8 @@ test "create stream and send message" {
     // Wait for the stream_created event on the client
     const client_stream_created_event = try test_client.expectEvent(timeout_ms, .stream_created);
     const stream_id = client_stream_created_event.stream_created.stream_id;
-    // FIXME: since I am sending the stream kind its generating an event which should be ignored
-    _ = try test_client.expectEvent(timeout_ms, .data_write_completed);
+    // // FIXME: since I am sending the stream kind its generating an event which should be ignored
+    // _ = try test_client.expectEvent(timeout_ms, .data_write_completed);
     std.log.info("Client created stream with ID: {}", .{stream_id});
 
     // Wait for the stream creation event on the server side
