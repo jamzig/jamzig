@@ -75,7 +75,7 @@ pub fn Connection(T: type) type {
                 return null;
             };
 
-            shared.invokeCallback(&connection.owner.callback_handlers, .ConnectionEstablished, .{
+            shared.invokeCallback(T, &connection.owner.callback_handlers, .ConnectionEstablished, .{
                 .ConnectionEstablished = .{
                     .connection = connection.id,
                     .endpoint = connection.endpoint,
@@ -137,7 +137,7 @@ pub fn Connection(T: type) type {
                 return null; // Let errdefer clean up, signal error
             };
 
-            shared.invokeCallback(&owner.callback_handlers, .ClientConnected, .{
+            shared.invokeCallback(T, &owner.callback_handlers, .ClientConnected, .{
                 .ClientConnected = .{
                     .connection = connection.id,
                     .endpoint = connection.endpoint,
@@ -170,7 +170,7 @@ pub fn Connection(T: type) type {
             span.debug("Connection closed callback triggered for ID: {}", .{conn_id});
 
             // Invoke user callback *before* removing/destroying
-            shared.invokeCallback(&owner.callback_handlers, .ConnectionClosed, .{
+            shared.invokeCallback(T, &owner.callback_handlers, .ConnectionClosed, .{
                 .ConnectionClosed = .{ .connection = conn_id },
             });
 

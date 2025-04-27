@@ -17,6 +17,7 @@ pub const ConnectionId = shared.ConnectionId;
 pub const StreamId = shared.StreamId;
 pub const StreamKind = shared.StreamKind;
 pub const JamSnpClient = jamsnp_client.JamSnpClient;
+pub const Stream = @import("jamsnp/stream.zig").Stream;
 pub const StreamHandle = @import("stream_handle.zig").StreamHandle;
 
 pub const Client = @import("client.zig").Client;
@@ -451,7 +452,7 @@ pub const ClientThread = struct {
 
                 if (self.client.streams.get(cmd.data.stream_id)) |stream| {
                     // This sets the buffer for the next onWrite callback
-                    stream.setWriteBuffer(cmd.data.data, true, true) catch |err| {
+                    stream.setWriteBuffer(cmd.data.data, .owned, .datawritecompleted) catch |err| {
                         cmd_span.err("Failed to set write buffer for stream {}: {}", .{ cmd.data.stream_id, err });
                         // FIXME: generate an event here
                         return; // Don't proceed if buffer setting fails
@@ -580,6 +581,7 @@ pub const ClientThread = struct {
         self.client.setCallback(.DataWriteCompleted, internalDataWriteCompletedCallback, self);
         self.client.setCallback(.DataWriteProgress, internalDataWriteProgressCallback, self);
         self.client.setCallback(.DataWriteError, internalDataWriteErrorCallback, self);
+        self.client.setCallback(.MessageSend, internalMessageSendCallback, self);
         self.client.setCallback(.MessageReceived, internalMessageReceivedCallback, self);
     }
 
@@ -647,35 +649,40 @@ pub const ClientThread = struct {
         try self.pushEvent(.{ .disconnected = .{ .connection_id = connection_id } });
     }
 
-    fn internalStreamCreatedCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) !void {
+    fn internalStreamCreatedCallback(stream: *Stream(JamSnpClient), context: ?*anyopaque) !void {
         const span = trace.span(.stream_created);
         defer span.deinit();
-        span.debug("Stream created: connection={} stream={}", .{ connection_id, stream_id });
+        span.debug("Stream created: connection={} stream={}", .{ stream.connection.id, stream.id });
 
-        const self: *ClientThread = @ptrCast(@alignCast(context.?));
+        const client_thread: *ClientThread = @ptrCast(@alignCast(context.?));
 
-        // FIXME: handle the null case in self.client.Stream.onNewStream
-        if (self.pending_streams.readItem()) |cmd| {
-            // Now write byte to our server to indicate the kind of stream we want to initialize
-
-            if (self.client.streams.get(stream_id)) |stream| {
-
-                // Set the write buffer and trigger lsquic to send it by setting
-                // wantWrite to true
-                try stream.setWriteBuffer(try self.alloc.dupe(u8, std.mem.asBytes(&cmd.data.kind)), true, false);
-                stream.wantWrite(true);
-                span.debug("Data queued successfully", .{});
-            }
-
-            try self.pushEvent(.{ .stream_created = .{
-                .connection_id = connection_id,
-                .stream_id = stream_id,
-                .metadata = cmd.metadata,
-            } });
-        } else {
-            // This should never happen.
-            span.warn("StreamCreated event for connection {} with no pending stream command", .{connection_id});
-            std.debug.panic("StreamCreated event for connection {} with no pending stream command", .{connection_id});
+        switch (stream.origin()) {
+            .local_initiated => {
+                if (client_thread.pending_streams.readItem()) |cmd| {
+                    // Set the write buffer and trigger lsquic to send it by setting
+                    // wantWrite to true
+                    try stream.setWriteBuffer(try client_thread.alloc.dupe(u8, std.mem.asBytes(&cmd.data.kind)), .owned, .none);
+                    stream.wantWrite(true);
+                    span.debug("Data queued successfully", .{});
+                    try client_thread.pushEvent(.{ .stream_created = .{
+                        .connection_id = stream.connection.id,
+                        .stream_id = stream.id,
+                        .kind = cmd.data.kind,
+                        .metadata = cmd.metadata,
+                    } });
+                } else {
+                    // This should never happen.
+                    span.warn("StreamCreated event for connection {} with no pending stream command", .{stream.connection.id});
+                    std.debug.panic("StreamCreated event for connection {} with no pending stream command", .{stream.connection.id});
+                }
+            },
+            .remote_initiated => {
+                // This is a server-initiated stream, we need to create a new stream
+                // object and push it to the event queue
+                const stream_kind_buffer = try client_thread.alloc.alloc(u8, 1);
+                try stream.setReadBuffer(stream_kind_buffer);
+                stream.wantRead(true);
+            },
         }
     }
 
@@ -718,8 +725,7 @@ pub const ClientThread = struct {
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
         // Convert i32 error code to a Zig error if possible/meaningful
-        const err = error.StreamReadError; // Placeholder
-        try self.pushEvent(.{ .data_read_error = .{ .connection_id = connection_id, .stream_id = stream_id, .err = err, .raw_error_code = error_code } });
+        try self.pushEvent(.{ .data_read_error = .{ .connection_id = connection_id, .stream_id = stream_id, .error_code = error_code } });
     }
 
     fn internalDataReadWouldBlockCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) !void {
@@ -737,7 +743,7 @@ pub const ClientThread = struct {
         span.debug("Write completed: connection={} stream={} bytes={d}", .{ connection_id, stream_id, total_bytes_written });
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
-        try self.pushEvent(.{ .data_write_completed = .{ .connection_id = connection_id, .stream_id = stream_id, .bytes_written = total_bytes_written } });
+        try self.pushEvent(.{ .data_write_completed = .{ .connection_id = connection_id, .stream_id = stream_id, .total_bytes_written = total_bytes_written } });
     }
 
     fn internalDataWriteProgressCallback(connection_id: ConnectionId, stream_id: StreamId, bytes_written: usize, total_size: usize, context: ?*anyopaque) void {
@@ -757,8 +763,18 @@ pub const ClientThread = struct {
         span.err("Stream write error: connection={} stream={} error_code={d}", .{ connection_id, stream_id, error_code });
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
-        const err = error.StreamWriteError; // Placeholder
-        try self.pushEvent(.{ .data_write_error = .{ .connection_id = connection_id, .stream_id = stream_id, .err = err, .raw_error_code = error_code } });
+        try self.pushEvent(.{ .data_write_error = .{ .connection_id = connection_id, .stream_id = stream_id, .error_code = error_code } });
+    }
+
+    fn internalMessageSendCallback(connection_id: ConnectionId, stream_id: StreamId, message: []const u8, context: ?*anyopaque) !void {
+        const span = trace.span(.message_received);
+        defer span.deinit();
+        span.debug("Message received: connection={} stream={} size={d} bytes", .{ connection_id, stream_id, message.len });
+        span.trace("Message first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (message.len > 16) message[0..16] else message)});
+
+        const self: *ClientThread = @ptrCast(@alignCast(context.?));
+
+        try self.pushEvent(.{ .message_send = .{ .connection_id = connection_id, .stream_id = stream_id } });
     }
 
     fn internalMessageReceivedCallback(connection_id: ConnectionId, stream_id: StreamId, message: []const u8, context: ?*anyopaque) !void {

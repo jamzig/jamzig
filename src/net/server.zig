@@ -19,6 +19,8 @@ pub const Server = struct {
     thread: *ServerThread,
     allocator: std.mem.Allocator,
 
+    pub const Event = @import("common.zig").Event;
+
     pub fn init(alloc: std.mem.Allocator, thread: *ServerThread) !Server {
         return .{
             .thread = thread,
@@ -201,118 +203,6 @@ pub const Server = struct {
             } };
             _ = self.thread.mailbox.push(command, .{ .instant = {} });
             try self.thread.wakeup.notify();
-        }
-    };
-
-    pub const Event = union(enum) {
-        pub fn Result(T: type) type {
-            return struct {
-                result: T,
-                metadata: CommandMetadata(T),
-
-                pub fn invokeCallback(self: *const Result(T)) void {
-                    self.metadata.callWithResult(self.result);
-                }
-            };
-        }
-
-        // -- Server events
-        listening: struct {
-            local_endpoint: network.EndPoint,
-            result: Result(anyerror!network.EndPoint),
-        },
-
-        // -- Connection events
-        client_connected: struct {
-            connection_id: ConnectionId,
-            peer_endpoint: network.EndPoint,
-        },
-        client_disconnected: struct {
-            connection_id: ConnectionId,
-        },
-
-        // -- Streams
-        stream_created_by_client: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            kind: StreamKind,
-        },
-        stream_created_by_server: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-        },
-        stream_closed: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-        },
-
-        // -- Data events
-        data_received: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            data: []const u8, // owned by original caller
-        },
-        data_write_completed: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            total_bytes_written: usize,
-        },
-        message_received: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            message: []const u8, // Complete message, owned by event
-        },
-        data_read_error: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            error_code: i32,
-        },
-        data_write_error: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-            error_code: i32,
-        },
-        data_read_would_block: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-        },
-        data_write_would_block: struct {
-            connection_id: ConnectionId,
-            stream_id: StreamId,
-        },
-        @"error": struct {
-            message: []const u8,
-            details: ?anyerror,
-        },
-
-        pub fn invokeCallback(self: Event) void {
-            const span = trace.span(.invoke_event_callback);
-            defer span.deinit();
-
-            span.debug("Invoking callback for event: {s}", .{@tagName(self)});
-            switch (self) {
-                .listening => |e| e.result.invokeCallback(),
-                else => {
-                    span.err("Event callback not implemented for this event type", .{});
-                    @panic("Event callback not implemented for this event type");
-                },
-            }
-        }
-
-        pub fn deinit(self: *Event, alloc: std.mem.Allocator) void {
-            const span = trace.span(.deinit_event);
-            defer span.deinit();
-
-            switch (self.*) {
-                .message_received => |e| {
-                    // Free the message buffer if it was allocated
-                    if (e.message.len > 0) {
-                        alloc.free(e.message);
-                    }
-                },
-                else => {},
-            }
-            self.* = undefined;
         }
     };
 

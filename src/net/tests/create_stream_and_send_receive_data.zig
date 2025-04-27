@@ -60,8 +60,8 @@ test "create stream and send message" {
     std.log.info("Client created stream with ID: {}", .{stream_id});
 
     // Wait for the stream creation event on the server side
-    const server_stream_created_event = try test_server.expectEvent(timeout_ms, .stream_created_by_client);
-    std.log.info("Server observed stream creation with ID: {}", .{server_stream_created_event.stream_created_by_client.stream_id});
+    const server_stream_created_event = try test_server.expectEvent(timeout_ms, .stream_created);
+    std.log.info("Server observed stream creation with ID: {}", .{server_stream_created_event.stream_created.stream_id});
 
     // --- Send message over the stream ---
     var client_stream_handle = try test_client.buildStreamHandle(
@@ -71,15 +71,15 @@ test "create stream and send message" {
 
     // Create a server stream handle for responses
     var server_stream_handle = try test_server.buildStreamHandle(
-        server_stream_created_event.stream_created_by_client.connection_id,
-        server_stream_created_event.stream_created_by_client.stream_id,
+        server_stream_created_event.stream_created.connection_id,
+        server_stream_created_event.stream_created.stream_id,
     );
 
     // Create a test message
     const message_content = "JamZig⚡";
     try client_stream_handle.sendMessage(message_content);
     // Wait for the client to complete the sending of the message
-    _ = try test_client.expectEvent(timeout_ms, .data_write_completed);
+    _ = try test_client.expectEvent(timeout_ms, .message_send);
 
     // Wait for the server to receive the message, ownership of the buffer
     // is with us. So handle freeing it in event or in the callback
@@ -96,7 +96,7 @@ test "create stream and send message" {
     const response_content = "Rocks🪨";
     try server_stream_handle.sendMessage(response_content);
     // Wait for the server to complete the sending of the message
-    _ = try test_server.expectEvent(timeout_ms, .data_write_completed);
+    _ = try test_server.expectEvent(timeout_ms, .message_send);
     std.log.info("Server sent message with length({}): '{s}'", .{ response_content.len, response_content });
 
     // Important, otherwise we are not reading anything

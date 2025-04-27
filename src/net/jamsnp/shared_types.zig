@@ -10,6 +10,15 @@ pub const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 pub const ConnectionId = uuid.Uuid;
 pub const StreamId = uuid.Uuid;
 
+pub const Stream = @import("stream.zig").Stream;
+
+pub const StreamOrigin = enum {
+    /// Stream is initiated by the client
+    local_initiated,
+    /// Stream is initiated by the server
+    remote_initiated,
+};
+
 /// Stream kinds defined in the JAM Simple Networking Protocol (JAMSNP-S)
 /// UP streams are Unique Persistent, CE streams are Common Ephemeral.
 /// UP stream kinds start from 0, CE stream kinds start from 128.
@@ -111,12 +120,11 @@ pub const StreamKind = enum(u8) {
 
 // -- Client Callback Types
 pub const EventType = enum {
-        ClientConnected,
+    ClientConnected,
     ConnectionEstablished,
     ConnectionFailed,
     ConnectionClosed,
     StreamCreated,
-    ServerStreamCreated,
     StreamClosed,
     DataReceived,
     DataEndOfStream,
@@ -126,6 +134,7 @@ pub const EventType = enum {
     DataWriteCompleted,
     DataWriteError,
     /// A complete message has been received (length-prefixed)
+    MessageSend,
     MessageReceived,
 };
 
@@ -133,7 +142,9 @@ pub const ClientConnectedCallbackFn = *const fn (connection: ConnectionId, endpo
 pub const ConnectionEstablishedCallbackFn = *const fn (connection: ConnectionId, endpoint: network.EndPoint, context: ?*anyopaque) void;
 pub const ConnectionFailedCallbackFn = *const fn (connection: ConnectionId, endpoint: network.EndPoint, err: anyerror, context: ?*anyopaque) void;
 pub const ConnectionClosedCallbackFn = *const fn (connection: ConnectionId, context: ?*anyopaque) void;
-pub const StreamCreatedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
+pub fn StreamCreatedCallbackFn(T: type) type {
+    return *const fn (stream: *Stream(T), context: ?*anyopaque) void;
+}
 pub const ServerStreamCreatedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, kind: StreamKind, context: ?*anyopaque) void;
 pub const StreamClosedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 pub const DataReceivedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, data: []const u8, context: ?*anyopaque) void;
@@ -142,7 +153,7 @@ pub const DataErrorCallbackFn = *const fn (connection: ConnectionId, stream: Str
 pub const DataWouldBlockCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 pub const DataWriteProgressCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize, context: ?*anyopaque) void;
 pub const DataWriteCompletedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, total_bytes_written: usize, context: ?*anyopaque) void;
-/// Complete message received callback with the message data (length prefix already removed)
+pub const MessageSendCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 pub const MessageReceivedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, message: []const u8, context: ?*anyopaque) void;
 
 // -- Common Callback Handler
@@ -157,25 +168,30 @@ pub const CallbackHandlers = [@typeInfo(EventType).@"enum".fields.len]CallbackHa
 pub const CALLBACK_HANDLERS_EMPTY = [_]CallbackHandler{.{ .callback = null, .context = null }} ** @typeInfo(EventType).@"enum".fields.len;
 
 // Argument Union for invokeCallback (using shared types)
-const EventArgs = union(EventType) {
-    ClientConnected: struct { connection: ConnectionId, endpoint: network.EndPoint },
-    ConnectionEstablished: struct { connection: ConnectionId, endpoint: network.EndPoint },
-    ConnectionFailed: struct { endpoint: network.EndPoint, err: anyerror },
-    ConnectionClosed: struct { connection: ConnectionId },
-    StreamCreated: struct { connection: ConnectionId, stream: StreamId },
-    ServerStreamCreated: struct { connection: ConnectionId, stream: StreamId, kind: StreamKind },
-    StreamClosed: struct { connection: ConnectionId, stream: StreamId },
-    DataReceived: struct { connection: ConnectionId, stream: StreamId, data: []const u8 },
-    DataEndOfStream: struct { connection: ConnectionId, stream: StreamId, data_read: []const u8 },
-    DataReadError: struct { connection: ConnectionId, stream: StreamId, error_code: i32 },
-    DataWouldBlock: struct { connection: ConnectionId, stream: StreamId },
-    DataWriteProgress: struct { connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize },
-    DataWriteCompleted: struct { connection: ConnectionId, stream: StreamId, total_bytes_written: usize },
-    DataWriteError: struct { connection: ConnectionId, stream: StreamId, error_code: i32 },
-    MessageReceived: struct { connection: ConnectionId, stream: StreamId, message: []const u8 },
-};
+pub fn EventArg(T: type) type {
+    return union(EventType) {
+        ClientConnected: struct { connection: ConnectionId, endpoint: network.EndPoint },
+        ConnectionEstablished: struct { connection: ConnectionId, endpoint: network.EndPoint },
+        ConnectionFailed: struct { endpoint: network.EndPoint, err: anyerror },
+        ConnectionClosed: struct { connection: ConnectionId },
+        StreamCreated: *Stream(T),
+        StreamClosed: struct { connection: ConnectionId, stream: StreamId },
+        DataReceived: struct { connection: ConnectionId, stream: StreamId, data: []const u8 },
+        DataEndOfStream: struct { connection: ConnectionId, stream: StreamId, data_read: []const u8 },
+        DataReadError: struct { connection: ConnectionId, stream: StreamId, error_code: i32 },
+        DataWouldBlock: struct { connection: ConnectionId, stream: StreamId },
+        DataWriteProgress: struct { connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize },
+        DataWriteCompleted: struct { connection: ConnectionId, stream: StreamId, total_bytes_written: usize },
+        DataWriteError: struct { connection: ConnectionId, stream: StreamId, error_code: i32 },
+        MessageSend: struct {
+            connection: ConnectionId,
+            stream: StreamId,
+        },
+        MessageReceived: struct { connection: ConnectionId, stream: StreamId, message: []const u8 },
+    };
+}
 
-pub fn invokeCallback(callback_handlers: *const CallbackHandlers, event_tag: EventType, args: EventArgs) void {
+pub fn invokeCallback(T: type, callback_handlers: *const CallbackHandlers, event_tag: EventType, args: EventArg(T)) void {
     const span = trace.span(.invoke_callback);
     defer span.deinit();
     std.debug.assert(event_tag == @as(EventType, @enumFromInt(@intFromEnum(args))));
@@ -196,13 +212,9 @@ pub fn invokeCallback(callback_handlers: *const CallbackHandlers, event_tag: Eve
                 const callback: ConnectionClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));
                 callback(ev_args.connection, handler.context);
             },
-            .StreamCreated => |ev_args| {
-                const callback: StreamCreatedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                callback(ev_args.connection, ev_args.stream, handler.context);
-            },
-            .ServerStreamCreated => |ev_args| {
-                const callback: ServerStreamCreatedCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                callback(ev_args.connection, ev_args.stream, ev_args.kind, handler.context);
+            .StreamCreated => |stream| {
+                const callback: StreamCreatedCallbackFn(T) = @ptrCast(@alignCast(callback_ptr));
+                callback(stream, handler.context);
             },
             .StreamClosed => |ev_args| {
                 const callback: StreamClosedCallbackFn = @ptrCast(@alignCast(callback_ptr));
@@ -233,8 +245,12 @@ pub fn invokeCallback(callback_handlers: *const CallbackHandlers, event_tag: Eve
                 callback(ev_args.connection, ev_args.stream, ev_args.bytes_written, ev_args.total_size, handler.context);
             },
             .DataEndOfStream => |ev_args| {
-                                const callback: DataEndOfStreamCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                const callback: DataEndOfStreamCallbackFn = @ptrCast(@alignCast(callback_ptr));
                 callback(ev_args.connection, ev_args.stream, ev_args.data_read, handler.context);
+            },
+            .MessageSend => |ev_args| {
+                const callback: MessageSendCallbackFn = @ptrCast(@alignCast(callback_ptr));
+                callback(ev_args.connection, ev_args.stream, handler.context);
             },
             .MessageReceived => |ev_args| {
                 const callback: MessageReceivedCallbackFn = @ptrCast(@alignCast(callback_ptr));

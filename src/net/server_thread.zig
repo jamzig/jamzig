@@ -224,7 +224,7 @@ pub const ServerThread = struct {
         // Pass 'self' as context so callbacks can access the thread state (event_queue)
         self.server.setCallback(.ClientConnected, internalClientConnectedCallback, self);
         self.server.setCallback(.ConnectionEstablished, internalClientDisconnectedCallback, self);
-        self.server.setCallback(.ServerStreamCreated, internalServerStreamCreatedCallback, self);
+        self.server.setCallback(.StreamCreated, internalStreamCreatedCallback, self);
         self.server.setCallback(.StreamClosed, internalStreamClosedByClientCallback, self);
         self.server.setCallback(.DataReceived, internalDataReceivedCallback, self);
         self.server.setCallback(.DataWriteCompleted, internalDataWriteCompletedCallback, self); // Server might need this?
@@ -480,7 +480,7 @@ pub const ServerThread = struct {
         span.trace("Data: {any}", .{std.fmt.fmtSliceHexLower(data)});
 
         const stream = try self.findStream(stream_id);
-        try stream.setWriteBuffer(data, true, true);
+        try stream.setWriteBuffer(data, .owned, .datawritecompleted);
         stream.wantWrite(true);
         span.debug("Data queued for writing", .{});
     }
@@ -562,7 +562,7 @@ pub const ServerThread = struct {
 
         span.debug("Client connected: {d} at {}", .{ connection_id, peer_endpoint });
         const self: *ServerThread = @ptrCast(@alignCast(context.?));
-        const event = Server.Event{ .client_connected = .{ .connection_id = connection_id, .peer_endpoint = peer_endpoint } };
+        const event = Server.Event{ .client_connected = .{ .connection_id = connection_id, .endpoint = peer_endpoint } };
         _ = self.event_queue.push(event, .instant); // Ignore push error (queue full?)
     }
 
@@ -572,17 +572,17 @@ pub const ServerThread = struct {
 
         span.debug("Client disconnected: {}", .{connection_id});
         const self: *ServerThread = @ptrCast(@alignCast(context.?));
-        const event = Server.Event{ .client_disconnected = .{ .connection_id = connection_id } };
+        const event = Server.Event{ .disconnected = .{ .connection_id = connection_id } };
         _ = self.event_queue.push(event, .instant);
     }
 
-    fn internalServerStreamCreatedCallback(connection_id: ConnectionId, stream_id: StreamId, kind: StreamKind, context: ?*anyopaque) void {
+    fn internalStreamCreatedCallback(connection_id: ConnectionId, stream_id: StreamId, kind: StreamKind, context: ?*anyopaque) void {
         const span = trace.span(.stream_created_callback);
         defer span.deinit();
 
         span.debug("Stream created by client: {d} on connection {d}. Kind {}", .{ stream_id, connection_id, kind });
         const self: *ServerThread = @ptrCast(@alignCast(context.?));
-        const event = Server.Event{ .stream_created_by_client = .{ .connection_id = connection_id, .stream_id = stream_id, .kind = kind } };
+        const event = Server.Event{ .stream_created = .{ .connection_id = connection_id, .stream_id = stream_id, .kind = kind } };
         _ = self.event_queue.push(event, .instant);
     }
 
