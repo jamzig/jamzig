@@ -574,8 +574,8 @@ pub const ClientThread = struct {
         self.client.setCallback(.ConnectionClosed, internalConnectionClosedCallback, self);
         self.client.setCallback(.StreamCreated, internalStreamCreatedCallback, self);
         self.client.setCallback(.StreamClosed, internalStreamClosedCallback, self);
-        self.client.setCallback(.DataReceived, internalDataReceivedCallback, self);
-        self.client.setCallback(.DataEndOfStream, internalDataEndOfStreamCallback, self);
+        self.client.setCallback(.DataReadCompleted, internalDataReadCompletedCallback, self);
+        self.client.setCallback(.DataReadEndOfStream, internalDataReadEndOfStreamCallback, self);
         self.client.setCallback(.DataReadError, internalDataReadErrorCallback, self);
         self.client.setCallback(.DataWouldBlock, internalDataReadWouldBlockCallback, self);
         self.client.setCallback(.DataWriteCompleted, internalDataWriteCompletedCallback, self);
@@ -683,7 +683,7 @@ pub const ClientThread = struct {
                 // object and push it to the event queue
                 span.debug("Reading StreamKind from peer", .{});
                 const stream_kind_buffer = try client_thread.alloc.alloc(u8, 1);
-                try stream.setReadBuffer(stream_kind_buffer);
+                try stream.setReadBuffer(stream_kind_buffer, .owned, .none);
                 stream.wantRead(true);
             },
         }
@@ -698,7 +698,7 @@ pub const ClientThread = struct {
         try self.pushEvent(.{ .stream_closed = .{ .connection_id = connection_id, .stream_id = stream_id } });
     }
 
-    fn internalDataReceivedCallback(connection_id: ConnectionId, stream_id: StreamId, data: []const u8, context: ?*anyopaque) !void {
+    fn internalDataReadCompletedCallback(connection_id: ConnectionId, stream_id: StreamId, data: []const u8, context: ?*anyopaque) !void {
         const span = trace.span(.data_received);
         defer span.deinit();
         span.debug("Data received: connection={} stream={} size={d} bytes", .{ connection_id, stream_id, data.len });
@@ -708,7 +708,7 @@ pub const ClientThread = struct {
         try self.pushEvent(.{ .data_received = .{ .connection_id = connection_id, .stream_id = stream_id, .data = data } });
     }
 
-    fn internalDataEndOfStreamCallback(connection_id: ConnectionId, stream_id: StreamId, data_read: []const u8, context: ?*anyopaque) !void {
+    fn internalDataReadEndOfStreamCallback(connection_id: ConnectionId, stream_id: StreamId, data_read: []const u8, context: ?*anyopaque) !void {
         const span = trace.span(.data_end_of_stream);
         defer span.deinit();
         span.debug("End of stream: connection={} stream={} final_data_size={d} bytes", .{ connection_id, stream_id, data_read.len });

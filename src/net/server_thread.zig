@@ -227,7 +227,7 @@ pub const ServerThread = struct {
         self.server.setCallback(.ConnectionEstablished, internalClientDisconnectedCallback, self);
         self.server.setCallback(.StreamCreated, internalStreamCreatedCallback, self);
         self.server.setCallback(.StreamClosed, internalStreamClosedByClientCallback, self);
-        self.server.setCallback(.DataReceived, internalDataReceivedCallback, self);
+        self.server.setCallback(.DataReadCompleted, internalDataReadCompletedCallback, self);
         self.server.setCallback(.DataWriteCompleted, internalDataWriteCompletedCallback, self); // Server might need this?
         self.server.setCallback(.DataReadError, internalDataReadErrorCallback, self);
         self.server.setCallback(.DataWriteError, internalDataWriteErrorCallback, self);
@@ -612,13 +612,72 @@ pub const ServerThread = struct {
                 // object and push it to the event queue
                 span.debug("Reading StreamKind from peer", .{});
                 const stream_kind_buffer = try server_thread.alloc.alloc(u8, 1);
-                try stream.setReadBuffer(stream_kind_buffer);
+                try stream.setReadBuffer(
+                    stream_kind_buffer,
+                    .borrow,
+                    .{ .custom = .{
+                        .on_success = remoteInitiatedStreamKindReceived,
+                        .on_error = remoteInitiatedStreamKindReceivedError,
+                        .context = server_thread,
+                    } },
+                );
                 stream.wantRead(true);
 
                 // FIXME: on setReadBuffer, also add the ownership and if we shuold invoke a callback
                 // and what callback to invoke. And what about timeouts how are we going to handle that?
             },
         }
+    }
+
+    fn remoteInitiatedStreamKindReceived(
+        stream: *Stream(JamSnpServer),
+        data: []const u8,
+        ctx: ?*anyopaque,
+    ) anyerror!void {
+        const span = trace.span(.remote_initiated_stream_kind_received);
+        defer span.deinit();
+
+        // check the inputs close stream when invalid
+        const server_thread: *ServerThread = @ptrCast(@alignCast(ctx.?));
+        defer server_thread.alloc.free(data);
+
+        const stream_kind: StreamKind = std.meta.intToEnum(StreamKind, data[0]) catch {
+            span.err("Invalid stream kind received: {d}. Closing stream", .{data[0]});
+            try stream.close();
+
+            return error.InvalidStreamKind;
+        };
+
+        span.debug("Remote initiated stream: {}", .{stream_kind});
+
+        // set the kind on the stream
+        stream.kind = stream_kind;
+
+        const event = Server.Event{ .stream_created = .{
+            .connection_id = stream.connection.id,
+            .stream_id = stream.id,
+            .kind = stream_kind,
+        } };
+        _ = try server_thread.event_queue.pushInstantNotFull(event);
+    }
+
+    pub fn remoteInitiatedStreamKindReceivedError(
+        stream: *Stream(JamSnpServer),
+        data: []const u8,
+        error_code: i32,
+        ctx: ?*anyopaque,
+    ) anyerror!void {
+        const span = trace.span(.remote_initiated_stream_kind_received_error);
+        defer span.deinit();
+
+        const server_thread: *ServerThread = @ptrCast(@alignCast(ctx.?));
+
+        // free the buffer when we are done
+        server_thread.alloc.free(data);
+        // on an errror we close the stream.
+        try stream.close();
+
+        span.err("Remote initiated stream kind received LSQUIC error_code: {}", .{error_code});
     }
 
     // Need a corresponding event for server-initiated streams too
@@ -634,7 +693,7 @@ pub const ServerThread = struct {
         _ = self.event_queue.push(event, .instant);
     }
 
-    fn internalDataReceivedCallback(connection_id: ConnectionId, stream_id: StreamId, data: []const u8, context: ?*anyopaque) void {
+    fn internalDataReadCompletedCallback(connection_id: ConnectionId, stream_id: StreamId, data: []const u8, context: ?*anyopaque) void {
         const span = trace.span(.data_received_callback);
         defer span.deinit();
 
