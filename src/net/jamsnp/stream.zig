@@ -249,11 +249,7 @@ pub fn Stream(T: type) type {
             if (self.read_state.buffer != null) {
                 // FIXME: this should fail
                 span.warn("Overwriting existing read buffer for stream ID: {}", .{self.id});
-
-                // Free previous buffer if we owned it
-                if (self.read_state.ownership == .owned) {
-                    self.read_state.freeBufferIfOwned(self.connection.owner.allocator);
-                }
+                self.read_state.freeBufferIfOwned(self.connection.owner.allocator);
             }
 
             self.read_state.buffer = buffer;
@@ -416,6 +412,8 @@ pub fn Stream(T: type) type {
             const stream: *Stream(T) = @alignCast(@ptrCast(stream_ctx)); // This is the internal Stream
             span.debug("onStreamRead triggered for internal stream ID: {}", .{stream.id});
 
+            span.debug("Stream ID: {}", .{@import("../../types.zig").fmt.format(stream.read_state)});
+
             // Handle message-based reading if no explicit read buffer was provided
             if (stream.read_state.buffer == null) {
                 processMessageRead(stream) catch |err| {
@@ -448,6 +446,7 @@ pub fn Stream(T: type) type {
                             });
                         },
                         else => {
+                            span.err("Generic error in message read processing for stream ID {}", .{stream.id});
                             // Generic error handling
                             shared.invokeCallback(T, &stream.connection.owner.callback_handlers, .DataReadError, .{
                                 .DataReadError = .{
@@ -482,11 +481,10 @@ pub fn Stream(T: type) type {
                     .DataReadEndOfStream = .{
                         .connection = stream.connection.id,
                         .stream = stream.id,
-                        .data_read = stream.read_state.buffer.?[0..stream.read_state.position],
                     },
                 });
-                stream.read_state.buffer = null;
-                stream.read_state.position = 0;
+                stream.read_state.reset();
+                stream.read_state.freeBufferIfOwned(stream.connection.owner.allocator);
                 stream.wantRead(false);
             } else if (bytes_read_or_error < 0) {
                 switch (std.posix.errno(bytes_read_or_error)) {
@@ -515,7 +513,9 @@ pub fn Stream(T: type) type {
                                 });
                             },
                             .custom => |callback| {
-                                // Custom callback handling
+                                // Custom callback handling, since we are passing the buffer to the callback
+                                // the callback is responsible for freeing it
+                                stream.read_state.ownership = .borrow; // make sure we don't free it
                                 callback.on_error(stream, stream.read_state.buffer.?, @intCast(bytes_read_or_error), callback.context) catch {
                                     std.debug.panic("Custom error callback failed for stream ID {}", .{stream.id});
                                 };
@@ -540,6 +540,7 @@ pub fn Stream(T: type) type {
 
             stream.read_state.position += bytes_read;
 
+            // FIXME: remove the DtaReadProgress event
             if (stream.read_state.callback_method == .events)
                 shared.invokeCallback(T, &stream.connection.owner.callback_handlers, .DataReadProgress, .{
                     .DataReadProgress = .{
@@ -551,12 +552,12 @@ pub fn Stream(T: type) type {
                 });
 
             if (stream.read_state.position == stream.read_state.buffer.?.len) {
-                span.debug("User read buffer full for stream ID: {}. Disabling wantRead.", .{stream.id});
-                stream.read_state.reset();
-                stream.wantRead(false);
+                span.debug("Read buffer filled, we completed our read: {}. .", .{stream.id});
 
                 switch (stream.read_state.callback_method) {
                     .events => {
+                        span.debug("Generating DataReadCompleted event for stream ID: {}", .{stream.id});
+                        stream.read_state.ownership = .borrow; // make sure we don't free it
                         shared.invokeCallback(T, &stream.connection.owner.callback_handlers, .DataReadCompleted, .{
                             .DataReadCompleted = .{
                                 .connection = stream.connection.id,
@@ -566,17 +567,23 @@ pub fn Stream(T: type) type {
                         });
                     },
                     .custom => {
+                        span.debug("Invoking custom callback method for stream ID: {}", .{stream.id});
                         // Custom callback handling
                         const callback = stream.read_state.callback_method.custom;
+                        stream.read_state.ownership = .borrow; // make sure we don't free it
                         callback.on_success(stream, stream.read_state.buffer.?, callback.context) catch {
                             std.debug.panic("Custom success callback failed for stream ID {}", .{stream.id});
                         };
                     },
                     .none => {
                         // do nothing
-
+                        span.debug("No event or callback called on completion for stream ID: {}", .{stream.id});
                     },
                 }
+
+                // cleanup
+                stream.read_state.reset();
+                stream.wantRead(false);
             }
         }
 
@@ -606,7 +613,6 @@ pub fn Stream(T: type) type {
                         .DataReadEndOfStream = .{
                             .connection = stream.connection.id,
                             .stream = stream.id,
-                            .data_read = &[0]u8{}, // Empty slice
                         },
                     });
                     stream.wantRead(false);
@@ -709,8 +715,6 @@ pub fn Stream(T: type) type {
                         .DataReadEndOfStream = .{
                             .connection = stream.connection.id,
                             .stream = stream.id,
-                            // Partial message data, owned by the event
-                            .data_read = message_buffer[0..stream.message_read_state.bytes_read],
                         },
                     });
 

@@ -61,7 +61,7 @@ test "create stream and send message" {
 
     // Wait for the stream creation event on the server side
     const server_stream_created_event = try test_server.expectEvent(timeout_ms, .stream_created);
-    std.log.info("Server observed stream creation with ID: {}", .{server_stream_created_event.stream_created.stream_id});
+    std.log.info("Server stream creation initiated by client with ID: {}", .{server_stream_created_event.stream_created.stream_id});
 
     // --- Send message over the stream ---
     var client_stream_handle = try test_client.buildStreamHandle(

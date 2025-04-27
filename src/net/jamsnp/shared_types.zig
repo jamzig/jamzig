@@ -150,7 +150,7 @@ pub const ServerStreamCreatedCallbackFn = *const fn (connection: ConnectionId, s
 pub const StreamClosedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 pub const DataReadProgressCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, bytes_read: usize, total_size: usize, context: ?*anyopaque) void;
 pub const DataReceivedCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, data: []const u8, context: ?*anyopaque) void;
-pub const DataEndOfStreamCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, data_read: []const u8, context: ?*anyopaque) void;
+pub const DataEndOfStreamCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 pub const DataErrorCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, error_code: i32, context: ?*anyopaque) void;
 pub const DataWouldBlockCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, context: ?*anyopaque) void;
 pub const DataWriteProgressCallbackFn = *const fn (connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize, context: ?*anyopaque) void;
@@ -180,7 +180,7 @@ pub fn EventArg(T: type) type {
         StreamClosed: struct { connection: ConnectionId, stream: StreamId },
         DataReadProgress: struct { connection: ConnectionId, stream: StreamId, bytes_read: usize, total_size: usize },
         DataReadCompleted: struct { connection: ConnectionId, stream: StreamId, data: []const u8 },
-        DataReadEndOfStream: struct { connection: ConnectionId, stream: StreamId, data_read: []const u8 },
+        DataReadEndOfStream: struct { connection: ConnectionId, stream: StreamId },
         DataReadError: struct { connection: ConnectionId, stream: StreamId, error_code: i32 },
         DataWouldBlock: struct { connection: ConnectionId, stream: StreamId },
         DataWriteProgress: struct { connection: ConnectionId, stream: StreamId, bytes_written: usize, total_size: usize },
@@ -237,7 +237,7 @@ pub fn invokeCallback(T: type, callback_handlers: *const CallbackHandlers, event
             },
             .DataReadEndOfStream => |ev_args| {
                 const callback: DataEndOfStreamCallbackFn = @ptrCast(@alignCast(callback_ptr));
-                callback(ev_args.connection, ev_args.stream, ev_args.data_read, handler.context);
+                callback(ev_args.connection, ev_args.stream, handler.context);
             },
             .DataReadError => |ev_args| {
                 const callback: DataErrorCallbackFn = @ptrCast(@alignCast(callback_ptr));
