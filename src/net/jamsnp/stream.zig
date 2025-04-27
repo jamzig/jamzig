@@ -30,12 +30,39 @@ pub fn Stream(T: type) type {
             position: usize = 0,
             ownership: Ownership = .borrow,
             callback_method: CallbackMethod = .none,
+
+            pub fn freeBufferIfOwned(self: *WriteState, allocator: std.mem.Allocator) void {
+                if (self.ownership == .owned and self.buffer != null) {
+                    allocator.free(self.buffer.?);
+                    self.buffer = null;
+                }
+                self.ownership = .borrow; // Reset ownership
+            }
+
+            pub fn reset(self: *WriteState) void {
+                self.want_write = false;
+                self.position = 0;
+                self.buffer = null;
+            }
         };
 
         const ReadState = struct {
             want_read: bool = false,
             buffer: ?[]u8 = null, // Buffer provided by user via command
             position: usize = 0,
+
+            pub fn freeBuffer(self: *ReadState, allocator: std.mem.Allocator) void {
+                if (self.buffer) |buffer| {
+                    allocator.free(buffer);
+                    self.buffer = null;
+                }
+            }
+
+            pub fn reset(self: *ReadState) void {
+                self.want_read = false;
+                self.position = 0;
+                self.buffer = null;
+            }
         };
 
         const MessageReadState = enum {
@@ -399,7 +426,7 @@ pub fn Stream(T: type) type {
 
             // Handle message-based reading if no explicit read buffer was provided
             if (stream.read_state.buffer == null) {
-                processMessageRead(maybe_lsquic_stream, stream) catch |err| {
+                processMessageRead(stream) catch |err| {
                     span.err("Error in message read processing for stream ID {}: {s}", .{ stream.id, @errorName(err) });
                     // Handle specific errors and potentially notify via callback
                     switch (err) {
@@ -540,14 +567,9 @@ pub fn Stream(T: type) type {
         }
 
         /// Process reading message-based data
-        fn processMessageRead(maybe_lsquic_stream: ?*lsquic.lsquic_stream_t, stream: *Stream(T)) !void {
+        fn processMessageRead(stream: *Stream(T)) !void {
             const span = trace.span(.process_message_read);
             defer span.deinit();
-
-            const lsquic_stream = maybe_lsquic_stream orelse {
-                span.err("processMessageRead called with null lsquic_stream", .{});
-                return error.NullLsquicStream;
-            };
 
             // Initialize message reading if idle
             if (stream.message_read_state.state == .idle) {
@@ -559,7 +581,9 @@ pub fn Stream(T: type) type {
             // Step 1: Read message length (4 bytes)
             if (stream.message_read_state.state == .reading_length) {
                 const length_remaining = 4 - stream.message_read_state.length_read;
-                const read_result = lsquic.lsquic_stream_read(lsquic_stream, &stream.message_read_state.length_buffer[stream.message_read_state.length_read], length_remaining);
+                // NOTE: using stream.lsquic_stream as set in onStreamCreated
+                // this could move. Check if there are guarantees on the position
+                const read_result = lsquic.lsquic_stream_read(stream.lsquic_stream, &stream.message_read_state.length_buffer[stream.message_read_state.length_read], length_remaining);
 
                 if (read_result == 0) {
                     // End of stream during length reading
@@ -662,7 +686,7 @@ pub fn Stream(T: type) type {
                 };
 
                 const bytes_remaining = message_length - stream.message_read_state.bytes_read;
-                const read_result = lsquic.lsquic_stream_read(lsquic_stream, message_buffer.ptr + stream.message_read_state.bytes_read, bytes_remaining);
+                const read_result = lsquic.lsquic_stream_read(stream.lsquic_stream, message_buffer.ptr + stream.message_read_state.bytes_read, bytes_remaining);
 
                 if (read_result == 0) {
                     // End of stream during body reading - unexpected termination
@@ -691,9 +715,8 @@ pub fn Stream(T: type) type {
                                 .stream = stream.id,
                             },
                         });
-                        return; // Keep wantRead true, we will try again later
+                        return; // Keep wantRead true, LSQUIC will try again later
                     } else {
-                        // Real error
                         span.err("Error reading message body from stream ID {}: {s}", .{ stream.id, @tagName(err) });
                         shared.invokeCallback(T, &stream.connection.owner.callback_handlers, .DataReadError, .{
                             .DataReadError = .{
@@ -703,7 +726,6 @@ pub fn Stream(T: type) type {
                             },
                         });
 
-                        // Free allocated buffer on error
                         stream.message_read_state.freeBuffers(stream.connection.owner.allocator);
                         stream.message_read_state.reset();
                         stream.wantRead(false);
@@ -711,11 +733,14 @@ pub fn Stream(T: type) type {
                     }
                 }
 
-                // Successfully read some bytes of the message body
                 const bytes_read: usize = @intCast(read_result);
                 stream.message_read_state.bytes_read += bytes_read;
 
-                span.debug("Read {d}/{d} bytes of message body on stream ID: {}", .{ stream.message_read_state.bytes_read, message_length, stream.id });
+                span.debug("Read {d}/{d} bytes of message body on stream ID: {}", .{
+                    stream.message_read_state.bytes_read,
+                    message_length,
+                    stream.id,
+                });
 
                 // Check if message is complete
                 if (stream.message_read_state.bytes_read == message_length) {
@@ -767,29 +792,36 @@ pub fn Stream(T: type) type {
                 return;
             }
 
-            const written = lsquic.lsquic_stream_write(stream.lsquic_stream, data_to_write.ptr, data_to_write.len);
+            const written_or_errorcode = lsquic.lsquic_stream_write(stream.lsquic_stream, data_to_write.ptr, data_to_write.len);
 
-            if (written == 0) {
+            if (written_or_errorcode == 0) {
                 span.trace("No data written to stream ID {} (likely blocked)", .{stream.id});
-                // Keep wantWrite true
+                // Keep wantWrite true, LSQUIC will try us again
                 return;
-            } else if (written < 0) {
-                if (std.posix.errno(written) == std.posix.E.AGAIN) {
+            } else if (written_or_errorcode < 0) {
+                if (std.posix.errno(written_or_errorcode) == std.posix.E.AGAIN) {
                     span.trace("Stream write would block (EAGAIN) for stream ID {}", .{stream.id});
                     // Keep wantWrite true
                     // LSQUIC will call us again when it can write
                     return;
                 } else {
-                    const err_code = -written;
-                    span.err("Stream write failed for stream ID {} with error code: {d}", .{ stream.id, err_code });
-                    if (stream.write_state.callback_method != .none)
+                    span.err("Stream write failed for stream ID {} with error code: {d}", .{ stream.id, written_or_errorcode });
+                    if (stream.write_state.callback_method != .none) {
+                        shared.invokeCallback(T, &stream.connection.owner.callback_handlers, .DataWriteError, .{
+                            .DataWriteError = .{
+                                .connection = stream.connection.id,
+                                .stream = stream.id,
+                                .error_code = @intCast(-written_or_errorcode),
+                            },
+                        });
                         stream.wantWrite(false);
+                    }
                     return;
                 }
             }
 
-            // written > 0
-            const bytes_written: usize = @intCast(written);
+            // Written > 0
+            const bytes_written: usize = @intCast(written_or_errorcode);
             span.debug("Written {d} bytes to stream ID: {}", .{ bytes_written, stream.id });
             stream.write_state.position += bytes_written;
 
@@ -830,15 +862,9 @@ pub fn Stream(T: type) type {
                 }
 
                 // Free the buffer if we own it
-                if (stream.write_state.ownership == .owned and stream.write_state.buffer != null) {
-                    const buffer_to_free = stream.write_state.buffer.?;
-                    stream.connection.owner.allocator.free(buffer_to_free);
-                    span.debug("Freed owned write buffer for stream ID: {}", .{stream.id});
-                }
+                stream.write_state.freeBufferIfOwned(stream.connection.owner.allocator);
+                stream.write_state.reset();
 
-                stream.write_state.buffer = null;
-                stream.write_state.position = 0;
-                stream.write_state.ownership = .borrow;
                 span.trace("Disabling write interest for stream ID {}", .{stream.id});
                 stream.wantWrite(false);
 
@@ -866,13 +892,9 @@ pub fn Stream(T: type) type {
             const stream: *Stream(T) = @alignCast(@ptrCast(stream_ctx)); // Internal Stream
             span.debug("Processing internal stream closure for ID: {}", .{stream.id});
 
-            // Invoke the user-facing callback
-            shared.invokeCallback(T, &stream.connection.owner.callback_handlers, .StreamClosed, .{
-                .StreamClosed = .{
-                    .connection = stream.connection.id,
-                    .stream = stream.id,
-                },
-            });
+            stream.write_state.freeBufferIfOwned(stream.connection.owner.allocator);
+            stream.read_state.freeBuffer(stream.connection.owner.allocator);
+            stream.message_read_state.freeBuffers(stream.connection.owner.allocator);
 
             // Remove the internal stream from the client's map
             if (stream.connection.owner.streams.fetchRemove(stream.id)) |_| {
@@ -881,11 +903,21 @@ pub fn Stream(T: type) type {
                 span.warn("Closing an internal stream (ID: {}) that was not found in the map.", .{stream.id});
             }
 
+            // Invoke the user-facing callback
+            shared.invokeCallback(T, &stream.connection.owner.callback_handlers, .StreamClosed, .{
+                .StreamClosed = .{
+                    .connection = stream.connection.id,
+                    .stream = stream.id,
+                },
+            });
+
             // Destroy our internal stream context struct
-            const id = stream.id;
+            const stream_id = stream.id;
+
+            // Destroy the object from the heap
             stream.destroy(stream.connection.owner.allocator);
 
-            span.debug("Internal stream cleanup complete for formerly ID: {}", .{id});
+            span.debug("Internal stream cleanup complete for formerly ID: {}", .{stream_id});
         }
     };
 }
