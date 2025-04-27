@@ -769,14 +769,12 @@ pub const ClientThread = struct {
         try self.pushEvent(.{ .data_write_error = .{ .connection_id = connection_id, .stream_id = stream_id, .error_code = error_code } });
     }
 
-    fn internalMessageSendCallback(connection_id: ConnectionId, stream_id: StreamId, message: []const u8, context: ?*anyopaque) !void {
-        const span = trace.span(.message_received);
+    fn internalMessageSendCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) !void {
+        const span = trace.span(.message_send);
         defer span.deinit();
-        span.debug("Message received: connection={} stream={} size={d} bytes", .{ connection_id, stream_id, message.len });
-        span.trace("Message first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (message.len > 16) message[0..16] else message)});
+        span.debug("Message send: connection={} stream={}", .{ connection_id, stream_id });
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
-
         try self.pushEvent(.{ .message_send = .{ .connection_id = connection_id, .stream_id = stream_id } });
     }
 
@@ -787,7 +785,6 @@ pub const ClientThread = struct {
         span.trace("Message first bytes: {any}", .{std.fmt.fmtSliceHexLower(if (message.len > 16) message[0..16] else message)});
 
         const self: *ClientThread = @ptrCast(@alignCast(context.?));
-
         try self.pushEvent(.{ .message_received = .{ .connection_id = connection_id, .stream_id = stream_id, .message = message } });
     }
 };
