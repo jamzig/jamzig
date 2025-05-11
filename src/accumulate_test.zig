@@ -123,6 +123,11 @@ test "tiny/enqueue_self_referential-4.bin" {
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/enqueue_self_referential-4.bin");
 }
 
+test "tiny/same_code_different_services-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/same_code_different_services-1.bin");
+}
+
 // Full test vectors
 pub const FULL_PARAMS = jam_params.FULL_PARAMS;
 
