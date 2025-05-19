@@ -68,10 +68,6 @@ fn shuffleCore(
 }
 
 /// Fisher-Yates shuffle implementation following the formal specification
-/// This is an optimized implementation that uses O(n) memory instead of O(n²),
-/// while preserving the exact same results as the original recursive implementation.
-///
-/// This version uses a single dynamic allocation for both working arrays.
 pub fn shuffleWithHashAlloc(
     comptime T: type,
     allocator: std.mem.Allocator,
@@ -96,20 +92,34 @@ pub fn shuffleWithHashAlloc(
     shuffleCore(T, sequence, result, seq_copy, hash);
 }
 
+// Constant representing the maximum safe allocation on stack (in bytes)
+const MAX_SAFE_STACK_BYTES = 500 * 1024;
+
 /// Compile-time maximum size Fisher-Yates shuffle with zero heap allocations
-/// This function is ideal for validators where the maximum count is known at compile time
+/// This function is ideal for where the maximum count is known at compile time
 pub fn shuffleWithHash(
     comptime T: type,
     comptime max_size: usize,
     sequence: []T,
     hash: [32]u8,
 ) void {
+    // Calculate total bytes needed for both arrays at compile time
+    const total_bytes_needed = 2 * max_size * @sizeOf(T);
+
+    // If the size is too large for stack allocation, panic at compile time
+    if (comptime total_bytes_needed > MAX_SAFE_STACK_BYTES) {
+        @compileError("Fisher-Yates stack arrays would exceed safe stack size limit. " ++
+            "Array size: " ++ std.fmt.comptimePrint("{}", .{total_bytes_needed}) ++ " bytes, " ++
+            "limit: " ++ std.fmt.comptimePrint("{}", .{MAX_SAFE_STACK_BYTES}) ++ " bytes. " ++
+            "Use shuffleWithHashAlloc for large sequences.");
+    }
+
     // Handle empty sequence case
     if (sequence.len < 1) return;
 
     // Verify the sequence size is within compile-time limits
     if (sequence.len > max_size) {
-        @panic("shuffleWithHashComptime: sequence length exceeds compile-time maximum");
+        @panic("shuffleWithHash: sequence length exceeds compile-time maximum");
     }
 
     // Fixed-size implementation - uses stack memory instead of heap
