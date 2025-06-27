@@ -4,7 +4,7 @@ const jam_types = @import("jam_types.zig");
 
 pub const jam_params = @import("../jam_params.zig");
 
-pub const BASE_PATH = "src/jamtestvectors/data/preimages/";
+pub const BASE_PATH = "src/jamtestvectors/data/stf/preimages/";
 
 // --------------------------------------------
 // -- Preimages
