@@ -159,10 +159,10 @@ pub const WorkPackage = struct {
 
 pub const WorkExecResult = union(enum(u8)) {
     ok: []const u8 = 0,
-    out_of_gas: void = 1,
-    panic: void = 2,
-    bad_code: void = 3,
-    code_oversize: void = 4,
+    panic: void = 1,
+    page_fault: void = 2,
+    host_call_fault: void = 3,
+    out_of_gas: void = 4,
 
     /// length of result
     pub fn len(self: *const @This()) usize {
@@ -207,10 +207,10 @@ pub const WorkExecResult = union(enum(u8)) {
         // First write the tag byte based on the union variant
         const tag: u8 = switch (self.*) {
             .ok => 0,
-            .out_of_gas => 1,
-            .panic => 2,
-            .bad_code => 3,
-            .code_oversize => 4,
+            .panic => 1,
+            .page_fault => 2,
+            .host_call_fault => 3,
+            .out_of_gas => 4,
         };
         try writer.writeByte(tag);
 
@@ -236,10 +236,10 @@ pub const WorkExecResult = union(enum(u8)) {
                 try reader.readNoEof(data);
                 break :blk WorkExecResult{ .ok = data };
             },
-            1 => WorkExecResult{ .out_of_gas = {} },
-            2 => WorkExecResult{ .panic = {} },
-            3 => WorkExecResult{ .bad_code = {} },
-            4 => WorkExecResult{ .code_oversize = {} },
+            1 => WorkExecResult{ .panic = {} },
+            2 => WorkExecResult{ .page_fault = {} },
+            3 => WorkExecResult{ .host_call_fault = {} },
+            4 => WorkExecResult{ .out_of_gas = {} },
             else => error.InvalidTag,
         };
     }
