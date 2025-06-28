@@ -39,6 +39,7 @@ pub fn machineInvocation(
         program_code,
         args,
         gas,
+        true, // enable dynamic allocation by default for machine invocations
     ) catch {
         return .{ .gas_used = 0, .result = .{ .terminal = .panic } };
     };
