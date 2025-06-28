@@ -132,7 +132,6 @@ test "Correct parsing of all tiny test vectors" {
 
 test "Correct parsing of all full test vectors" {
     const allocator = std.testing.allocator;
-
     const dir = @import("dir.zig");
     var test_vectors = try dir.scan(
         TestCase,

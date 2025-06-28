@@ -95,7 +95,7 @@ test "detectKeyType simple state" {
     const testing = std.testing;
 
     // Test simple state key
-    var simple_key = [_]u8{0} ** 32;
+    var simple_key = [_]u8{0} ** 31;
     simple_key[0] = 5;
     try testing.expectEqual(detectKeyType(simple_key), .state_component);
 }
@@ -104,7 +104,7 @@ test "detectKeyType delta base" {
     const testing = std.testing;
 
     // Test delta base key
-    var base_key = [_]u8{0} ** 32;
+    var base_key = [_]u8{0} ** 31;
     base_key[0] = 255;
     base_key[1] = 42;
     base_key[3] = 42;
@@ -116,7 +116,7 @@ test "detectKeyType delta base" {
 test "detectKeyType service entries" {
     const testing = std.testing;
 
-    var key = [_]u8{0} ** 32;
+    var key = [_]u8{0} ** 31;
 
     // Test storage key
     key[1] = 0xFF;

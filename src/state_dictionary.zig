@@ -279,7 +279,7 @@ pub const DiffType = enum {
 };
 
 pub const DiffEntry = struct {
-    key: [32]u8,
+    key: types.StateKey,
     diff_type: DiffType,
     me_value: ?[]const u8 = null,
     other_value: ?[]const u8 = null,
