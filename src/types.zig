@@ -49,6 +49,7 @@ pub const BandersnatchVrfRoot = BlsPublic; // TODO: check if this is correct
 pub const BandersnatchVrfSignature = [96]u8;
 pub const BandersnatchIetfVrfSignature = [96]u8;
 pub const BandersnatchRingVrfSignature = [784]u8;
+pub const BandersnatchRingCommitment = [144]u8;
 pub const Ed25519Signature = [64]u8;
 
 pub const BandersnatchKeyPair = struct {
@@ -706,20 +707,7 @@ pub const GammaS = union(enum) {
 pub const GammaA = []TicketBody;
 pub const GammaZ = BlsPublic;
 
-pub const OffendersMark = struct {
-    items: []Ed25519Public, // SIZE(0..validators_count)
-
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.items);
-        self.* = undefined;
-    }
-
-    pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
-        return @This(){
-            .items = try allocator.dupe(Ed25519Public, self.offenders),
-        };
-    }
-};
+pub const OffendersMark = []Ed25519Public; // SIZE(0..validators_count)
 
 pub const HeaderUnsigned = struct {
     parent: HeaderHash,

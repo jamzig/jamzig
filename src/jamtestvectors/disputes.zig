@@ -52,7 +52,7 @@ pub const OutputData = struct {
     offenders_mark: types.OffendersMark,
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        self.offenders_mark.deinit(allocator);
+        allocator.free(self.offenders_mark);
         self.* = undefined;
     }
 };

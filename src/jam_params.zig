@@ -35,7 +35,7 @@ pub const Params = struct {
     // H: The size of recent history, in blocks
     recent_history_size: u8 = 8, // H
     // I: The maximum amount of work items in a package
-    max_work_items_per_package: u8 = 4, // I
+    max_work_items_per_package: u8 = 16, // I
     // J: The maximum amount of dependencies in a work report segment-root
     // lookup dictionary and the number of pre-requisites for a work item
     max_number_of_dependencies_for_work_reports: u8 = 8, // J
