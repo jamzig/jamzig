@@ -301,7 +301,7 @@ pub const Memory = struct {
         span.debug("Creating deep clone of memory system", .{});
 
         // Initialize a new empty memory system
-        var new_memory = try Memory.initEmpty(allocator);
+        var new_memory = try Memory.initEmpty(allocator, self.dynamic_allocation_enabled);
         errdefer new_memory.deinit();
 
         // Clone all pages
