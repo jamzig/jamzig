@@ -118,7 +118,7 @@ pub const TargetServer = struct {
     }
 
     /// Read a message from the stream
-    fn readMessage(self: *Self, stream: net.Stream) !messages.codec.Deserialized(messages.Message) {
+    pub fn readMessage(self: *Self, stream: net.Stream) !messages.codec.Deserialized(messages.Message) {
         const frame_data = try frame.readFrame(self.allocator, stream);
         defer self.allocator.free(frame_data);
 
@@ -127,7 +127,7 @@ pub const TargetServer = struct {
     }
 
     /// Send a message to the stream
-    fn sendMessage(self: *Self, stream: net.Stream, message: messages.Message) !void {
+    pub fn sendMessage(self: *Self, stream: net.Stream, message: messages.Message) !void {
         const encoded = try messages.encodeMessage(self.allocator, message);
         defer self.allocator.free(encoded);
 
@@ -135,7 +135,7 @@ pub const TargetServer = struct {
     }
 
     /// Process an incoming message and generate appropriate response
-    fn processMessage(self: *Self, message: messages.Message, handshake_complete: *bool) !?messages.Message {
+    pub fn processMessage(self: *Self, message: messages.Message, handshake_complete: *bool) !?messages.Message {
         const span = trace.span(.process_message);
         defer span.deinit();
 

@@ -8,11 +8,11 @@ pub const FUZZ_TARGET_VERSION = messages.Version{
 };
 
 /// Protocol version supported by this implementation
-const GREYPAPER_VERSION = @import("../version.zig");
+const main_version = @import("../version.zig");
 pub const PROTOCOL_VERSION = messages.Version{
-    .major = GREYPAPER_VERSION.major,
-    .minor = GREYPAPER_VERSION.minor,
-    .patch = GREYPAPER_VERSION.patch,
+    .major = main_version.GREYPAPER_VERSION.major,
+    .minor = main_version.GREYPAPER_VERSION.minor,
+    .patch = main_version.GREYPAPER_VERSION.patch,
 };
 
 /// Name of the fuzz protocol target
