@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../types.zig");
 const state = @import("../state.zig");
+const state_keys = @import("../state_keys.zig");
 const PVM = @import("../pvm.zig").PVM;
 const Params = @import("../jam_params.zig").Params;
 
@@ -476,7 +477,9 @@ pub fn GeneralHostCalls(comptime params: Params) type {
 
             // Look up preimage at the specified timeslot
             span.debug("Looking up preimage", .{});
-            const preimage = service_account.?.getPreimage(hash) orelse {
+            const actual_service_id = if (service_id == 0xFFFFFFFFFFFFFFFF) host_ctx.service_id else @as(u32, @intCast(service_id));
+            const preimage_key = state_keys.constructServicePreimageKey(actual_service_id, hash);
+            const preimage = service_account.?.getPreimage(preimage_key) orelse {
                 // Preimage not found, return error status
                 span.debug("Preimage not found, returning NONE", .{});
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE); // Item does not exist
@@ -553,30 +556,19 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             defer key_data.deinit();
             span.trace("Key = {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
-            // Construct storage key: H(E_4(service_id) ⌢ key_data)
-            span.debug("Constructing storage key", .{});
-            var key_input = std.ArrayList(u8).init(host_ctx.allocator);
-            defer key_input.deinit();
-
-            // Add service ID as bytes (4 bytes in little-endian)
-            var service_id_bytes: [4]u8 = undefined;
-            std.mem.writeInt(u32, &service_id_bytes, if (service_id == 0xFFFFFFFFFFFFFFFF) host_ctx.service_id else @intCast(service_id), .little);
-            key_input.appendSlice(&service_id_bytes) catch {
-                span.err("Failed to append service ID to key input", .{});
-                return .{ .terminal = .panic };
-            };
-
-            // Add key data
-            key_input.appendSlice(key_data.buffer) catch {
-                span.err("Failed to append key data to key input", .{});
-                return .{ .terminal = .panic };
-            };
-
-            // Hash to get final storage key
-            var storage_key: [32]u8 = undefined;
-            // FIXME: we can hash without allocation
-            std.crypto.hash.blake2.Blake2b256.hash(key_input.items, &storage_key, .{});
-            span.trace("Generated storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
+            // Hash the key_data first before constructing storage key
+            span.debug("Hashing key data", .{});
+            var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+            hasher.update(key_data.buffer);
+            var key_hash: [32]u8 = undefined;
+            hasher.final(&key_hash);
+            
+            // Construct storage key using the hash
+            span.debug("Constructing PVM storage key", .{});
+            const actual_service_id = if (service_id == 0xFFFFFFFFFFFFFFFF) host_ctx.service_id else @as(u32, @intCast(service_id));
+            
+            const storage_key = state_keys.constructStorageKey(actual_service_id, key_hash);
+            span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
             // Look up the value in storage
             span.debug("Looking up value in storage", .{});
@@ -654,29 +646,18 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             defer key_data.deinit();
             span.trace("Key data: {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
-            // Construct storage key: H(E_4(service_id) ⌢ key_data)
-            span.debug("Constructing storage key", .{});
-            var key_input = std.ArrayList(u8).init(host_ctx.allocator);
-            defer key_input.deinit();
-
-            // Add service ID as bytes (4 bytes in little-endian)
-            var service_id_bytes: [4]u8 = undefined;
-            std.mem.writeInt(u32, &service_id_bytes, host_ctx.service_id, .little);
-            key_input.appendSlice(&service_id_bytes) catch {
-                span.err("Failed to append service ID to key input", .{});
-                return .{ .terminal = .panic };
-            };
-
-            // Add key data
-            key_input.appendSlice(key_data.buffer) catch {
-                span.err("Failed to append key data to key input", .{});
-                return .{ .terminal = .panic };
-            };
-
-            // Hash to get final storage key
-            var storage_key: [32]u8 = undefined;
-            std.crypto.hash.blake2.Blake2b256.hash(key_input.items, &storage_key, .{});
-            span.trace("Generated storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
+            // Hash the key_data first before constructing storage key
+            span.debug("Hashing key data", .{});
+            var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+            hasher.update(key_data.buffer);
+            var key_hash: [32]u8 = undefined;
+            hasher.final(&key_hash);
+            
+            // Construct storage key using the hash
+            span.debug("Constructing PVM storage key", .{});
+            
+            const storage_key = state_keys.constructStorageKey(host_ctx.service_id, key_hash);
+            span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
             // Check if this is a removal operation (v_z == 0)
             if (v_z == 0) {

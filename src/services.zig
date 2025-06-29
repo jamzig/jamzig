@@ -3,6 +3,7 @@ const math = std.math;
 const mem = std.mem;
 
 const types = @import("types.zig");
+const state_keys = @import("state_keys.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -89,8 +90,8 @@ pub const AccountUpdate = struct {
 
 /// See GP0.4.1p@Ch9
 pub const ServiceAccount = struct {
-    // Storage data on-chain
-    storage: std.AutoHashMap(Hash, []const u8),
+    // Storage data on-chain - using 31-byte structured keys
+    storage: std.AutoHashMap(types.StateKey, []const u8),
 
     // Preimages for in-core access. This enables the Refine logic of the
     // service to use the data. The service manages this through its 'p'
@@ -98,8 +99,8 @@ pub const ServiceAccount = struct {
 
     // Preimage data, once supplied, may not be removed freely; instead it goes
     // through a process of being marked as unavailable, and only after a period of
-    // time may it be removed from state
-    preimages: std.AutoHashMap(Hash, []const u8),
+    // time may it be removed from state - using 31-byte structured keys
+    preimages: std.AutoHashMap(types.StateKey, []const u8),
     preimage_lookups: std.AutoHashMap(PreimageLookupKey, PreimageLookup),
 
     // Must be present in pre-image lookup, this in self.preimages
@@ -116,8 +117,8 @@ pub const ServiceAccount = struct {
 
     pub fn init(allocator: Allocator) ServiceAccount {
         return .{
-            .storage = std.AutoHashMap(Hash, []const u8).init(allocator),
-            .preimages = std.AutoHashMap(Hash, []const u8).init(allocator),
+            .storage = std.AutoHashMap(types.StateKey, []const u8).init(allocator),
+            .preimages = std.AutoHashMap(types.StateKey, []const u8).init(allocator),
             .preimage_lookups = std.AutoHashMap(PreimageLookupKey, PreimageLookup).init(allocator),
             .code_hash = undefined,
             .balance = 0,
@@ -177,25 +178,25 @@ pub const ServiceAccount = struct {
     }
 
     // Functionality to read and write storage, reflecting access patterns in Section 4.9.2 on Service State.
-    pub fn readStorage(self: *ServiceAccount, key: Hash) ?[]const u8 {
+    pub fn readStorage(self: *ServiceAccount, key: types.StateKey) ?[]const u8 {
         return self.storage.get(key);
     }
 
-    pub fn resetStorage(self: *ServiceAccount, key: Hash) void {
+    pub fn resetStorage(self: *ServiceAccount, key: types.StateKey) void {
         if (self.storage.getPtr(key)) |old_value_ptr| {
             self.storage.allocator.free(old_value_ptr.*);
-            self.storage.put(key, &[_]u8{});
+            self.storage.put(key, &[_]u8{}) catch unreachable;
         }
     }
 
-    pub fn removeStorage(self: *ServiceAccount, key: Hash) void {
+    pub fn removeStorage(self: *ServiceAccount, key: types.StateKey) void {
         if (self.storage.getPtr(key)) |old_value_ptr| {
             self.storage.allocator.free(old_value_ptr.*);
             _ = self.storage.remove(key);
         }
     }
 
-    pub fn writeStorage(self: *ServiceAccount, key: Hash, value: []const u8) !?[]const u8 {
+    pub fn writeStorage(self: *ServiceAccount, key: types.StateKey, value: []const u8) !?[]const u8 {
         // Clear the old, otherwise we are leaking
         const old_value = self.storage.get(key);
 
@@ -204,23 +205,51 @@ pub const ServiceAccount = struct {
         return old_value;
     }
 
-    pub fn writeStorageFreeOldValue(self: *ServiceAccount, key: Hash, value: []const u8) !void {
+    pub fn writeStorageFreeOldValue(self: *ServiceAccount, key: types.StateKey, value: []const u8) !void {
         const maybe_old_value = try self.writeStorage(key, value);
         if (maybe_old_value) |old_value| self.storage.allocator.free(old_value);
     }
 
     // Functions to add and manage preimages correspond to the discussion in Section 4.9.2 and Appendix D.
-    pub fn addPreimage(self: *ServiceAccount, hash: Hash, preimage: []const u8) !void {
+    pub fn addPreimage(self: *ServiceAccount, key: types.StateKey, preimage: []const u8) !void {
         const new_preimage = try self.preimages.allocator.dupe(u8, preimage);
-        try self.preimages.put(hash, new_preimage);
+        try self.preimages.put(key, new_preimage);
     }
 
-    pub fn getPreimage(self: *const ServiceAccount, hash: Hash) ?[]const u8 {
-        return self.preimages.get(hash);
+    pub fn getPreimage(self: *const ServiceAccount, key: types.StateKey) ?[]const u8 {
+        return self.preimages.get(key);
     }
 
-    pub fn hasPreimage(self: *const ServiceAccount, hash: Hash) bool {
-        return self.preimages.contains(hash);
+    /// Legacy compatibility method for hash-based preimage access
+    /// TEMPORARY: Will be removed when all callers use structured keys
+    pub fn getPreimageByHash(self: *const ServiceAccount, hash: Hash) ?[]const u8 {
+        // Iterate through all preimages to find one that matches the hash
+        // This is inefficient but needed for compatibility during transition
+        var iter = self.preimages.iterator();
+        while (iter.next()) |entry| {
+            const key = entry.key_ptr.*;
+            
+            // Extract hash portion from structured preimage key
+            // C_variant3 format: [n₀, h₀, n₁, h₁, n₂, h₂, n₃, h₃, h₄, h₅, ..., h₂₆]
+            // For preimage keys, data = [254, 255, 255, 255, h₁, h₂, ..., h₂₈]
+            // Result: [n₀, 254, n₁, 255, n₂, 255, n₃, 255, h₁, h₂, ..., h₂₈]
+            
+            // Check if this is actually a preimage key by verifying the marker pattern
+            if (key[1] != 254 or key[3] != 255 or key[5] != 255 or key[7] != 255) {
+                continue; // Not a preimage key
+            }
+            
+            // Hash bytes h₁...h₂₈ are at positions 8-30 in the key
+            // Compare with hash[1..29] (we skip h₀ since it's not stored in the key)
+            if (std.mem.eql(u8, key[8..31], hash[1..29])) {
+                return entry.value_ptr.*;
+            }
+        }
+        return null;
+    }
+
+    pub fn hasPreimage(self: *const ServiceAccount, key: types.StateKey) bool {
+        return self.preimages.contains(key);
     }
 
     //  PreImageLookups assume correct state, that is when you sollicit a
@@ -257,6 +286,7 @@ pub const ServiceAccount = struct {
     }
 
     /// Forgets a preimage
+    /// TEMPORARY: Still uses hash-based lookup until Phase 3 updates host calls
     pub fn forgetPreimage(
         self: *ServiceAccount,
         hash: Hash,
@@ -270,12 +300,12 @@ pub const ServiceAccount = struct {
             var pi = preimage_lookup.asSliceMut();
             if (pi.len == 0) {
                 _ = self.preimage_lookups.remove(lookup_key);
-                _ = self.preimages.remove(hash);
+                self.removePreimageByHash(hash);
             } else if (pi.len == 1) {
                 preimage_lookup.status[1] = current_slot; // [x, t]
             } else if (pi.len == 2 and pi[1].? < current_slot -| preimage_expungement_period) {
                 _ = self.preimage_lookups.remove(lookup_key);
-                _ = self.preimages.remove(hash);
+                self.removePreimageByHash(hash);
             } else if (pi.len == 3 and pi[1].? < current_slot -| preimage_expungement_period) {
                 // [x,y,w]
                 pi[0] = pi[2];
@@ -287,6 +317,34 @@ pub const ServiceAccount = struct {
             }
         } else {
             return error.PreimageLookupKeyMissing;
+        }
+    }
+
+    /// Internal helper to remove preimage by hash
+    /// TEMPORARY: Used during transition period
+    fn removePreimageByHash(self: *ServiceAccount, target_hash: Hash) void {
+        // Iterate through preimages to find one with matching hash portion
+        var iter = self.preimages.iterator();
+        var key_to_remove: ?types.StateKey = null;
+        
+        while (iter.next()) |entry| {
+            const key = entry.key_ptr.*;
+            
+            // Check if this is a preimage key and extract hash portion
+            if (key[1] == 254 and key[3] == 255 and key[5] == 255 and key[7] == 255) {
+                // This is a preimage key, compare the hash portion (h₁...h₂₈)
+                // Hash bytes h₁...h₂₈ are at positions 8-30 in the key
+                if (std.mem.eql(u8, key[8..31], target_hash[1..29])) {
+                    key_to_remove = key;
+                    break;
+                }
+            }
+        }
+        
+        if (key_to_remove) |key| {
+            if (self.preimages.fetchRemove(key)) |removed| {
+                self.preimages.allocator.free(removed.value);
+            }
         }
     }
 
@@ -363,7 +421,7 @@ pub const ServiceAccount = struct {
     // 9.2.2 Implement the historical lookup function
     pub fn historicalLookup(self: *ServiceAccount, time: Timeslot, hash: Hash) ?[]const u8 {
         // first get the preimage, if not return null
-        if (self.getPreimage(hash)) |preimage| {
+        if (self.getPreimageByHash(hash)) |preimage| {
             // see if we have it in the lookup table
             if (self.preimage_lookups.get(PreimageLookupKey{ .hash = hash, .length = @intCast(preimage.len) })) |lookup| {
                 const status = lookup.status;
@@ -499,8 +557,10 @@ pub const Delta = struct {
     pub fn integratePreimage(self: *Delta, preimages: []const PreimageSubmission, t: Timeslot) !void {
         for (preimages) |item| {
             if (self.getAccount(item.index)) |account| {
-                try account.addPreimage(item.hash, item.preimage);
-                try account.integratePreimageLookup(item.hash, @intCast(item.preimage.len), t);
+                // Create structured preimage key using the service ID and hash
+                const preimage_key = state_keys.constructServicePreimageKey(item.index, item.hash);
+                try account.addPreimage(preimage_key, item.preimage);
+                try account.registerPreimageAvailable(item.hash, @intCast(item.preimage.len), t);
             } else {
                 return error.AccountNotFound;
             }
@@ -569,7 +629,9 @@ test "ServiceAccount historicalLookup" {
     const hash = [_]u8{1} ** 32;
     const preimage = "test preimage";
 
-    try account.addPreimage(hash, preimage);
+    // Create a structured preimage key for testing (use service ID 42)
+    const preimage_key = state_keys.constructServicePreimageKey(42, hash);
+    try account.addPreimage(preimage_key, preimage);
 
     const key = PreimageLookupKey{ .hash = hash, .length = @intCast(preimage.len) };
 

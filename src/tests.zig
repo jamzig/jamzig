@@ -78,6 +78,9 @@ comptime {
     _ = @import("services_snapshot.zig");
     _ = @import("services_priviledged.zig");
 
+    _ = @import("state_keys.zig");
+    _ = @import("state_recovery.zig");
+
     _ = @import("recent_blocks.zig");
 
     _ = @import("authorizations.zig");

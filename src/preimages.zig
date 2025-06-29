@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const state = @import("state.zig");
 const state_delta = @import("state_delta.zig");
+const state_keys = @import("state_keys.zig");
 
 const Params = @import("jam_params.zig").Params;
 
@@ -93,8 +94,9 @@ pub fn processPreimagesExtrinsic(
             return error.PreimageUnneeded;
         }
 
-        // Add the preimage to the service account
-        try service_account.addPreimage(preimage_hash, preimage.blob);
+        // Add the preimage to the service account using structured key
+        const preimage_key = state_keys.constructServicePreimageKey(service_id, preimage_hash);
+        try service_account.addPreimage(preimage_key, preimage.blob);
         preimage_span.debug("Added preimage to service {d}", .{service_id});
 
         // Update the lookup metadata

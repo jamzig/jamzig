@@ -66,8 +66,8 @@ pub fn encodePreimageKey(key: [32]u8, writer: anytype) !void {
     span.debug("Starting preimage key encoding", .{});
     span.trace("Input key: {s}", .{std.fmt.fmtSliceHexLower(&key)});
 
-    const preimage_key = state_dictionary.buildPreimageKey(key);
-    try writer.writeAll(&preimage_key);
+    // The key is already in the correct StateKey format (31 bytes)
+    try writer.writeAll(&key);
 }
 
 /// Encodes preimage lookups: C(s, h) ↦ p

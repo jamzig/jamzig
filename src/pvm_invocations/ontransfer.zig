@@ -2,6 +2,7 @@ const std = @import("std");
 
 const types = @import("../types.zig");
 const state = @import("../state.zig");
+const state_keys = @import("../state_keys.zig");
 
 const codec = @import("../codec.zig");
 
@@ -120,7 +121,8 @@ pub fn invoke(
     const destination_account_prime = context.service_accounts.getReadOnly(service_id).?;
 
     // Execute the PVM invocation
-    const code_preimage = destination_account_prime.getPreimage(destination_account_prime.code_hash) orelse {
+    const code_key = state_keys.constructServicePreimageKey(service_id, destination_account_prime.code_hash);
+    const code_preimage = destination_account_prime.getPreimage(code_key) orelse {
         span.err("Service code not available for hash: {s}", .{std.fmt.fmtSliceHexLower(&destination_account_prime.code_hash)});
         return OnTransferResult{
             .service_id = service_id,

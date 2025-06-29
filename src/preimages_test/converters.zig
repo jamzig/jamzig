@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../types.zig");
 const state = @import("../state.zig");
 const state_delta = @import("../state_delta.zig");
+const state_keys = @import("../state_keys.zig");
 
 const tv_types = @import("../jamtestvectors/preimages.zig");
 const Params = @import("../jam_params.zig").Params;
@@ -47,9 +48,11 @@ pub fn convertAccount(allocator: std.mem.Allocator, account: tv_types.Account) !
     var service_account = state.services.ServiceAccount.init(allocator);
     errdefer service_account.deinit();
 
-    // Add preimages
+    // Add preimages - need to construct proper structured keys
+    // For test purposes, we'll use service ID 0 - in real usage this should be provided
     for (account.preimages) |preimage_entry| {
-        try service_account.addPreimage(preimage_entry.hash, preimage_entry.blob);
+        const preimage_key = state_keys.constructServicePreimageKey(0, preimage_entry.hash);
+        try service_account.addPreimage(preimage_key, preimage_entry.blob);
     }
 
     // Add lookup metadata
