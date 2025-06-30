@@ -7,6 +7,54 @@ const RandomStateGenerator = @import("state_random_generator.zig").RandomStateGe
 const StateComplexity = @import("state_random_generator.zig").StateComplexity;
 const types = @import("types.zig");
 const Params = @import("jam_params.zig").Params;
+const state_diff = @import("tests/state_diff.zig");
+
+/// Diagnose reconstruction failures using three-level diff analysis
+/// Level 1: State roots (already compared)
+/// Level 2: JamState field-by-field diff
+/// Level 3: MerklizationDictionary entry-by-entry diff
+fn diagnoseReconstructionFailure(
+    comptime params: Params,
+    allocator: std.mem.Allocator,
+    original_state: *const jamstate.JamState(params),
+    reconstructed_state: *const jamstate.JamState(params),
+    original_dict: *const state_dictionary.MerklizationDictionary,
+    reconstructed_dict: *const state_dictionary.MerklizationDictionary,
+    original_state_root: *const types.Hash,
+    reconstructed_state_root: *const types.Hash,
+) !void {
+    std.debug.print("\nRECONSTRUCTION FAILURE DIAGNOSIS\n", .{});
+    std.debug.print("=====================================\n\n", .{});
+
+    // Level 1: State Root Analysis
+    std.debug.print("Level 1: State Root Comparison\n", .{});
+    std.debug.print("Original:      {s}\n", .{std.fmt.fmtSliceHexLower(original_state_root)});
+    std.debug.print("Reconstructed: {s}\n\n", .{std.fmt.fmtSliceHexLower(reconstructed_state_root)});
+
+    // Level 2: JamState Diff Analysis
+    std.debug.print("Level 2: JamState Field-by-Field Analysis\n", .{});
+    var jam_state_diff = try state_diff.JamStateDiff(params).build(allocator, original_state, reconstructed_state);
+    defer jam_state_diff.deinit();
+
+    if (jam_state_diff.hasChanges()) {
+        jam_state_diff.printToStdErr();
+    } else {
+        std.debug.print("✅ No differences found in JamState fields\n\n", .{});
+    }
+
+    // Level 3: Dictionary Diff Analysis
+    std.debug.print("Level 3: MerklizationDictionary Entry Analysis\n", .{});
+    var dict_diff = try original_dict.diff(reconstructed_dict);
+    defer dict_diff.deinit();
+
+    if (dict_diff.has_changes()) {
+        std.debug.print("{}\n", .{dict_diff});
+    } else {
+        std.debug.print("✅ No differences found in dictionary entries\n\n", .{});
+    }
+
+    std.debug.print("🎯 Summary: State roots differ but detailed analysis complete\n", .{});
+}
 
 /// Comprehensive round-trip test that verifies:
 /// 1. State root comparison (primary verification)
@@ -142,8 +190,9 @@ test "deterministic_state_generation" {
     try std.testing.expectEqualSlices(u8, &root1, &root2);
 }
 
-/// Primary verification test - focuses only on state root comparison
+/// Enhanced primary verification test with three-level diff analysis
 /// This is the core requirement: state roots must be identical after round-trip
+/// If they don't match, provides detailed diagnostic information
 fn runPrimaryVerificationTest(
     allocator: std.mem.Allocator,
     comptime params: Params,
@@ -157,24 +206,33 @@ fn runPrimaryVerificationTest(
     var original_state = try generator.generateRandomState(params, complexity);
     defer original_state.deinit(allocator);
 
-    // 2. Generate original state root hash
+    // 2. Generate original state root hash and dictionary
     const original_state_root = try state_merklization.merklizeState(params, allocator, &original_state);
+    var original_dict = try state_dictionary.buildStateMerklizationDictionary(params, allocator, &original_state);
+    defer original_dict.deinit();
 
-    // 3. Build merklization dictionary and reconstruct
-    var dict = try state_dictionary.buildStateMerklizationDictionary(params, allocator, &original_state);
-    defer dict.deinit();
-
-    var reconstructed_state = try state_reconstruction.reconstructState(params, allocator, &dict);
+    // 3. Reconstruct state from dictionary
+    var reconstructed_state = try state_reconstruction.reconstructState(params, allocator, &original_dict);
     defer reconstructed_state.deinit(allocator);
 
-    // 4. Generate reconstructed state root hash
+    // 4. Generate reconstructed state root hash and dictionary
     const reconstructed_state_root = try state_merklization.merklizeState(params, allocator, &reconstructed_state);
+    var reconstructed_dict = try state_dictionary.buildStateMerklizationDictionary(params, allocator, &reconstructed_state);
+    defer reconstructed_dict.deinit();
 
     // 5. PRIMARY VERIFICATION: State roots must be identical
     std.testing.expectEqualSlices(u8, &original_state_root, &reconstructed_state_root) catch |err| {
-        std.debug.print("State root mismatch!\n", .{});
-        std.debug.print("Original:      {s}\n", .{std.fmt.fmtSliceHexLower(&original_state_root)});
-        std.debug.print("Reconstructed: {s}\n", .{std.fmt.fmtSliceHexLower(&reconstructed_state_root)});
+        // Enhanced diagnostic output when state roots don't match
+        try diagnoseReconstructionFailure(
+            params,
+            allocator,
+            &original_state,
+            &reconstructed_state,
+            &original_dict,
+            &reconstructed_dict,
+            &original_state_root,
+            &reconstructed_state_root,
+        );
         return err;
     };
 }
@@ -193,3 +251,9 @@ test "primary_verification_moderate_complexity" {
     try runPrimaryVerificationTest(allocator, TINY, .moderate, 67890);
 }
 
+test "primary_verification_maximal_complexity" {
+    const allocator = std.testing.allocator;
+    const TINY = @import("jam_params.zig").TINY_PARAMS;
+
+    try runPrimaryVerificationTest(allocator, TINY, .maximal, 54321);
+}
