@@ -114,18 +114,113 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             return try codec.serializeAlloc([]const types.AccumulateOutput, .{}, allocator, outputs);
         }
 
-        /// Host call implementation for fetch (Ω_Y)
-        ///
-        /// Implements fetch selectors as specified in JAM graypaper §1.7.2:
-        /// - Selector 0: JAM chain constants (IMPLEMENTED - returns encoded parameters)
-        /// - Selectors 1-2: Block/state data (accumulate context only)
-        /// - Selectors 3-13: REMOVED FOR REFINE (work package specific selectors)
-        /// - Selector 14: REMOVED FOR REFINE (operands)
-        /// - Selectors 15-16: Transfers (accumulate context only)
-        /// - Selector 17: Outputs (accumulate context only)
-        ///
-        /// General host calls context supports selector 0. Accumulate context supports
-        /// selectors 1-2, 15-17. Refine-specific selectors (3-14) have been removed.
+        //
+        // Fetch Host Function (ΩY) - Host Call ID: 18
+        //
+        // Provides context-aware data access to PVM programs across different invocation contexts.
+        // The function uses register ω10 as a selector to determine which of 17 cases to execute.
+        //
+        // Gas Cost: 10
+        //
+        // Parameters:
+        // - ϱ: Gas remaining
+        // - ω: Registers (ω7 = output offset, ω8 = first byte offset, ω9 = length limit, ω10 = case selector, ω11-12 = indices)
+        // - µ: Memory
+        // - (m, e): PVM context (for Refine invocation)
+        // - p: Work package (available in Refine context)
+        // - n: Entropy/nonce (available in Is-Authorized and Accumulate contexts)
+        // - r: Refinement context (available in Refine context)
+        // - i: Import segments sequence (available in Refine context)
+        // - i: Current work item index (available in Refine context)
+        // - x: Extrinsic data segments (available in Refine context)
+        // - o: Operand tuples sequence (available in Accumulate context)
+        // - t: Transfer sequence (available in On-Transfer context)
+        //
+        // Cases (by ω10 value):
+        //
+        // === Universal Cases (All Contexts) ===
+        // 0: SYSTEM CONSTANTS - Returns encoded system parameters (BI, BL, BS, C, D, E, GA, GI, GR, GT, H, I, J, L, O, P, Q, R, S, T, U, V, WA, WB, WC, WE, WG, WM, WP, WR, WT, WX, Y)
+        //    Used by: All contexts for system limits and parameters
+        //
+        //    BI: min_balance_per_item (10)
+        //    BL: min_balance_per_octet (1)
+        //    BS: basic_service_balance (100)
+        //    C: core_count (341)
+        //    D: preimage_expungement_period (28_800)
+        //    E: epoch_length (600)
+        //    GA: gas_alloc_accumulation (10_000_000)
+        //    GI: gas_alloc_is_authorized (1_000_000)
+        //    GR: gas_alloc_refine (500_000_000)
+        //    GT: total_gas_alloc_accumulation (35_000_000)
+        //    H: recent_history_size (8)
+        //    I: max_work_items_per_package (16)
+        //    J: max_number_of_dependencies_for_work_reports (8)
+        //    L: max_lookup_anchor_age (14_400)
+        //    O: max_authorizations_pool_items (8)
+        //    P: slot_period (6)
+        //    Q: max_authorizations_queue_items (80)
+        //    R: validator_rotation_period (10)
+        //    S: max_accumulation_queue_entries (1024)
+        //    T: [NOT IN STRUCT - ticket-related constant]
+        //    U: work_replacement_period (5)
+        //    V: validators_count (1023)
+        //    WA: max_authorization_code_size (64_000)
+        //    WB: [NOT IN STRUCT - work-related size constant]
+        //    WC: max_service_code_size (4_000_000)
+        //    WE: erasure_coded_piece_size (684)
+        //    WG: [NOT IN STRUCT - exported_segment_size is WS, not WG]
+        //    WM: max_manifest_entries (2^11)
+        //    WP: max_work_package_size (12 * 2^20)
+        //    WR: max_work_report_size (96 * 2^10)
+        //    WT: transfer_memo_size (128)
+        //    WX: [NOT IN STRUCT - work-related constant]
+        //    Y: ticket_submission_end_epoch_slot (500)
+        //    Used by: All contexts for system limits and parameters
+        //
+        // === Is-Authorized & Accumulate Context ===
+        // 1: ENTROPY - Returns entropy value n for randomness
+        //    Used by: Is-Authorized and Accumulate for random number generation
+        //
+        // === Refine Context Only ===
+        // 2: REFINEMENT CONTEXT - Returns refinement context r
+        // 3: IMPORT SEGMENT DATA - Returns x[ω11][ω12] (specific import segment)
+        // 4: IMPORT SEGMENT BY WORK ITEM - Returns x[i][ω11] (import for current work item)
+        // 5: IMPORT JUSTIFICATION DATA - Returns i[ω11][ω12] (justification data)
+        // 6: IMPORT JUSTIFICATION BY WORK ITEM - Returns i[i][ω11] (justification for current work item)
+        // 7: ENCODED WORK PACKAGE - Returns E(p) (entire work package encoded)
+        // 8: WORK PACKAGE HEADER - Returns E(pu, ↕pp) (authorization and parameterization)
+        // 9: WORK PACKAGE CONTEXT - Returns pj (work package justification)
+        // 10: WORK PACKAGE EXTRINSIC - Returns px (extrinsic data)
+        // 11: ENCODED WORK ITEMS LIST - Returns E(↕[S(w) | w <- pw]) (all work items summary)
+        // 12: SPECIFIC WORK ITEM SUMMARY - Returns S(pw[ω11]) (work item at index ω11)
+        // 13: WORK ITEM PAYLOAD - Returns pw[ω11]y (payload of work item at ω11)
+        //
+        // === Accumulate Context Only ===
+        // 14: ENCODED OPERAND TUPLES - Returns E(↕o) (all operand tuples for accumulation)
+        //     Used by: Accumulate to access all work items being processed
+        // 15: SPECIFIC OPERAND TUPLE - Returns E(o[ω11]) (operand tuple at index ω11)
+        //     Used by: Accumulate to access individual work item data
+        //
+        // === On-Transfer Context Only ===
+        // 16: ENCODED TRANSFER SEQUENCE - Returns E(↕t) (all pending transfers)
+        //     Used by: On-Transfer to access all transfers to process
+        // 17: SPECIFIC TRANSFER - Returns E(t[ω11]) (transfer at index ω11)
+        //     Used by: On-Transfer to access individual transfer details
+        //
+        // Return Behavior:
+        // - Writes result to memory at µ[o:o+l] where o=ω7, l=min(ω9, |v|-f), f=min(ω8, |v|)
+        // - Sets ω'7 to the actual length of data (or NONE if no data)
+        // - Returns ∅ for cases where required context data is unavailable
+        // - Triggers page fault (☇) if output range is not writable
+        //
+        // Error Conditions:
+        // - ε' = ☇ if output memory range No:o+l is not writable
+        // - ω'7 = NONE if requested data is not available in current context
+        //
+        // Work Item Summary Format S(w):
+        // E(E4(ws), wh, E8(wg, wa), E2(we, |wi|, |wx|), E4(|wy|))
+        // Contains: service id, hash, gas/argument, extrinsic flags, and payload length
+        //
         pub fn fetch(
             exec_ctx: *PVM.ExecutionContext,
             host_ctx: anytype,
@@ -562,11 +657,11 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             hasher.update(key_data.buffer);
             var key_hash: [32]u8 = undefined;
             hasher.final(&key_hash);
-            
+
             // Construct storage key using the hash
             span.debug("Constructing PVM storage key", .{});
             const actual_service_id = if (service_id == 0xFFFFFFFFFFFFFFFF) host_ctx.service_id else @as(u32, @intCast(service_id));
-            
+
             const storage_key = state_keys.constructStorageKey(actual_service_id, key_hash);
             span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
@@ -652,10 +747,10 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             hasher.update(key_data.buffer);
             var key_hash: [32]u8 = undefined;
             hasher.final(&key_hash);
-            
+
             // Construct storage key using the hash
             span.debug("Constructing PVM storage key", .{});
-            
+
             const storage_key = state_keys.constructStorageKey(host_ctx.service_id, key_hash);
             span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
@@ -909,14 +1004,14 @@ fn encodeJamParams(allocator: std.mem.Allocator, params: Params) ![]u8 {
         .work_report_timeout_period = params.work_replacement_period,
         .number_of_validators = @truncate(params.validators_count),
         .maximum_size_is_authorized_code = params.max_authorization_code_size,
-        .max_work_package_size = params.max_work_package_size,
+        .max_work_package_size = params.max_work_package_size_with_extrinsics,
         .max_size_service_code = params.max_service_code_size,
         .erasure_coding_chunk_size = params.erasure_coded_piece_size,
-        .max_number_of_imports_exports = params.max_manifest_entries,
+        .max_number_of_imports_exports = params.max_imports_per_work_package,
         .number_of_erasure_codec_pieces_in_segment = params.exported_segment_size,
         .max_work_package_size_bytes = params.max_work_report_size,
         .transfer_memo_size_bytes = params.transfer_memo_size,
-        .max_number_of_exports = params.max_manifest_entries, // WX - derived from WM (max manifest entries)
+        .max_number_of_exports = params.max_exports_per_work_package, // WX - derived from WM (max manifest entries)
         .ticket_submission_time_slots = params.ticket_submission_end_epoch_slot,
     };
 
