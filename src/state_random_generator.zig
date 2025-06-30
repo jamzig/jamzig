@@ -277,38 +277,106 @@ pub const RandomStateGenerator = struct {
 
     /// Generate random gamma (safrole state) data
     fn generateRandomGamma(
-        _: *RandomStateGenerator,
+        self: *RandomStateGenerator,
         comptime params: Params,
-        _: *jamstate.Gamma(params.validators_count, params.epoch_length),
+        gamma: *jamstate.Gamma(params.validators_count, params.epoch_length),
     ) !void {
-        // TODO: Implement once Gamma structure is analyzed
+        // Generate random validator set (k field)
+        try self.generateRandomValidatorSet(&gamma.k);
+        
+        // Generate random VRF root (z field) - 144-byte BLS public key
+        self.rng.bytes(&gamma.z);
+        
+        // For now, only generate small simple structures to avoid performance issues
+        // TODO: Implement full s field generation when structure is more stable
+        
+        // Generate minimal ticket array (a field) - limit to 3 for performance
+        const num_tickets_a = self.rng.uintAtMost(usize, 3);
+        gamma.a = try self.allocator.alloc(types.TicketBody, num_tickets_a);
+        
+        for (gamma.a) |*ticket| {
+            self.rng.bytes(&ticket.id);
+            ticket.attempt = self.rng.int(u8);
+        }
     }
 
     /// Generate random phi (authorization queue) data
     fn generateRandomPhi(
-        _: *RandomStateGenerator,
+        self: *RandomStateGenerator,
         comptime params: Params,
-        _: *jamstate.Phi(params.core_count, params.max_authorizations_queue_items),
+        phi: *jamstate.Phi(params.core_count, params.max_authorizations_queue_items),
     ) !void {
-        // TODO: Implement once Phi structure is analyzed
+        // For each core, generate random number of authorizations
+        for (0..params.core_count) |core| {
+            // Generate random queue length (0 to max_items, but limit to 5 for performance)
+            const max_items = @min(params.max_authorizations_queue_items, 5);
+            const queue_length = self.rng.uintAtMost(u8, max_items);
+            
+            for (0..queue_length) |_| {
+                var hash: [32]u8 = undefined;
+                self.rng.bytes(&hash);
+                try phi.addAuthorization(core, hash);
+            }
+        }
     }
 
     /// Generate random chi (privileged services) data
     fn generateRandomChi(
-        _: *RandomStateGenerator,
+        self: *RandomStateGenerator,
         comptime _: Params,
-        _: *jamstate.Chi,
+        chi: *jamstate.Chi,
     ) !void {
-        // TODO: Implement once Chi structure is analyzed
+        // Generate optional privileged service indices (30% chance of being null)
+        chi.manager = if (self.rng.int(u8) % 10 < 3) null else self.rng.intRangeAtMost(u32, 1, 1000);
+        chi.assign = if (self.rng.int(u8) % 10 < 3) null else self.rng.intRangeAtMost(u32, 1, 1000);
+        chi.designate = if (self.rng.int(u8) % 10 < 3) null else self.rng.intRangeAtMost(u32, 1, 1000);
+        
+        // Generate always_accumulate services map (0-5 entries for performance)
+        const num_always_accumulate = self.rng.uintAtMost(u8, 5);
+        for (0..num_always_accumulate) |_| {
+            const service_index = self.rng.intRangeAtMost(u32, 1, 1000);
+            const gas_limit = self.rng.intRangeAtMost(u64, 1000, 100000);
+            try chi.always_accumulate.put(service_index, gas_limit);
+        }
     }
 
     /// Generate random psi (disputes) data
     fn generateRandomPsi(
-        _: *RandomStateGenerator,
+        self: *RandomStateGenerator,
         comptime _: Params,
-        _: *jamstate.Psi,
+        psi: *jamstate.Psi,
     ) !void {
-        // TODO: Implement once Psi structure is analyzed
+        // Generate random hashes for good_set (0-3 entries for performance)
+        const good_count = self.rng.uintAtMost(u8, 3);
+        for (0..good_count) |_| {
+            var hash: [32]u8 = undefined;
+            self.rng.bytes(&hash);
+            try psi.good_set.put(hash, {});
+        }
+        
+        // Generate random hashes for bad_set (0-3 entries for performance)
+        const bad_count = self.rng.uintAtMost(u8, 3);
+        for (0..bad_count) |_| {
+            var hash: [32]u8 = undefined;
+            self.rng.bytes(&hash);
+            try psi.bad_set.put(hash, {});
+        }
+        
+        // Generate random hashes for wonky_set (0-3 entries for performance)
+        const wonky_count = self.rng.uintAtMost(u8, 3);
+        for (0..wonky_count) |_| {
+            var hash: [32]u8 = undefined;
+            self.rng.bytes(&hash);
+            try psi.wonky_set.put(hash, {});
+        }
+        
+        // Generate random public keys for punish_set (0-3 entries for performance)
+        const punish_count = self.rng.uintAtMost(u8, 3);
+        for (0..punish_count) |_| {
+            var pub_key: [32]u8 = undefined;
+            self.rng.bytes(&pub_key);
+            try psi.punish_set.put(pub_key, {});
+        }
     }
 
     /// Generate random pi (validator stats) data
