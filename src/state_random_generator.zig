@@ -146,20 +146,133 @@ pub const RandomStateGenerator = struct {
 
     /// Generate random recent blocks data
     fn generateRandomBeta(
-        _: *RandomStateGenerator,
-        comptime _: Params,
-        _: *jamstate.Beta,
+        self: *RandomStateGenerator,
+        comptime params: Params,
+        beta: *jamstate.Beta,
     ) !void {
-        // TODO: Implement proper block creation once Beta structure is analyzed
+        // Generate a random number of blocks (0 to max_blocks)
+        const num_blocks = self.rng.uintAtMost(usize, beta.max_blocks);
+        
+        for (0..num_blocks) |_| {
+            // Generate random BlockInfo
+            const block_info = try self.generateRandomBlockInfo(params);
+            try beta.addBlockInfo(block_info);
+        }
+    }
+
+    /// Helper function to generate a random BlockInfo
+    fn generateRandomBlockInfo(self: *RandomStateGenerator, comptime _: Params) !types.BlockInfo {
+        // Generate random header hash
+        var header_hash: types.Hash = undefined;
+        self.rng.bytes(&header_hash);
+        
+        // Generate random state root
+        var state_root: types.Hash = undefined;
+        self.rng.bytes(&state_root);
+        
+        // Generate random MMR (1-10 peaks, some may be null)
+        const mmr_size = self.rng.uintAtMost(usize, 10) + 1;
+        const beefy_mmr = try self.allocator.alloc(?types.Hash, mmr_size);
+        for (beefy_mmr) |*peak| {
+            if (self.rng.boolean()) {
+                var hash: types.Hash = undefined;
+                self.rng.bytes(&hash);
+                peak.* = hash;
+            } else {
+                peak.* = null;
+            }
+        }
+        
+        // Generate random work reports (0-5 reports)
+        const num_reports = self.rng.uintAtMost(usize, 5);
+        const work_reports = try self.allocator.alloc(types.ReportedWorkPackage, num_reports);
+        for (work_reports) |*report| {
+            self.rng.bytes(&report.hash);
+            self.rng.bytes(&report.exports_root);
+        }
+        
+        return types.BlockInfo{
+            .header_hash = header_hash,
+            .state_root = state_root,
+            .beefy_mmr = beefy_mmr,
+            .work_reports = work_reports,
+        };
     }
 
     /// Generate random service accounts data
     fn generateRandomDelta(
-        _: *RandomStateGenerator,
+        self: *RandomStateGenerator,
         comptime _: Params,
-        _: *jamstate.Delta,
+        delta: *jamstate.Delta,
     ) !void {
-        // TODO: Implement proper service account creation once Delta structure is analyzed
+        // Generate only 1 simple service account to avoid performance issues
+        const service_id = self.rng.int(u32);
+        
+        var service_account = @import("services.zig").ServiceAccount.init(self.allocator);
+        
+        // Generate only basic fields
+        self.rng.bytes(&service_account.code_hash);
+        service_account.balance = self.rng.int(u64) % 1000;
+        service_account.min_gas_accumulate = self.rng.int(u64) % 1000;
+        service_account.min_gas_on_transfer = self.rng.int(u64) % 1000;
+        
+        // Skip storage and preimage generation for now to avoid performance issues
+        
+        try delta.accounts.put(service_id, service_account);
+    }
+
+    /// Helper function to generate a random ServiceAccount
+    fn generateRandomServiceAccount(self: *RandomStateGenerator) !@import("services.zig").ServiceAccount {
+        var service_account = @import("services.zig").ServiceAccount.init(self.allocator);
+        
+        // Generate random code hash
+        self.rng.bytes(&service_account.code_hash);
+        
+        // Generate random balance (0 to 1M tokens)
+        service_account.balance = self.rng.int(u64) % 1_000_000;
+        
+        // Generate random gas limits
+        service_account.min_gas_accumulate = self.rng.int(u64) % 100_000;
+        service_account.min_gas_on_transfer = self.rng.int(u64) % 50_000;
+        
+        // Generate random storage entries (0-5 entries)
+        const num_storage = self.rng.uintAtMost(u8, 5);
+        for (0..num_storage) |_| {
+            var storage_key: types.StateKey = undefined;
+            self.rng.bytes(&storage_key);
+            
+            // Generate random storage value (1-512 bytes)
+            const value_size = self.rng.uintAtMost(usize, 512) + 1;
+            const storage_value = try self.allocator.alloc(u8, value_size);
+            self.rng.bytes(storage_value);
+            
+            try service_account.storage.put(storage_key, storage_value);
+        }
+        
+        // Generate random preimage entries (0-3 entries)
+        const num_preimages = self.rng.uintAtMost(u8, 3);
+        for (0..num_preimages) |_| {
+            var preimage_key: types.StateKey = undefined;
+            self.rng.bytes(&preimage_key);
+            
+            // Generate random preimage data (1-1024 bytes)
+            const preimage_size = self.rng.uintAtMost(usize, 1024) + 1;
+            const preimage_data = try self.allocator.alloc(u8, preimage_size);
+            self.rng.bytes(preimage_data);
+            
+            try service_account.preimages.put(preimage_key, preimage_data);
+            
+            // Create corresponding preimage lookup with random status
+            var lookup = @import("services.zig").PreimageLookup{ .status = [_]?types.TimeSlot{null} ** 3 };
+            const status_count = self.rng.uintAtMost(u8, 3) + 1;
+            for (0..status_count) |i| {
+                lookup.status[i] = self.rng.int(types.TimeSlot);
+            }
+            
+            try service_account.preimage_lookups.put(preimage_key, lookup);
+        }
+        
+        return service_account;
     }
 
     /// Generate random gamma (safrole state) data
@@ -288,10 +401,23 @@ pub const RandomStateGenerator = struct {
 
     /// Generate random validator set data
     fn generateRandomValidatorSet(
-        _: *RandomStateGenerator,
-        _: *types.ValidatorSet,
+        self: *RandomStateGenerator,
+        validator_set: *types.ValidatorSet,
     ) !void {
-        // TODO: Implement once ValidatorSet structure is analyzed
+        // Generate random cryptographic keys for each validator
+        for (validator_set.validators) |*validator| {
+            // Generate random Bandersnatch public key (32 bytes)
+            self.rng.bytes(&validator.bandersnatch);
+            
+            // Generate random Ed25519 public key (32 bytes)
+            self.rng.bytes(&validator.ed25519);
+            
+            // Generate random BLS public key (144 bytes)
+            self.rng.bytes(&validator.bls);
+            
+            // Generate random metadata (128 bytes)
+            self.rng.bytes(&validator.metadata);
+        }
     }
 
     /// Helper function to generate a random hash
