@@ -442,11 +442,22 @@ pub const RandomStateGenerator = struct {
 
     /// Generate random xi (accumulated reports) data
     fn generateRandomXi(
-        _: *RandomStateGenerator,
+        self: *RandomStateGenerator,
         comptime params: Params,
-        _: *jamstate.Xi(params.epoch_length),
+        xi: *jamstate.Xi(params.epoch_length),
     ) !void {
-        // TODO: Implement once Xi structure is analyzed
+        // Generate random work packages - they will be added to the newest slot automatically
+        // Limit total work packages to avoid performance issues
+        const total_packages = self.rng.uintAtMost(usize, 10);
+        
+        for (0..total_packages) |_| {
+            // Generate random work package hash
+            var work_package_hash: types.WorkPackageHash = undefined;
+            self.rng.bytes(&work_package_hash);
+            
+            // Add work package (automatically goes to newest slot)
+            try xi.addWorkPackage(work_package_hash);
+        }
     }
 
     /// Generate random theta (reports ready) data
@@ -455,16 +466,36 @@ pub const RandomStateGenerator = struct {
         comptime params: Params,
         _: *jamstate.Theta(params.epoch_length),
     ) !void {
-        // TODO: Implement once Theta structure is analyzed
+        // TODO: Theta is very complex with nested WorkReport structures
+        // For now, we'll leave it empty to avoid compilation complexity
+        // This can be implemented later when needed for specific testing
     }
+
 
     /// Generate random rho (pending reports) data
     fn generateRandomRho(
-        _: *RandomStateGenerator,
+        self: *RandomStateGenerator,
         comptime params: Params,
-        _: *jamstate.Rho(params.core_count),
+        rho: *jamstate.Rho(params.core_count),
     ) !void {
-        // TODO: Implement once Rho structure is analyzed
+        // Rho is complex with nested WorkReport structures like Theta
+        // For now, we'll populate only a few cores with minimal data to avoid complexity
+        const num_cores_to_populate = self.rng.uintAtMost(usize, 3);
+        
+        for (0..num_cores_to_populate) |_| {
+            const core_index = self.rng.uintAtMost(u16, params.core_count);
+            
+            // Only populate if the slot is currently null
+            if (rho.reports[core_index] == null) {
+                // Create minimal assignment with basic timeout
+                // NOTE: We would need to create a full WorkReport here, but that's very complex
+                // For now, we'll skip this implementation to avoid the complexity of WorkReport generation
+                // This can be implemented later when specific Rho testing is needed
+            }
+        }
+        
+        // TODO: Implement full RhoEntry generation when WorkReport generation is stable
+        // For now, all cores remain null to avoid complex WorkReport generation
     }
 
     /// Generate random validator set data
