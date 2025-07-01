@@ -28,6 +28,7 @@ pub fn HostCalls(comptime params: Params) type {
             allocator: std.mem.Allocator,
             transfers: []const @import("../accumulate/types.zig").DeferredTransfer,
             entropy: types.Entropy,
+            timeslot: types.TimeSlot,
 
             const Self = @This();
 
@@ -42,6 +43,7 @@ pub fn HostCalls(comptime params: Params) type {
                     .allocator = self.allocator,
                     .transfers = self.transfers,
                     .entropy = self.entropy,
+                    .timeslot = self.timeslot,
                 };
             }
 

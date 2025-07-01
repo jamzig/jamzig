@@ -401,6 +401,7 @@ pub fn processAccumulateReports(
                 .allocator = allocator,
                 .transfers = deferred_transfers,
                 .entropy = (try stx.ensure(.eta_prime))[0],
+                .timeslot = stx.time.current_slot,
             };
             defer context.deinit();
 
@@ -408,9 +409,6 @@ pub fn processAccumulateReports(
                 params,
                 allocator,
                 &context,
-                stx.time.current_slot,
-                service_id,
-                deferred_transfers,
             );
 
             // Store transfer stats
