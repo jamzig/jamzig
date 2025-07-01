@@ -1179,12 +1179,6 @@ pub fn HostCalls(comptime params: Params) type {
             const span = trace.span(.host_call_fetch);
             defer span.deinit();
 
-            // Check gas availability first
-            if (exec_ctx.gas < 10) {
-                span.debug("Insufficient gas for fetch: {d} < 10", .{exec_ctx.gas});
-                return .{ .terminal = .out_of_gas };
-            }
-
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 

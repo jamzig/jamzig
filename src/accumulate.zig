@@ -409,6 +409,7 @@ pub fn processAccumulateReports(
                 stx.time.current_slot,
                 service_id,
                 deferred_transfers,
+                (try stx.ensure(.eta_prime))[0], // Pass entropy for fetch access
             );
 
             // Store transfer stats

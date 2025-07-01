@@ -26,6 +26,9 @@ pub fn HostCalls(comptime params: Params) type {
             service_id: types.ServiceId,
             service_accounts: DeltaSnapshot,
             allocator: std.mem.Allocator,
+            // Add transfer data and entropy for fetch access
+            transfers: ?[]const @import("../accumulate/types.zig").DeferredTransfer = null,
+            entropy: ?types.Entropy = null,
 
             const Self = @This();
 
@@ -47,15 +50,20 @@ pub fn HostCalls(comptime params: Params) type {
                     .ontransfer = .{
                         // Note: transfer_memo would be set if available
                         .transfer_memo = null,
-                    }
+                    },
                 };
-                
+
                 return general.GeneralHostCalls(params).Context.initWithContext(
                     self.service_id,
                     &self.service_accounts,
                     self.allocator,
                     invocation_ctx,
                 );
+            }
+
+            pub fn setTransferData(self: *Self, transfers: []const @import("../accumulate/types.zig").DeferredTransfer, entropy: types.Entropy) void {
+                self.transfers = transfers;
+                self.entropy = entropy;
             }
 
             pub fn deinit(self: *Self) void {
@@ -126,10 +134,13 @@ pub fn HostCalls(comptime params: Params) type {
         }
 
         /// Host call implementation for fetch (Ω_Y) - OnTransfer context
-        /// Simplified fetch for ontransfer context supporting selectors:
-        /// 0: System constants  
-        /// 16: Encoded transfer sequence
-        /// 17: Specific transfer
+        /// ΩY(ϱ, ω, µ, ∅, η'₀, ∅, ∅, ∅, ∅, ∅, t)
+        /// Fetch for ontransfer context supporting selectors:
+        /// 0: System constants
+        /// 1: Current random accumulator (η'₀)
+        /// 2-15: NOT available (no work package or accumulation context)
+        /// 16: Transfer list (from t)
+        /// 17: Specific transfer by index (from t)
         pub fn fetch(
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
@@ -146,6 +157,7 @@ pub fn HostCalls(comptime params: Params) type {
             const offset = exec_ctx.registers[8]; // Offset (f)
             const limit = exec_ctx.registers[9]; // Length limit (l)
             const selector = exec_ctx.registers[10]; // Data selector
+            const index1 = @as(u32, @intCast(exec_ctx.registers[11])); // Index 1
 
             span.debug("Host call: fetch selector={d}", .{selector});
             span.debug("Output ptr: 0x{x}, offset: {d}, limit: {d}", .{ output_ptr, offset, limit });
@@ -167,23 +179,78 @@ pub fn HostCalls(comptime params: Params) type {
                     needs_cleanup = true;
                 },
 
-                16 => {
-                    // Selector 16: Encoded transfer sequence - not available in basic ontransfer context
-                    span.debug("Transfer sequence not available in basic ontransfer context", .{});
+                1 => {
+                    // Selector 1: Current random accumulator (η'₀)
+                    if (host_ctx.entropy) |entropy_data| {
+                        span.debug("Random accumulator available from ontransfer context", .{});
+                        data_to_fetch = entropy_data[0..];
+                    } else {
+                        span.debug("Random accumulator not available in ontransfer context", .{});
+                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                        return .play;
+                    }
+                },
+
+                2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 => {
+                    // Selectors 2-13: Work package related data - NOT available in ontransfer
+                    span.debug("Work package data (selector {d}) not available in ontransfer context", .{selector});
                     exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                     return .play;
                 },
 
-                17 => {
-                    // Selector 17: Specific transfer - not available in basic ontransfer context  
-                    span.debug("Specific transfer not available in basic ontransfer context", .{});
+                14, 15 => {
+                    // Selectors 14-15: Operand data - NOT available in ontransfer
+                    span.debug("Operand data (selector {d}) not available in ontransfer context", .{selector});
                     exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                     return .play;
+                },
+
+                16 => {
+                    // Selector 16: Transfer list (from t)
+                    if (host_ctx.transfers) |transfer_list| {
+                        const transfers_data = encoding_utils.encodeTransfers(host_ctx.allocator, transfer_list) catch {
+                            span.err("Failed to encode transfer sequence", .{});
+                            exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                            return .play;
+                        };
+                        span.debug("Transfer sequence encoded successfully, count={d}", .{transfer_list.len});
+                        data_to_fetch = transfers_data;
+                        needs_cleanup = true;
+                    } else {
+                        span.debug("No transfers available in ontransfer context", .{});
+                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                        return .play;
+                    }
+                },
+
+                17 => {
+                    // Selector 17: Specific transfer by index (from t)
+                    if (host_ctx.transfers) |transfer_list| {
+                        if (index1 < transfer_list.len) {
+                            const transfer_item = &transfer_list[index1];
+                            const transfer_data = encoding_utils.encodeTransfer(host_ctx.allocator, transfer_item) catch {
+                                span.err("Failed to encode transfer", .{});
+                                exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                                return .play;
+                            };
+                            span.debug("Transfer encoded successfully: index={d}", .{index1});
+                            data_to_fetch = transfer_data;
+                            needs_cleanup = true;
+                        } else {
+                            span.debug("Transfer index out of bounds: index={d}, count={d}", .{ index1, transfer_list.len });
+                            exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                            return .play;
+                        }
+                    } else {
+                        span.debug("No transfers available in ontransfer context", .{});
+                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                        return .play;
+                    }
                 },
 
                 else => {
                     // Invalid selector for ontransfer context
-                    span.debug("Invalid fetch selector for ontransfer: {d} (valid: 0,16,17)", .{selector});
+                    span.debug("Invalid fetch selector for ontransfer: {d} (valid: 0,1,16,17)", .{selector});
                     exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                     return .play;
                 },
