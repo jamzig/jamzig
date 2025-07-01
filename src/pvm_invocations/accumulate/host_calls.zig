@@ -1164,18 +1164,26 @@ pub fn HostCalls(comptime params: Params) type {
         }
 
         /// Host call implementation for fetch (Ω_Y) - Accumulate context
-        /// Simplified fetch for accumulate context supporting selectors:
+        /// ΩY(ϱ, ω, µ, ∅, η'₀, ∅, ∅, ∅, x, ∅, t)
+        /// Fetch for accumulate context supporting selectors:
         /// 0: System constants
-        /// 1: Entropy
-        /// 2: Authorizer hash
-        /// 14: Encoded operand tuples
-        /// 15: Specific operand tuple
+        /// 1: Current random accumulator (η'₀)
+        /// 14: Operand data (from context x)
+        /// 15: Specific operand by index (from context x)
+        /// 16: Transfer list (from t)
+        /// 17: Specific transfer by index (from t)
         pub fn fetch(
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) PVM.HostCallResult {
             const span = trace.span(.host_call_fetch);
             defer span.deinit();
+
+            // Check gas availability first
+            if (exec_ctx.gas < 10) {
+                span.debug("Insufficient gas for fetch: {d} < 10", .{exec_ctx.gas});
+                return .{ .terminal = .out_of_gas };
+            }
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
@@ -1187,6 +1195,7 @@ pub fn HostCalls(comptime params: Params) type {
             const offset = exec_ctx.registers[8]; // Offset (f)
             const limit = exec_ctx.registers[9]; // Length limit (l)
             const selector = exec_ctx.registers[10]; // Data selector
+            const index1 = @as(u32, @intCast(exec_ctx.registers[11])); // Index 1
 
             span.debug("Host call: fetch selector={d}", .{selector});
             span.debug("Output ptr: 0x{x}, offset: {d}, limit: {d}", .{ output_ptr, offset, limit });
@@ -1209,21 +1218,9 @@ pub fn HostCalls(comptime params: Params) type {
                 },
 
                 1 => {
-                    // Selector 1: Entropy (η) - available in accumulate context
-                    span.debug("Entropy available from accumulate context", .{});
+                    // Selector 1: Current random accumulator (η'₀)
+                    span.debug("Random accumulator available from accumulate context", .{});
                     data_to_fetch = ctx_regular.context.entropy[0..];
-                },
-
-                2 => {
-                    // Selector 2: Authorizer hash output (ω) - context-aware
-                    if (ctx_regular.context.getCurrentAuthorizerHash()) |authorizer_hash| {
-                        span.debug("Context-aware authorizer hash available from current operand", .{});
-                        data_to_fetch = authorizer_hash[0..];
-                    } else {
-                        span.debug("Context-aware authorizer hash not available", .{});
-                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
-                        return .play;
-                    }
                 },
 
                 14 => {
@@ -1246,20 +1243,19 @@ pub fn HostCalls(comptime params: Params) type {
 
                 15 => {
                     // Selector 15: Specific operand tuple
-                    const operand_index = @as(u32, @intCast(exec_ctx.registers[11]));
                     if (ctx_regular.context.operand_tuples) |operand_tuples| {
-                        if (operand_index < operand_tuples.len) {
-                            const operand_tuple = &operand_tuples[operand_index];
+                        if (index1 < operand_tuples.len) {
+                            const operand_tuple = &operand_tuples[index1];
                             const operand_tuple_data = encoding_utils.encodeOperandTuple(ctx_regular.allocator, operand_tuple) catch {
                                 span.err("Failed to encode operand tuple", .{});
                                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                                 return .play;
                             };
-                            span.debug("Operand tuple encoded successfully: index={d}", .{operand_index});
+                            span.debug("Operand tuple encoded successfully: index={d}", .{index1});
                             data_to_fetch = operand_tuple_data;
                             needs_cleanup = true;
                         } else {
-                            span.debug("Operand tuple index out of bounds: index={d}, count={d}", .{ operand_index, operand_tuples.len });
+                            span.debug("Operand tuple index out of bounds: index={d}, count={d}", .{ index1, operand_tuples.len });
                             exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                             return .play;
                         }
@@ -1270,9 +1266,52 @@ pub fn HostCalls(comptime params: Params) type {
                     }
                 },
 
+                16 => {
+                    // Selector 16: Encoded transfer sequence - access from deferred transfers
+                    if (ctx_regular.deferred_transfers.items.len > 0) {
+                        const transfers_data = encoding_utils.encodeTransfers(ctx_regular.allocator, ctx_regular.deferred_transfers.items) catch {
+                            span.err("Failed to encode transfer sequence", .{});
+                            exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                            return .play;
+                        };
+                        span.debug("Transfer sequence encoded successfully, count={d}", .{ctx_regular.deferred_transfers.items.len});
+                        data_to_fetch = transfers_data;
+                        needs_cleanup = true;
+                    } else {
+                        span.debug("No deferred transfers available in accumulate context", .{});
+                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                        return .play;
+                    }
+                },
+
+                17 => {
+                    // Selector 17: Specific transfer by index
+                    if (ctx_regular.deferred_transfers.items.len > 0) {
+                        if (index1 < ctx_regular.deferred_transfers.items.len) {
+                            const transfer_item = &ctx_regular.deferred_transfers.items[index1];
+                            const transfer_data = encoding_utils.encodeTransfer(ctx_regular.allocator, transfer_item) catch {
+                                span.err("Failed to encode transfer", .{});
+                                exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                                return .play;
+                            };
+                            span.debug("Transfer encoded successfully: index={d}", .{index1});
+                            data_to_fetch = transfer_data;
+                            needs_cleanup = true;
+                        } else {
+                            span.debug("Transfer index out of bounds: index={d}, count={d}", .{ index1, ctx_regular.deferred_transfers.items.len });
+                            exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                            return .play;
+                        }
+                    } else {
+                        span.debug("No deferred transfers available in accumulate context", .{});
+                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                        return .play;
+                    }
+                },
+
                 else => {
                     // Invalid selector for accumulate context
-                    span.debug("Invalid fetch selector for accumulate: {d} (valid: 0,1,2,14,15)", .{selector});
+                    span.debug("Invalid fetch selector for accumulate: {d} (valid: 0,1,14,15,16,17)", .{selector});
                     exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                     return .play;
                 },
