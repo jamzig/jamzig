@@ -46,12 +46,16 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 authorizer_hash_output: ?Hash256 = null,
                 outputs: ?[]const types.AccumulateOutput = null,
                 transfers: ?[]const @import("accumulate/types.zig").DeferredTransfer = null,
+                // Operand tuples for selectors 14-15
+                operand_tuples: ?[]const @import("accumulate.zig").AccumulationOperand = null,
             };
 
             pub const OnTransferData = struct {
                 // Limited data available in transfer context
                 // Could include transfer-specific information
                 transfer_memo: ?[]const u8 = null,
+                // Transfer sequence for selectors 16-17
+                transfer_sequence: ?[]const @import("accumulate/types.zig").DeferredTransfer = null,
             };
         };
 
@@ -114,6 +118,18 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             return try codec.serializeAlloc([]const types.AccumulateOutput, .{}, allocator, outputs);
         }
 
+        /// Encode operand tuples array
+        fn encodeOperandTuples(allocator: std.mem.Allocator, operand_tuples: []const @import("accumulate.zig").AccumulationOperand) ![]u8 {
+            const codec = @import("../codec.zig");
+            return try codec.serializeAlloc([]const @import("accumulate.zig").AccumulationOperand, .{}, allocator, operand_tuples);
+        }
+
+        /// Encode single operand tuple
+        fn encodeOperandTuple(allocator: std.mem.Allocator, operand_tuple: *const @import("accumulate.zig").AccumulationOperand) ![]u8 {
+            const codec = @import("../codec.zig");
+            return try codec.serializeAlloc(@import("accumulate.zig").AccumulationOperand, .{}, allocator, operand_tuple.*);
+        }
+
         //
         // Fetch Host Function (ΩY) - Host Call ID: 18
         //
@@ -161,19 +177,19 @@ pub fn GeneralHostCalls(comptime params: Params) type {
         //    Q: max_authorizations_queue_items (80)
         //    R: validator_rotation_period (10)
         //    S: max_accumulation_queue_entries (1024)
-        //    T: [NOT IN STRUCT - ticket-related constant]
+        //    T: max_number_of_extrinsics
         //    U: work_replacement_period (5)
         //    V: validators_count (1023)
         //    WA: max_authorization_code_size (64_000)
-        //    WB: [NOT IN STRUCT - work-related size constant]
+        //    WB: max_work_package_size
         //    WC: max_service_code_size (4_000_000)
         //    WE: erasure_coded_piece_size (684)
-        //    WG: [NOT IN STRUCT - exported_segment_size is WS, not WG]
+        //    WG: exported_segment_size
         //    WM: max_manifest_entries (2^11)
         //    WP: max_work_package_size (12 * 2^20)
         //    WR: max_work_report_size (96 * 2^10)
         //    WT: transfer_memo_size (128)
-        //    WX: [NOT IN STRUCT - work-related constant]
+        //    WX: max_number_of_exports
         //    Y: ticket_submission_end_epoch_slot (500)
         //    Used by: All contexts for system limits and parameters
         //
@@ -285,33 +301,6 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                     }
                 },
 
-                2 => {
-                    // Selector 2: Authorizer hash output (ω) - available in accumulate context
-                    if (host_ctx.invocation_context) |ctx| {
-                        switch (ctx) {
-                            // REMOVED FOR REFINE: .refine case
-                            .accumulate => |acc_data| {
-                                if (acc_data.authorizer_hash_output) |hash_output| {
-                                    span.debug("Authorizer hash output available from accumulate context", .{});
-                                    data_to_fetch = hash_output[0..];
-                                } else {
-                                    span.debug("Authorizer hash output not set in accumulate context", .{});
-                                }
-                            },
-                            else => {
-                                span.debug("Authorizer hash output not available in {s} context", .{@tagName(ctx)});
-                            },
-                        }
-                    } else {
-                        span.debug("Authorizer hash output fetch: no invocation context available", .{});
-                    }
-
-                    if (data_to_fetch == null) {
-                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
-                        return .play;
-                    }
-                },
-
                 // REMOVED FOR REFINE: Selectors 3-13 (work package specific selectors)
                 // - Selector 3: Extrinsics by item and byte index
                 // - Selector 4: Extrinsics for current work item by byte index
@@ -324,39 +313,78 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 // - Selector 11: Work items summary
                 // - Selector 12: Specific work item summary
                 // - Selector 13: Work item payload
-                3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 => {
+                2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 => {
                     span.debug("Selector {d} disabled (refine-only)", .{selector});
                     exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                     return .play;
                 },
 
-                15 => {
-                    // Selector 15: Encoded transfers
-                    // E(transfers)
+                14 => {
+                    // Selector 14: Encoded operand tuples
+                    // E(↕o) - All operand tuples for accumulation
                     if (host_ctx.invocation_context) |ctx| {
                         switch (ctx) {
-                            // REMOVED FOR REFINE: .refine case
                             .accumulate => |acc_data| {
-                                if (acc_data.transfers) |transfers| {
-                                    // Encode transfers array
-                                    const transfers_data = encodeTransfers(host_ctx.allocator, transfers) catch {
-                                        span.err("Failed to encode transfers", .{});
+                                if (acc_data.operand_tuples) |operand_tuples| {
+                                    // Encode operand tuples array
+                                    const operand_tuples_data = encodeOperandTuples(host_ctx.allocator, operand_tuples) catch {
+                                        span.err("Failed to encode operand tuples", .{});
                                         exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                                         return .play;
                                     };
-                                    span.debug("Transfers encoded successfully from accumulate context, count={d}", .{transfers.len});
-                                    data_to_fetch = transfers_data;
+                                    span.debug("Operand tuples encoded successfully from accumulate context, count={d}", .{operand_tuples.len});
+                                    data_to_fetch = operand_tuples_data;
                                     needs_cleanup = true;
                                 } else {
-                                    span.debug("Transfers not available in accumulate context", .{});
+                                    span.debug("Operand tuples not available in accumulate context", .{});
                                 }
                             },
                             else => {
-                                span.debug("Transfers not available in {s} context", .{@tagName(ctx)});
+                                span.debug("Operand tuples not available in {s} context", .{@tagName(ctx)});
                             },
                         }
                     } else {
-                        span.debug("Transfers fetch: no invocation context available", .{});
+                        span.debug("Operand tuples fetch: no invocation context available", .{});
+                    }
+
+                    if (data_to_fetch == null) {
+                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                        return .play;
+                    }
+                },
+
+                15 => {
+                    // Selector 15: Specific operand tuple
+                    // E(o[ω11]) - Operand tuple at index ω11
+                    const operand_index = @as(u32, @intCast(exec_ctx.registers[11]));
+
+                    if (host_ctx.invocation_context) |ctx| {
+                        switch (ctx) {
+                            .accumulate => |acc_data| {
+                                if (acc_data.operand_tuples) |operand_tuples| {
+                                    if (operand_index < operand_tuples.len) {
+                                        const operand_tuple = &operand_tuples[operand_index];
+                                        const operand_tuple_data = encodeOperandTuple(host_ctx.allocator, operand_tuple) catch {
+                                            span.err("Failed to encode operand tuple", .{});
+                                            exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                                            return .play;
+                                        };
+                                        span.debug("Operand tuple encoded successfully from accumulate context: index={d}", .{operand_index});
+                                        data_to_fetch = operand_tuple_data;
+                                        needs_cleanup = true;
+                                    } else {
+                                        span.debug("Operand tuple index out of bounds in accumulate context: index={d}, count={d}", .{ operand_index, operand_tuples.len });
+                                    }
+                                } else {
+                                    span.debug("Operand tuples not available in accumulate context", .{});
+                                }
+                            },
+                            else => {
+                                span.debug("Specific operand tuple not available in {s} context", .{@tagName(ctx)});
+                            },
+                        }
+                    } else {
+                        span.debug("Specific operand tuple fetch: no invocation context available", .{});
                     }
 
                     if (data_to_fetch == null) {
@@ -366,38 +394,31 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 },
 
                 16 => {
-                    // Selector 16: Specific transfer
-                    // E(transfers[registers[11]])
-                    const transfer_index = @as(u32, @intCast(exec_ctx.registers[11]));
-
+                    // Selector 16: Encoded transfer sequence
+                    // E(↕t) - All pending transfers
                     if (host_ctx.invocation_context) |ctx| {
                         switch (ctx) {
-                            // REMOVED FOR REFINE: .refine case
-                            .accumulate => |acc_data| {
-                                if (acc_data.transfers) |transfers| {
-                                    if (transfer_index < transfers.len) {
-                                        const transfer = &transfers[transfer_index];
-                                        const transfer_data = encodeTransfer(host_ctx.allocator, transfer) catch {
-                                            span.err("Failed to encode transfer", .{});
-                                            exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
-                                            return .play;
-                                        };
-                                        span.debug("Transfer encoded successfully from accumulate context: index={d}", .{transfer_index});
-                                        data_to_fetch = transfer_data;
-                                        needs_cleanup = true;
-                                    } else {
-                                        span.debug("Transfer index out of bounds in accumulate context: index={d}, count={d}", .{ transfer_index, transfers.len });
-                                    }
+                            .ontransfer => |transfer_data| {
+                                if (transfer_data.transfer_sequence) |transfer_sequence| {
+                                    // Encode transfer sequence array
+                                    const transfers_data = encodeTransfers(host_ctx.allocator, transfer_sequence) catch {
+                                        span.err("Failed to encode transfer sequence", .{});
+                                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                                        return .play;
+                                    };
+                                    span.debug("Transfer sequence encoded successfully from ontransfer context, count={d}", .{transfer_sequence.len});
+                                    data_to_fetch = transfers_data;
+                                    needs_cleanup = true;
                                 } else {
-                                    span.debug("Transfers not available in accumulate context", .{});
+                                    span.debug("Transfer sequence not available in ontransfer context", .{});
                                 }
                             },
                             else => {
-                                span.debug("Specific transfer not available in {s} context", .{@tagName(ctx)});
+                                span.debug("Transfer sequence not available in {s} context", .{@tagName(ctx)});
                             },
                         }
                     } else {
-                        span.debug("Specific transfer fetch: no invocation context available", .{});
+                        span.debug("Transfer sequence fetch: no invocation context available", .{});
                     }
 
                     if (data_to_fetch == null) {
@@ -407,31 +428,37 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 },
 
                 17 => {
-                    // Selector 17: Outputs (accumulation results)
-                    // E(outputs)
+                    // Selector 17: Specific transfer
+                    // E(t[ω11]) - Transfer at index ω11
+                    const transfer_index = @as(u32, @intCast(exec_ctx.registers[11]));
+
                     if (host_ctx.invocation_context) |ctx| {
                         switch (ctx) {
-                            .accumulate => |acc_data| {
-                                if (acc_data.outputs) |outputs| {
-                                    // Encode outputs array
-                                    const outputs_data = encodeOutputs(host_ctx.allocator, outputs) catch {
-                                        span.err("Failed to encode outputs", .{});
-                                        exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
-                                        return .play;
-                                    };
-                                    span.debug("Outputs encoded successfully, count={d}", .{outputs.len});
-                                    data_to_fetch = outputs_data;
-                                    needs_cleanup = true;
+                            .ontransfer => |transfer_data| {
+                                if (transfer_data.transfer_sequence) |transfer_sequence| {
+                                    if (transfer_index < transfer_sequence.len) {
+                                        const transfer = &transfer_sequence[transfer_index];
+                                        const transfer_data_encoded = encodeTransfer(host_ctx.allocator, transfer) catch {
+                                            span.err("Failed to encode transfer", .{});
+                                            exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
+                                            return .play;
+                                        };
+                                        span.debug("Transfer encoded successfully from ontransfer context: index={d}", .{transfer_index});
+                                        data_to_fetch = transfer_data_encoded;
+                                        needs_cleanup = true;
+                                    } else {
+                                        span.debug("Transfer index out of bounds in ontransfer context: index={d}, count={d}", .{ transfer_index, transfer_sequence.len });
+                                    }
                                 } else {
-                                    span.debug("Outputs not available in accumulate context", .{});
+                                    span.debug("Transfer sequence not available in ontransfer context", .{});
                                 }
                             },
                             else => {
-                                span.debug("Outputs not available in {s} context", .{@tagName(ctx)});
+                                span.debug("Specific transfer not available in {s} context", .{@tagName(ctx)});
                             },
                         }
                     } else {
-                        span.debug("Outputs fetch: no invocation context available", .{});
+                        span.debug("Specific transfer fetch: no invocation context available", .{});
                     }
 
                     if (data_to_fetch == null) {
@@ -941,100 +968,82 @@ pub fn GeneralHostCalls(comptime params: Params) type {
 
 /// GetChainConstants returns the encoded chain constants as per the JAM specification
 fn encodeJamParams(allocator: std.mem.Allocator, params: Params) ![]u8 {
+    // JAM Constants using GrayPaper notation - encoded in order per specification
     const EncodeMap = struct {
-        additional_minimum_balance_per_item: u64, // BI
-        additional_minimum_balance_per_octet: u64, // BL
-        basic_minimum_balance: u64, // BS
-        total_number_of_cores: u16, // C
-        preimage_expulsion_period: u32, // D
-        timeslots_per_epoch: u32, // E
-        max_allocated_gas_accumulation: u64, // GA
-        max_allocated_gas_is_authorized: u64, // GI
-        max_allocated_gas_refine: u64, // GR
-        total_gas_accumulation: u64, // GT
-        max_recent_blocks: u16, // H
-        max_number_of_items: u16, // I
-        max_number_of_dependency_items: u16, // J
-        max_tickets_per_block: u16, // K
-        max_timeslots_for_preimage: u32, // L
-        max_ticket_attempts_per_validator: u16, // N
-        max_authorizers_per_core: u16, // O
-        slot_period_in_seconds: u16, // P
-        pending_authorizers_queue_size: u16, // Q
-        validator_rotation_period: u16, // R
-        max_accumulation_queue_entries: u16, // S
-        max_number_of_extrinsics: u16, // T
-        work_report_timeout_period: u16, // U
-        number_of_validators: u16, // V
-        maximum_size_is_authorized_code: u32, // WA
-        max_work_package_size: u32, // WB
-        max_size_service_code: u32, // WC
-        erasure_coding_chunk_size: u32, // WE
-        max_number_of_imports_exports: u32, // WM
-        number_of_erasure_codec_pieces_in_segment: u32, // WP
-        max_work_package_size_bytes: u32, // WR
-        transfer_memo_size_bytes: u32, // WT
-        max_number_of_exports: u32, // WX
-        ticket_submission_time_slots: u32, // Y
+        BI: u64, // additional_minimum_balance_per_item
+        BL: u64, // additional_minimum_balance_per_octet
+        BS: u64, // basic_minimum_balance
+        C: u16, // total_number_of_cores
+        D: u32, // preimage_expulsion_period
+        E: u32, // timeslots_per_epoch
+        GA: u64, // max_allocated_gas_accumulation
+        GI: u64, // max_allocated_gas_is_authorized
+        GR: u64, // max_allocated_gas_refine
+        GT: u64, // total_gas_accumulation
+        H: u16, // max_recent_blocks
+        I: u16, // max_number_of_items
+        J: u16, // max_number_of_dependency_items
+        L: u32, // max_timeslots_for_preimage
+        O: u16, // max_authorizers_per_core
+        P: u16, // slot_period_in_seconds
+        Q: u16, // pending_authorizers_queue_size
+        R: u16, // validator_rotation_period
+        S: u16, // max_accumulation_queue_entries
+        T: u16, // max_number_of_extrinsics
+        U: u16, // work_report_timeout_period
+        V: u16, // number_of_validators
+        WA: u32, // maximum_size_is_authorized_code
+        WB: u32, // max_work_package_size
+        WC: u32, // max_size_service_code
+        WE: u32, // erasure_coding_chunk_size
+        WG: u32, // exported_segment_size
+        WM: u32, // max_number_of_imports_exports
+        WP: u32, // number_of_erasure_codec_pieces_in_segment
+        WR: u32, // max_work_package_size_bytes
+        WT: u32, // transfer_memo_size_bytes
+        WX: u32, // max_number_of_exports
+        Y: u32, // ticket_submission_time_slots
     };
 
     const constants = EncodeMap{
-        .additional_minimum_balance_per_item = params.min_balance_per_item,
-        .additional_minimum_balance_per_octet = params.min_balance_per_octet,
-        .basic_minimum_balance = params.basic_service_balance,
-        .total_number_of_cores = params.core_count,
-        .preimage_expulsion_period = params.preimage_expungement_period,
-        .timeslots_per_epoch = params.epoch_length,
-        .max_allocated_gas_accumulation = params.gas_alloc_accumulation,
-        .max_allocated_gas_is_authorized = params.gas_alloc_is_authorized,
-        .max_allocated_gas_refine = params.gas_alloc_refine,
-        .total_gas_accumulation = params.total_gas_alloc_accumulation,
-        .max_recent_blocks = params.recent_history_size,
-        .max_number_of_items = params.max_work_items_per_package,
-        .max_number_of_dependency_items = params.max_number_of_dependencies_for_work_reports,
-        .max_tickets_per_block = @truncate(params.max_tickets_per_extrinsic),
-        .max_timeslots_for_preimage = params.max_lookup_anchor_age,
-        .max_ticket_attempts_per_validator = params.max_ticket_entries_per_validator,
-        .max_authorizers_per_core = params.max_authorizations_pool_items,
-        .slot_period_in_seconds = params.slot_period,
-        .pending_authorizers_queue_size = params.max_authorizations_queue_items,
-        .validator_rotation_period = @truncate(params.validator_rotation_period),
-        .max_accumulation_queue_entries = @truncate(params.max_accumulation_queue_entries),
-        .max_number_of_extrinsics = @truncate(params.max_tickets_per_extrinsic), // T - derived from K (max tickets per extrinsic)
-        .work_report_timeout_period = params.work_replacement_period,
-        .number_of_validators = @truncate(params.validators_count),
-        .maximum_size_is_authorized_code = params.max_authorization_code_size,
-        .max_work_package_size = params.max_work_package_size_with_extrinsics,
-        .max_size_service_code = params.max_service_code_size,
-        .erasure_coding_chunk_size = params.erasure_coded_piece_size,
-        .max_number_of_imports_exports = params.max_imports_per_work_package,
-        .number_of_erasure_codec_pieces_in_segment = params.exported_segment_size,
-        .max_work_package_size_bytes = params.max_work_report_size,
-        .transfer_memo_size_bytes = params.transfer_memo_size,
-        .max_number_of_exports = params.max_exports_per_work_package, // WX - derived from WM (max manifest entries)
-        .ticket_submission_time_slots = params.ticket_submission_end_epoch_slot,
+        .BI = params.min_balance_per_item,
+        .BL = params.min_balance_per_octet,
+        .BS = params.basic_service_balance,
+        .C = params.core_count,
+        .D = params.preimage_expungement_period,
+        .E = params.epoch_length,
+        .GA = params.gas_alloc_accumulation,
+        .GI = params.gas_alloc_is_authorized,
+        .GR = params.gas_alloc_refine,
+        .GT = params.total_gas_alloc_accumulation,
+        .H = params.recent_history_size,
+        .I = params.max_work_items_per_package,
+        .J = params.max_number_of_dependencies_for_work_reports,
+        .L = params.max_lookup_anchor_age,
+        .O = params.max_authorizations_pool_items,
+        .P = params.slot_period,
+        .Q = params.max_authorizations_queue_items,
+        .R = @truncate(params.validator_rotation_period),
+        .S = @truncate(params.max_accumulation_queue_entries),
+        .T = params.max_extrinsics_per_work_package,
+        .U = params.work_replacement_period,
+        .V = @truncate(params.validators_count),
+        .WA = params.max_authorization_code_size,
+        .WB = params.max_work_package_size_with_extrinsics,
+        .WC = params.max_service_code_size,
+        .WE = params.erasure_coded_piece_size,
+        .WG = params.exported_segment_size, // NOTE: WG now maps to exported_segment_size
+        .WM = params.max_imports_per_work_package,
+        .WP = params.exported_segment_size, // number_of_erasure_codec_pieces_in_segment
+        .WR = params.max_work_report_size,
+        .WT = params.transfer_memo_size,
+        .WX = params.max_exports_per_work_package,
+        .Y = params.ticket_submission_end_epoch_slot,
     };
 
     // Trace the constants being encoded
     const span = trace.span(.encode_jam_params);
     defer span.deinit();
-
-    span.debug("Encoding JAM parameters:", .{});
-    span.debug("  Cores: {d}, Validators: {d}, Epoch length: {d}", .{
-        constants.total_number_of_cores,
-        constants.number_of_validators,
-        constants.timeslots_per_epoch,
-    });
-    span.debug("  Gas allocations - Accumulation: {d}, Refine: {d}, Total: {d}", .{
-        constants.max_allocated_gas_accumulation,
-        constants.max_allocated_gas_refine,
-        constants.total_gas_accumulation,
-    });
-    span.debug("  Balances - Basic: {d}, Per item: {d}, Per octet: {d}", .{
-        constants.basic_minimum_balance,
-        constants.additional_minimum_balance_per_item,
-        constants.additional_minimum_balance_per_octet,
-    });
 
     const codec = @import("../codec.zig");
     return try codec.serializeAlloc(EncodeMap, .{}, allocator, constants);
