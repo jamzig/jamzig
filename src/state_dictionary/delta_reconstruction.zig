@@ -4,6 +4,7 @@ const types = @import("../types.zig");
 const state_decoding = @import("../state_decoding.zig");
 const state_dictionary = @import("../state_dictionary.zig");
 const services = @import("../services.zig");
+const state_recovery = @import("../state_recovery.zig");
 
 const Blake2b256 = std.crypto.hash.blake2.Blake2b(256);
 const trace = @import("../tracing.zig").scoped(.codec);
@@ -14,7 +15,7 @@ const log = std.log.scoped(.state_dictionary);
 pub fn reconstructServiceAccountBase(
     allocator: std.mem.Allocator,
     delta: *state.Delta,
-    key: [32]u8,
+    key: types.StateKey,
     value: []const u8,
 ) !void {
     const span = trace.span(.reconstruct_service_account_base);
@@ -25,7 +26,7 @@ pub fn reconstructServiceAccountBase(
     var stream = std.io.fixedBufferStream(value);
     const reader = stream.reader();
 
-    const dkey = state_dictionary.deconstructByteServiceIndexKey(key);
+    const dkey = state_recovery.deconstructByteServiceIndexKey(key);
     std.debug.assert(dkey.byte == 255);
     span.debug("Deconstructed key - service index: {d}, byte: {d}", .{ dkey.service_index, dkey.byte });
 
@@ -44,7 +45,7 @@ pub fn reconstructStorageEntry(
     span.debug("Starting storage entry reconstruction", .{});
     span.trace("Key: {any}, Value length: {d}", .{ std.fmt.fmtSliceHexLower(&dict_entry.key), dict_entry.value.len });
 
-    const dkey = state_dictionary.deconstructServiceIndexHashKey(dict_entry.key);
+    const dkey = state_recovery.deconstructServiceIndexHashKey(dict_entry.key);
     span.debug("Deconstructed service index: {d}", .{dkey.service_index});
 
     // Get or create the account
@@ -75,7 +76,7 @@ pub fn reconstructPreimageEntry(
         tau,
     });
 
-    const dkey = state_dictionary.deconstructServiceIndexHashKey(dict_entry.key);
+    const dkey = state_recovery.deconstructServiceIndexHashKey(dict_entry.key);
     span.debug("Deconstructed service index: {d}", .{dkey.service_index});
 
     // Get or create the account
@@ -86,24 +87,9 @@ pub fn reconstructPreimageEntry(
     const owned_value = try allocator.dupe(u8, dict_entry.value);
     errdefer allocator.free(owned_value);
 
-    // we have to decode the value to add it the account preimages, but we also do
-    // not have access to the hash
-    try account.preimages.put(dict_entry.metadata.?.delta_preimage.hash, owned_value);
+    // Store preimage using the StateKey directly - no conversion needed
+    try account.preimages.put(dict_entry.key, owned_value);
     span.debug("Successfully stored preimage in account", .{});
-
-    // GP0.5.0 @ 9.2.1 The state of the lookup system natu-
-    // rally satisfies a number of invariants. Firstly, any preim-
-    // age value must correspond to its hash.
-    // TODO: leave this in??
-
-    // if (tau == null) {
-    //     log.warn("tau not set yet", .{});
-    // }
-    // try account.integratePreimageLookup(
-    //     hash_of_value,
-    //     @intCast(value.len),
-    //     tau,
-    // );
 }
 
 pub fn reconstructPreimageLookupEntry(
@@ -119,7 +105,7 @@ pub fn reconstructPreimageLookupEntry(
     _ = allocator;
 
     // Deconstruct the dkey and the preimageLookupEntry
-    const dkey = state_dictionary.deconstructServiceIndexHashKey(dict_entry.key);
+    const dkey = state_recovery.deconstructServiceIndexHashKey(dict_entry.key);
     span.debug("Deconstructed service index: {d}", .{dkey.service_index});
 
     // Now walk the delta to see if we have on the service a preimage which matches our hash
@@ -131,10 +117,6 @@ pub fn reconstructPreimageLookupEntry(
         stream.reader(),
     );
 
-    // add it to the account
-    const metadata = dict_entry.metadata.?.delta_preimage_lookup;
-    try account.preimage_lookups.put(
-        services.PreimageLookupKey{ .hash = metadata.hash, .length = metadata.preimage_length },
-        entry,
-    );
+    // Store preimage lookup using the StateKey directly - no conversion needed
+    try account.preimage_lookups.put(dict_entry.key, entry);
 }
