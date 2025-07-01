@@ -45,19 +45,10 @@ pub fn HostCalls(comptime params: Params) type {
             }
 
             pub fn toGeneralContext(self: *Self) general.GeneralHostCalls(params).Context {
-                // Create ontransfer-specific invocation context
-                const invocation_ctx = general.GeneralHostCalls(params).InvocationContext{
-                    .ontransfer = .{
-                        // Note: transfer_memo would be set if available
-                        .transfer_memo = null,
-                    },
-                };
-
-                return general.GeneralHostCalls(params).Context.initWithContext(
+                return general.GeneralHostCalls(params).Context.init(
                     self.service_id,
                     &self.service_accounts,
                     self.allocator,
-                    invocation_ctx,
                 );
             }
 

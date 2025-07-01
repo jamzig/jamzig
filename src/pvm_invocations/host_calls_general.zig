@@ -28,28 +28,9 @@ pub const WorkItemMetadata = struct {
 
 /// General host calls following the same pattern as accumulate
 pub fn GeneralHostCalls(comptime params: Params) type {
+    _ = params;
     return struct {
-        /// Optional invocation-specific context (kept for compatibility with existing functions)
-        pub const InvocationContext = union(enum) {
-            accumulate: AccumulateData,
-            // REMOVED FOR REFINE: refine: RefineData,
-            ontransfer: OnTransferData,
-
-            pub const AccumulateData = struct {
-                // Reference to accumulate context containing all accumulation data
-                accumulate_context: *@import("accumulate/context.zig").AccumulationContext(params),
-                // Additional data not in the context
-                transfers: ?[]const @import("accumulate/types.zig").DeferredTransfer = null,
-            };
-
-            pub const OnTransferData = struct {
-                // Limited data available in transfer context
-                // Could include transfer-specific information
-                transfer_memo: ?[]const u8 = null,
-                // Transfer sequence for selectors 16-17
-                transfer_sequence: ?[]const @import("accumulate/types.zig").DeferredTransfer = null,
-            };
-        };
+        // Removed deprecated InvocationContext
 
         /// Context for general host calls
         pub const Context = struct {
@@ -59,8 +40,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             service_accounts: *DeltaSnapshot, // d ∈ D⟨N_S → A⟩
             /// Allocator for memory allocation
             allocator: std.mem.Allocator,
-            /// Optional invocation-specific context (kept for compatibility with existing functions)
-            invocation_context: ?InvocationContext = null,
+            // Removed deprecated invocation_context
 
             const Self = @This();
 
@@ -73,21 +53,6 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                     .service_id = service_id,
                     .service_accounts = service_accounts,
                     .allocator = allocator,
-                    .invocation_context = null, // Default: no extended context
-                };
-            }
-
-            pub fn initWithContext(
-                service_id: types.ServiceId,
-                service_accounts: *DeltaSnapshot,
-                allocator: std.mem.Allocator,
-                invocation_context: InvocationContext,
-            ) Self {
-                return Self{
-                    .service_id = service_id,
-                    .service_accounts = service_accounts,
-                    .allocator = allocator,
-                    .invocation_context = invocation_context,
                 };
             }
         };

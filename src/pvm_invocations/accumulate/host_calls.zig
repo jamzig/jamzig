@@ -67,19 +67,10 @@ pub fn HostCalls(comptime params: Params) type {
             }
 
             pub fn toGeneralContext(self: *@This()) general.GeneralHostCalls(params).Context {
-                // Create accumulate-specific invocation context with reference to accumulate context
-                const invocation_ctx = general.GeneralHostCalls(params).InvocationContext{
-                    .accumulate = .{
-                        .accumulate_context = &self.context,
-                        .transfers = if (self.deferred_transfers.items.len > 0) self.deferred_transfers.items else null,
-                    },
-                };
-
-                return general.GeneralHostCalls(params).Context.initWithContext(
+                return general.GeneralHostCalls(params).Context.init(
                     self.service_id,
                     &self.context.service_accounts,
                     self.allocator,
-                    invocation_ctx,
                 );
             }
 
