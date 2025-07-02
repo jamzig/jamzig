@@ -56,7 +56,7 @@ pub fn generateReport(allocator: std.mem.Allocator, result: FuzzResult) ![]u8 {
     try writer.print("Seed: {d}\n", .{result.seed});
     try writer.print("Blocks Processed: {d}\n", .{result.blocks_processed});
     try writer.print("Success: {}\n", .{result.isSuccess()});
-    try writer.print("Mismatches Found: {d}\n\n", .{result.mismatches.len});
+    try writer.print("Mismatches Found: {d}\n\n", .{if (result.mismatch != null) @as(usize, 1) else @as(usize, 0)});
 
     // Reproduction instructions
     try writer.print("Reproduction Instructions:\n", .{});
@@ -66,42 +66,40 @@ pub fn generateReport(allocator: std.mem.Allocator, result: FuzzResult) ![]u8 {
     try writer.print("2. Run fuzzing cycle with {d} blocks\n\n", .{result.blocks_processed});
 
     // Detailed mismatch information
-    if (result.mismatches.len > 0) {
+    if (result.mismatch) |mismatch| {
         try writer.print("Detailed Mismatch Analysis:\n", .{});
         try writer.print("---------------------------\n\n", .{});
 
-        for (result.mismatches, 0..) |mismatch, i| {
-            try writer.print("Mismatch #{d}:\n", .{i + 1});
-            try writer.print("  Block Number: {d}\n", .{mismatch.block_number});
-            try writer.print("  Local State Root:  {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.local_state_root)});
-            try writer.print("  Target State Root: {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.target_state_root)});
+        try writer.print("Mismatch Details:\n", .{});
+        try writer.print("  Block Number: {d}\n", .{mismatch.block_number});
+        try writer.print("  Local State Root:  {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.local_state_root)});
+        try writer.print("  Target State Root: {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.target_state_root)});
 
-            // Block information
-            const block_hash = try mismatch.block.header.header_hash(messages.FUZZ_PARAMS, allocator);
-            try writer.print("  Block Hash: {s}\n", .{std.fmt.fmtSliceHexLower(&block_hash)});
-            try writer.print("  Block Slot: {d}\n", .{mismatch.block.header.slot});
+        // Block information
+        const block_hash = try mismatch.block.header.header_hash(messages.FUZZ_PARAMS, allocator);
+        try writer.print("  Block Hash: {s}\n", .{std.fmt.fmtSliceHexLower(&block_hash)});
+        try writer.print("  Block Slot: {d}\n", .{mismatch.block.header.slot});
 
-            // State information if available
-            if (mismatch.target_state) |state| {
-                try writer.print("  Target State Entries: {d}\n", .{state.len});
+        // State information if available
+        if (mismatch.target_state) |state| {
+            try writer.print("  Target State Entries: {d}\n", .{state.len});
 
-                // Show first few entries as sample
-                const max_entries = @min(5, state.len);
-                if (max_entries > 0) {
-                    try writer.print("  Sample State Entries:\n", .{});
-                    for (state[0..max_entries]) |kv| {
-                        try writer.print("    Key: {s}, Value: {d} bytes\n", .{
-                            std.fmt.fmtSliceHexLower(&kv.key),
-                            kv.value.len,
-                        });
-                    }
-                    if (state.len > max_entries) {
-                        try writer.print("    ... and {d} more entries\n", .{state.len - max_entries});
-                    }
+            // Show first few entries as sample
+            const max_entries = @min(5, state.len);
+            if (max_entries > 0) {
+                try writer.print("  Sample State Entries:\n", .{});
+                for (state[0..max_entries]) |kv| {
+                    try writer.print("    Key: {s}, Value: {d} bytes\n", .{
+                        std.fmt.fmtSliceHexLower(&kv.key),
+                        kv.value.len,
+                    });
+                }
+                if (state.len > max_entries) {
+                    try writer.print("    ... and {d} more entries\n", .{state.len - max_entries});
                 }
             }
-            try writer.print("\n", .{});
         }
+        try writer.print("\n", .{});
     } else {
         try writer.print("No mismatches found - all state roots matched!\n\n", .{});
     }
@@ -114,7 +112,7 @@ pub fn generateReport(allocator: std.mem.Allocator, result: FuzzResult) ![]u8 {
         try writer.print("✓ All state roots matched between local and target\n", .{});
         try writer.print("✓ Target implementation appears to be conformant for this test\n", .{});
     } else {
-        try writer.print("✗ {d} mismatch(es) detected during fuzzing\n", .{result.mismatches.len});
+        try writer.print("✗ 1 mismatch detected during fuzzing\n", .{});
         try writer.print("✗ Target implementation may have conformance issues\n", .{});
         try writer.print("✗ Manual inspection required to determine root cause\n", .{});
         try writer.print("\nRecommendations:\n", .{});

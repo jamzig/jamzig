@@ -97,6 +97,31 @@ pub fn build(b: *std.Build) !void {
     rust_deps.staticallyLinkTo(fuzz_protocol_target);
     b.installArtifact(fuzz_protocol_target);
 
+    // JAM Conformance Testing Executables
+    const jam_conformance_fuzzer = b.addExecutable(.{
+        .name = "jam_conformance_fuzzer",
+        .root_source_file = b.path("src/jam_conformance_fuzzer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    jam_conformance_fuzzer.root_module.addOptions("build_options", build_options);
+    jam_conformance_fuzzer.root_module.addImport("clap", clap_module);
+    jam_conformance_fuzzer.linkLibCpp();
+    rust_deps.staticallyLinkTo(jam_conformance_fuzzer);
+    b.installArtifact(jam_conformance_fuzzer);
+
+    const jam_conformance_target = b.addExecutable(.{
+        .name = "jam_conformance_target",
+        .root_source_file = b.path("src/jam_conformance_target.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    jam_conformance_target.root_module.addOptions("build_options", build_options);
+    jam_conformance_target.root_module.addImport("clap", clap_module);
+    jam_conformance_target.linkLibCpp();
+    rust_deps.staticallyLinkTo(jam_conformance_target);
+    b.installArtifact(jam_conformance_target);
+
     // Run Steps
     // NODE
     const run_cmd = b.addRunArtifact(jamzig_exe);
@@ -133,6 +158,24 @@ pub fn build(b: *std.Build) !void {
     }
     const run_fuzz_protocol_target_step = b.step("fuzz_protocol_target", "Run the fuzz protocol target server");
     run_fuzz_protocol_target_step.dependOn(&run_fuzz_protocol_target.step);
+
+    // JAM CONFORMANCE FUZZER
+    const run_jam_conformance_fuzzer = b.addRunArtifact(jam_conformance_fuzzer);
+    run_jam_conformance_fuzzer.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_jam_conformance_fuzzer.addArgs(args);
+    }
+    const run_jam_conformance_fuzzer_step = b.step("jam_conformance_fuzzer", "Run the JAM conformance fuzzer");
+    run_jam_conformance_fuzzer_step.dependOn(&run_jam_conformance_fuzzer.step);
+
+    // JAM CONFORMANCE TARGET
+    const run_jam_conformance_target = b.addRunArtifact(jam_conformance_target);
+    run_jam_conformance_target.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_jam_conformance_target.addArgs(args);
+    }
+    const run_jam_conformance_target_step = b.step("jam_conformance_target", "Run the JAM conformance target server");
+    run_jam_conformance_target_step.dependOn(&run_jam_conformance_target.step);
 
     // This creates the test step
     const unit_tests = b.addTest(.{
