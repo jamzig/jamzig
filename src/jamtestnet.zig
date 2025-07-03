@@ -8,6 +8,7 @@ const stf = @import("stf.zig");
 const types = @import("types.zig");
 const state = @import("state.zig");
 const state_dict = @import("state_dictionary.zig");
+const state_delta = @import("state_delta.zig");
 const codec = @import("codec.zig");
 const services = @import("services.zig");
 
@@ -15,7 +16,8 @@ const jam_params = @import("jam_params.zig");
 
 const jamtestnet = @import("jamtestnet/parsers.zig");
 
-const trace = @import("tracing.zig").scoped(.stf_test);
+const tracing = @import("tracing.zig");
+const trace = tracing.scoped(.stf_test);
 
 // we derive from the normal settings
 // see: https://github.com/jam-duna/jamtestnet/blob/main/chainspecs.json#L2
@@ -184,6 +186,11 @@ pub fn runStateTransitionTests(
     allocator: std.mem.Allocator,
     test_dir: []const u8,
 ) !void {
+    // Initialize runtime tracing if available
+    if (comptime tracing.tracing_mode == .runtime) {
+        tracing.runtime.init(allocator);
+    }
+
     std.debug.print("\nRunning state transition tests from: {s}\n", .{test_dir});
 
     var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions(test_dir, allocator);
@@ -253,11 +260,13 @@ pub fn runStateTransitionTests(
         // std.debug.print("{s}\n", .{current_state.?});
 
         // std.debug.print("Executing state transition...\n", .{});
-        var transition = try stf.stateTransition(
+        // Try state transition, with automatic retry on failure if runtime tracing is enabled
+        var transition = try executeStateTransitionWithTracing(
             params,
             allocator,
             &current_state.?,
             &state_transition.block(),
+            state_transition_vector.bin.name,
         );
         defer transition.deinitHeap();
 
@@ -307,4 +316,53 @@ pub fn runStateTransitionTests(
             &state_root,
         );
     }
+}
+
+// Execute state transition with automatic tracing on failure
+fn executeStateTransitionWithTracing(
+    comptime params: jam_params.Params,
+    allocator: std.mem.Allocator,
+    current_state: *const state.JamState(params),
+    block: *const types.Block,
+    filename: []const u8,
+) !*state_delta.StateTransition(params) {
+    // First attempt without tracing
+    return stf.stateTransition(params, allocator, current_state, block) catch |err| {
+        // Only retry with tracing if runtime mode is enabled
+        if (comptime tracing.tracing_mode == .runtime) {
+            std.debug.print("\n== STATE TRANSITION FAILED ==\n", .{});
+            std.debug.print("Error: {s}\n", .{@errorName(err)});
+            std.debug.print("Block slot: {d}\n", .{block.header.slot});
+            std.debug.print("File: {s}\n", .{filename});
+
+            // Enable debug tracing for STF modules
+            std.debug.print("\nRetrying with debug tracing enabled...\n\n", .{});
+            try tracing.runtime.setScope("stf", .debug);
+            try tracing.runtime.setScope("safrole", .debug);
+            try tracing.runtime.setScope("time", .debug);
+            try tracing.runtime.setScope("disputes", .debug);
+            try tracing.runtime.setScope("reports", .debug);
+            try tracing.runtime.setScope("accumulate", .debug);
+
+            // Retry with tracing enabled
+            defer {
+                // Disable tracing after retry
+                tracing.runtime.disableScope("stf") catch {};
+                tracing.runtime.disableScope("safrole") catch {};
+                tracing.runtime.disableScope("time") catch {};
+                tracing.runtime.disableScope("disputes") catch {};
+                tracing.runtime.disableScope("reports") catch {};
+                tracing.runtime.disableScope("accumulate") catch {};
+            }
+
+            return stf.stateTransition(params, allocator, current_state, block) catch |retry_err| {
+                std.debug.print("\n=== Detailed trace above shows failure context ===\n", .{});
+                std.debug.print("Error persists: {s}\n\n", .{@errorName(retry_err)});
+                return retry_err;
+            };
+        } else {
+            std.debug.print("State transition failed without runtime tracing: {s}\n", .{@errorName(err)});
+            return err;
+        }
+    };
 }
