@@ -135,6 +135,32 @@ EXPECTED_DIR="${OS_NAME}/${ARCH_NAME}"
 # Function to find executables
 find_executables() {
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local current_dir="$(pwd)"
+    
+    # Check if we're in a full or tiny subdirectory of a release
+    if [[ "$current_dir" =~ /releases/[^/]+/(full|tiny)$ ]]; then
+        local param_set=$(basename "$current_dir")
+        echo -e "${YELLOW}Detected parameter set: $param_set${NC}"
+        echo -e "${YELLOW}Auto-navigating to architecture: ${OS_NAME}/${ARCH_NAME}${NC}"
+        
+        # Check if the architecture directory exists
+        if [ -d "${OS_NAME}/${ARCH_NAME}" ]; then
+            cd "${OS_NAME}/${ARCH_NAME}"
+            echo -e "${GREEN}Changed to architecture directory: $(pwd)${NC}"
+        else
+            echo -e "${RED}Error: Architecture directory '${OS_NAME}/${ARCH_NAME}' not found${NC}"
+            echo ""
+            echo "This release does not include binaries for your platform."
+            echo "Available architectures in this directory:"
+            if [ -d "linux" ]; then
+                echo "  - linux/$(ls linux 2>/dev/null | tr '\n' ' ')"
+            fi
+            if [ -d "macos" ]; then
+                echo "  - macos/$(ls macos 2>/dev/null | tr '\n' ' ')"
+            fi
+            exit 1
+        fi
+    fi
     
     # Search paths in order
     local search_paths=(
