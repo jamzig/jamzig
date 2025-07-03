@@ -1308,7 +1308,16 @@ pub fn HostCalls(comptime params: Params) type {
                 const f = @min(offset, data.len);
                 const l = @min(limit, data.len - f);
 
-                span.debug("Fetching {d} bytes from offset {d}", .{ l, f });
+                span.debug("Fetching {d} bytes from offset {d} from data_to_fetch", .{ l, f });
+
+                // Double check if we have any data to fetch
+                // TODO: double check this in other memory access patterns
+                const v = data[f..][0..l];
+                if (v.len == 0) {
+                    span.debug("No data to fetch after offset and limit, returning NONE", .{});
+                    exec_ctx.registers[7] = data.len;
+                    return .play;
+                }
 
                 // Write data to memory
                 exec_ctx.memory.writeSlice(@truncate(output_ptr), data[f..][0..l]) catch {
