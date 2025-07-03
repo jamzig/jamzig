@@ -208,7 +208,7 @@ pub fn runStateTransitionTests(
             continue;
         }
 
-        // std.debug.print("\nProcessing transition: {s}\n\n", .{state_transition_vector.bin.name});
+        std.debug.print("\nProcessing transition: {s}\n\n", .{state_transition_vector.bin.name});
 
         var state_transition = try loader.loadTestVector(allocator, state_transition_vector.bin.path);
         defer state_transition.deinit(allocator);
@@ -318,6 +318,50 @@ pub fn runStateTransitionTests(
     }
 }
 
+// Extract the failing STF module from stack trace
+fn extractFailingModuleFromStackTrace(stack_trace: *std.builtin.StackTrace) ?[]const u8 {
+    // Get debug info for analyzing the stack trace
+    const debug_info = std.debug.getSelfDebugInfo() catch return null;
+    defer debug_info.deinit();
+
+    // Iterate through stack frames similar to writeStackTrace
+    var frame_index: usize = 0;
+    var frames_left: usize = @min(stack_trace.index, stack_trace.instruction_addresses.len);
+
+    while (frames_left != 0) : ({
+        frames_left -= 1;
+        frame_index = (frame_index + 1) % stack_trace.instruction_addresses.len;
+    }) {
+        const return_address = stack_trace.instruction_addresses[frame_index];
+
+        // Create a buffer to capture the source location output
+        var buf: [1024]u8 = undefined;
+        var stream = std.io.fixedBufferStream(&buf);
+
+        // Try to print source location to our buffer
+        std.debug.printSourceAtAddress(debug_info, stream.writer(), return_address - 1, .no_color) catch continue;
+
+        const output = stream.getWritten();
+
+        // Look for STF module patterns in the output
+        if (std.mem.indexOf(u8, output, "stf/time.zig")) |_| return "time";
+        if (std.mem.indexOf(u8, output, "stf/safrole.zig")) |_| return "safrole";
+        if (std.mem.indexOf(u8, output, "stf/reports.zig")) |_| return "reports";
+        if (std.mem.indexOf(u8, output, "stf/disputes.zig")) |_| return "disputes";
+        if (std.mem.indexOf(u8, output, "stf/assurances.zig")) |_| return "assurances";
+        if (std.mem.indexOf(u8, output, "stf/accumulate.zig")) |_| return "accumulate";
+        if (std.mem.indexOf(u8, output, "stf/preimages.zig")) |_| return "preimages";
+        if (std.mem.indexOf(u8, output, "stf/authorization.zig")) |_| return "authorization";
+        if (std.mem.indexOf(u8, output, "stf/validator_stats.zig")) |_| return "validator_stats";
+        if (std.mem.indexOf(u8, output, "stf/recent_history.zig")) |_| return "recent_history";
+        if (std.mem.indexOf(u8, output, "stf/eta.zig")) |_| return "eta";
+        if (std.mem.indexOf(u8, output, "stf/core_allocation.zig")) |_| return "core_allocation";
+        if (std.mem.indexOf(u8, output, "stf/services.zig")) |_| return "services";
+    }
+
+    return null;
+}
+
 // Execute state transition with automatic tracing on failure
 fn executeStateTransitionWithTracing(
     comptime params: jam_params.Params,
@@ -335,25 +379,29 @@ fn executeStateTransitionWithTracing(
             std.debug.print("Block slot: {d}\n", .{block.header.slot});
             std.debug.print("File: {s}\n", .{filename});
 
-            // Enable debug tracing for STF modules
-            std.debug.print("\nRetrying with debug tracing enabled...\n\n", .{});
-            try tracing.runtime.setScope("stf", .debug);
-            try tracing.runtime.setScope("safrole", .debug);
-            try tracing.runtime.setScope("time", .debug);
-            try tracing.runtime.setScope("disputes", .debug);
-            try tracing.runtime.setScope("reports", .debug);
-            try tracing.runtime.setScope("accumulate", .debug);
+            // Try to extract the failing module from stack trace, otherwise default to "stf"
+            var failing_module: []const u8 = "stf";
 
-            // Retry with tracing enabled
-            defer {
-                // Disable tracing after retry
-                tracing.runtime.disableScope("stf") catch {};
-                tracing.runtime.disableScope("safrole") catch {};
-                tracing.runtime.disableScope("time") catch {};
-                tracing.runtime.disableScope("disputes") catch {};
-                tracing.runtime.disableScope("reports") catch {};
-                tracing.runtime.disableScope("accumulate") catch {};
+            if (@errorReturnTrace()) |stack_trace| {
+                // First try to extract module from stack trace
+                if (extractFailingModuleFromStackTrace(stack_trace)) |detected_module| {
+                    failing_module = detected_module;
+                } else {
+                    // If detection fails, fallback to "stf"
+                    std.debug.print("Failed to detect module from stack trace, using default 'stf'\n", .{});
+                }
             }
+
+            // Enable debug tracing only for the specific failing module
+            std.debug.print("\nDetected failure in module: {s}\n", .{failing_module});
+            std.debug.print("Retrying with debug tracing enabled for {s} module...\n\n", .{failing_module});
+
+            try tracing.runtime.setScope(failing_module, .trace);
+            defer tracing.runtime.disableScope(failing_module) catch {};
+
+            // Also enable stf scope for general transition tracking
+            try tracing.runtime.setScope("stf", .debug);
+            defer tracing.runtime.disableScope("stf") catch {};
 
             return stf.stateTransition(params, allocator, current_state, block) catch |retry_err| {
                 std.debug.print("\n=== Detailed trace above shows failure context ===\n", .{});
