@@ -186,11 +186,6 @@ pub fn runStateTransitionTests(
     allocator: std.mem.Allocator,
     test_dir: []const u8,
 ) !void {
-    // Initialize runtime tracing if available
-    if (comptime tracing.tracing_mode == .runtime) {
-        tracing.runtime.init(allocator);
-    }
-
     std.debug.print("\nRunning state transition tests from: {s}\n", .{test_dir});
 
     var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions(test_dir, allocator);

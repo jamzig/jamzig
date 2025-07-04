@@ -49,8 +49,6 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    tracing.runtime.init(allocator);
-
     // Parse command line arguments
     const params = comptime clap.parseParamsComptime(
         \\-h, --help             Display this help and exit.
