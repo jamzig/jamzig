@@ -402,6 +402,14 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 value.buffer.len,
                 std.fmt.fmtSliceHexLower(value.buffer[0..@min(32, value.buffer.len)]),
             });
+            span.trace("Value data: {s}", .{std.fmt.fmtSliceHexLower(value.buffer)});
+            
+            // In debug builds, also print as string if it looks like valid UTF-8
+            if (std.debug.runtime_safety) {
+                if (std.unicode.utf8ValidateSlice(value.buffer)) {
+                    span.trace("Value as string: {s}", .{value.buffer});
+                }
+            }
 
             // Write and get the prior value owned
             var maybe_prior_value: ?[]const u8 = pv: {
