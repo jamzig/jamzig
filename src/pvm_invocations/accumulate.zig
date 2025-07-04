@@ -439,8 +439,8 @@ test "AccumulationOperand.Output encode/decode" {
         const reader = fbs.reader();
         const decoded = try AccumulationOperand.Output.decode(.{}, reader, alloc);
         defer {
-            if (decoded == .success) {
-                alloc.free(decoded.success);
+            if (decoded == .ok) {
+                alloc.free(decoded.ok);
             }
         }
 
@@ -448,12 +448,10 @@ test "AccumulationOperand.Output encode/decode" {
         try testing.expectEqual(@as(std.meta.Tag(AccumulationOperand.Output), output), @as(std.meta.Tag(AccumulationOperand.Output), decoded));
 
         switch (output) {
-            .success => |data| {
-                try testing.expectEqualSlices(u8, data, decoded.success);
+            .ok => |data| {
+                try testing.expectEqualSlices(u8, data, decoded.ok);
             },
-            .err => |code| {
-                try testing.expectEqual(code, decoded.err);
-            },
+            else => {},
         }
     }
 }

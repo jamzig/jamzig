@@ -144,7 +144,6 @@ pub fn fuzzStateToMerklizationDictionary(
         try dict.put(.{
             .key = kv.key,
             .value = value_copy,
-            .metadata = null,
         });
     }
 
