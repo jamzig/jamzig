@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
+const state_keys = @import("../../state_keys.zig");
 
 const general = @import("../host_calls_general.zig");
 
@@ -903,6 +904,7 @@ pub fn HostCalls(comptime params: Params) type {
 
             // Try to solicit the preimage
             span.debug("Attempting to solicit preimage", .{});
+
             if (service_account.solicitPreimage(ctx_regular.service_id, hash, @intCast(preimage_size), current_timeslot)) |_| {
                 // Success, preimage solicited
                 span.debug("Preimage solicited successfully: {any}", .{service_account.getPreimageLookup(ctx_regular.service_id, hash, @intCast(preimage_size))});

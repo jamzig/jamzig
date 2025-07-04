@@ -223,17 +223,17 @@ pub const ServiceAccount = struct {
         var iter = self.preimages.iterator();
         while (iter.next()) |entry| {
             const key = entry.key_ptr.*;
-            
+
             // Extract hash portion from structured preimage key
             // C_variant3 format: [n₀, h₀, n₁, h₁, n₂, h₂, n₃, h₃, h₄, h₅, ..., h₂₆]
             // For preimage keys, data = [254, 255, 255, 255, h₁, h₂, ..., h₂₈]
             // Result: [n₀, 254, n₁, 255, n₂, 255, n₃, 255, h₁, h₂, ..., h₂₈]
-            
+
             // Check if this is actually a preimage key by verifying the marker pattern
             if (key[1] != 254 or key[3] != 255 or key[5] != 255 or key[7] != 255) {
                 continue; // Not a preimage key
             }
-            
+
             // Hash bytes h₁...h₂₈ are at positions 8-30 in the key
             // Compare with hash[1..29] (we skip h₀ since it's not stored in the key)
             if (std.mem.eql(u8, key[8..31], hash[1..29])) {
@@ -262,7 +262,13 @@ pub const ServiceAccount = struct {
         length: u32,
         current_timeslot: types.TimeSlot,
     ) !void {
-        const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
+        var hash_of_hash: [32]u8 = undefined;
+        var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+        hasher.update(&hash);
+        hasher.final(&hash_of_hash);
+
+        // TODO: refactor this and make this state keys usage toward storage consistent.
+        const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash_of_hash);
 
         // Check if we already have an entry for this hash/length
         if (self.preimage_lookups.getPtr(key)) |preimage_lookup| {
@@ -320,7 +326,7 @@ pub const ServiceAccount = struct {
     fn removePreimageByHash(self: *ServiceAccount, service_id: u32, target_hash: Hash) void {
         // Create the structured preimage key directly
         const preimage_key = state_keys.constructServicePreimageKey(service_id, target_hash);
-        
+
         if (self.preimages.fetchRemove(preimage_key)) |removed| {
             self.preimages.allocator.free(removed.value);
         }
@@ -401,7 +407,7 @@ pub const ServiceAccount = struct {
     pub fn historicalLookup(self: *ServiceAccount, service_id: u32, time: Timeslot, hash: Hash) ?[]const u8 {
         // Create the structured preimage key
         const preimage_key = state_keys.constructServicePreimageKey(service_id, hash);
-        
+
         // first get the preimage, if not return null
         if (self.getPreimage(preimage_key)) |preimage| {
             // see if we have it in the lookup table

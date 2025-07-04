@@ -171,4 +171,3 @@ pub fn constructServicePreimageLookupKey(service_id: u32, length: u32, hash: [32
 
     return C_variant3(service_id, &data);
 }
-
