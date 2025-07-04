@@ -262,13 +262,9 @@ pub const ServiceAccount = struct {
         length: u32,
         current_timeslot: types.TimeSlot,
     ) !void {
-        var hash_of_hash: [32]u8 = undefined;
-        var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-        hasher.update(&hash);
-        hasher.final(&hash_of_hash);
 
         // TODO: refactor this and make this state keys usage toward storage consistent.
-        const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash_of_hash);
+        const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
 
         // Check if we already have an entry for this hash/length
         if (self.preimage_lookups.getPtr(key)) |preimage_lookup| {

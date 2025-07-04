@@ -418,12 +418,12 @@ test "AccumulationOperand.Output encode/decode" {
 
     // Test all possible Output variants
     const test_cases = [_]AccumulationOperand.Output{
-        .{ .success = try alloc.dupe(u8, &[_]u8{ 1, 2, 3, 4, 5 }) },
-        .{ .err = .OutOfGas },
-        .{ .err = .ProgramTermination },
-        .{ .err = .InvalidExportCount },
-        .{ .err = .ServiceCodeUnavailable },
-        .{ .err = .ServiceCodeTooLarge },
+        .{ .ok = try alloc.dupe(u8, &[_]u8{ 1, 2, 3, 4, 5 }) },
+        .{ .out_of_gas = {} },
+        .{ .panic = {} },
+        .{ .bad_exports = {} },
+        .{ .bad_code = {} },
+        .{ .code_oversize = {} },
     };
 
     for (test_cases) |output| {

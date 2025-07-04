@@ -97,7 +97,7 @@ pub fn constructStateComponentKey(component_id: u8) types.StateKey {
 /// @param service_id - The service identifier
 /// @param key_data - The 32-byte hash (e.g., Blake2b-256 of the PVM key data)
 /// @return A 31-byte key for storage operations
-pub fn constructStorageKey(service_id: u32, key_data: [32]u8) types.StateKey {
+pub fn constructStorageKey(service_id: u32, storage_key: [32]u8) types.StateKey {
     // Prepare the data: ℰ₄(2³² - 1) ⌢ h₀...₂₇
     var data: [32]u8 = undefined;
 
@@ -105,7 +105,7 @@ pub fn constructStorageKey(service_id: u32, key_data: [32]u8) types.StateKey {
     std.mem.writeInt(u32, data[0..4], std.math.maxInt(u32), .little);
 
     // Concatenate with first 28 bytes of the hash
-    @memcpy(data[4..32], key_data[0..28]);
+    @memcpy(data[4..32], storage_key[0..28]);
 
     return C_variant3(service_id, &data);
 }
@@ -160,6 +160,11 @@ pub fn constructServicePreimageKey(service_id: u32, hash: [32]u8) types.StateKey
 /// @param hash - The 32-byte hash (typically Blake2b-256)
 /// @return A 31-byte key for the preimage lookup entry
 pub fn constructServicePreimageLookupKey(service_id: u32, length: u32, hash: [32]u8) types.StateKey {
+    var hash_of_hash: [32]u8 = undefined;
+    var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+    hasher.update(&hash);
+    hasher.final(&hash_of_hash);
+
     // Prepare the data: ℰ₄(l) ⌢ ℋ(h)₂...₂₉
     var data: [32]u8 = undefined;
 
@@ -167,7 +172,7 @@ pub fn constructServicePreimageLookupKey(service_id: u32, length: u32, hash: [32
     std.mem.writeInt(u32, data[0..4], length, .little);
 
     // Concatenate with ℋ(h)₂...₂₉ (bytes 2-29 of the hash)
-    @memcpy(data[4..32], hash[2..30]);
+    @memcpy(data[4..32], hash_of_hash[2..30]);
 
     return C_variant3(service_id, &data);
 }

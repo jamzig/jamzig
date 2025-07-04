@@ -86,6 +86,23 @@ pub fn convertServiceAccount(allocator: std.mem.Allocator, account: tv_types.Ser
         try service_account.registerPreimageAvailable(account.id, preimage.hash, @intCast(preimage.blob.len), null);
     }
 
+    // Add all storage entries
+    for (account.data.storage) |storage_entry| {
+        var storage_key: types.StateKey = undefined;
+
+        // The test vector provides raw key data that needs to be hashed
+        // This matches how PVM host calls work: hash the key data first
+        var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+        hasher.update(storage_entry.key);
+        var key_hash: [32]u8 = undefined;
+        hasher.final(&key_hash);
+
+        // Construct the storage key using service ID and hash
+        storage_key = state_keys.constructStorageKey(account.id, key_hash);
+
+        try service_account.writeStorageFreeOldValue(storage_key, try allocator.dupe(u8, storage_entry.value));
+    }
+
     return service_account;
 }
 

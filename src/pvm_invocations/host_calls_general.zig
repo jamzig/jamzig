@@ -251,16 +251,16 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             // According to graypaper, we might need to hash ℰ₄(s) ⌢ k
             span.debug("Hashing key data", .{});
             span.info("Raw key data to hash (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
-            
+
             // Prepare data to hash: service_id (4 bytes little-endian) + key_data
             var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
             var service_id_bytes: [4]u8 = undefined;
             std.mem.writeInt(u32, &service_id_bytes, actual_service_id, .little);
             span.info("Service ID bytes to prepend: {s}", .{std.fmt.fmtSliceHexLower(&service_id_bytes)});
-            
+
             hasher.update(&service_id_bytes);
             hasher.update(key_data.buffer);
-            
+
             var key_hash: [32]u8 = undefined;
             hasher.final(&key_hash);
             span.info("Resulting hash: {s}", .{std.fmt.fmtSliceHexLower(&key_hash)});
@@ -352,18 +352,14 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             // According to graypaper, we might need to hash ℰ₄(s) ⌢ k
             span.debug("Hashing key data", .{});
             span.info("Raw key data to hash (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
-            
+
             // Prepare data to hash: service_id (4 bytes little-endian) + key_data
             var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-            var service_id_bytes: [4]u8 = undefined;
-            std.mem.writeInt(u32, &service_id_bytes, host_ctx.service_id, .little);
-            span.info("Service ID bytes to prepend: {s}", .{std.fmt.fmtSliceHexLower(&service_id_bytes)});
-            
-            hasher.update(&service_id_bytes);
             hasher.update(key_data.buffer);
-            
+
             var key_hash: [32]u8 = undefined;
             hasher.final(&key_hash);
+
             span.info("Resulting hash: {s}", .{std.fmt.fmtSliceHexLower(&key_hash)});
 
             // Construct storage key using the hash
