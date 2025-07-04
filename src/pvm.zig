@@ -256,6 +256,14 @@ pub const PVM = struct {
         return false;
     }
 
+    fn isNewBasicBlockAtPc(context: *ExecutionContext, pc: u32) bool {
+        // Check if given PC is a basic block start
+        for (context.program.basic_blocks) |block_start| {
+            if (pc == block_start) return true;
+        }
+        return false;
+    }
+
     /// Calculate the total gas cost for the current basic block
     fn calculateBlockGasCost(context: *ExecutionContext) !u32 {
         var total_gas: u32 = 0;
@@ -274,10 +282,8 @@ pub const PVM = struct {
 
             // Check if next PC is a basic block start
             const next_pc = pc + 1 + instruction.args.skip_l();
-            for (context.program.basic_blocks) |block_start| {
-                if (next_pc == block_start and next_pc != context.pc) {
-                    return total_gas;
-                }
+            if (isNewBasicBlockAtPc(context, next_pc)) {
+                return total_gas;
             }
 
             pc = next_pc;

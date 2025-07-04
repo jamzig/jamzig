@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../types.zig");
 const state = @import("../state.zig");
+const ServiceAccount = @import("../services.zig").ServiceAccount;
 const state_keys = @import("../state_keys.zig");
 const PVM = @import("../pvm.zig").PVM;
 const Params = @import("../jam_params.zig").Params;
@@ -292,9 +293,17 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 std.fmt.fmtSliceHexLower(value[f..][0..l]),
             });
 
+            // Double check if we have any data to fetch
+            const value_slice = value[f..][0..l];
+            if (value_slice.len == 0) {
+                span.debug("Zero len offset requested, returning size: {d}", .{value_slice.len});
+                exec_ctx.registers[7] = value_slice.len;
+                return .play;
+            }
+
             // Write the value to memory
             span.debug("Writing value to memory at 0x{x}", .{output_ptr});
-            exec_ctx.memory.writeSlice(@truncate(output_ptr), value[f..][0..l]) catch {
+            exec_ctx.memory.writeSlice(@truncate(output_ptr), value_slice) catch {
                 span.err("Memory access failed while writing value", .{});
                 return .{ .terminal = .panic };
             };
@@ -403,7 +412,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 std.fmt.fmtSliceHexLower(value.buffer[0..@min(32, value.buffer.len)]),
             });
             span.trace("Value data: {s}", .{std.fmt.fmtSliceHexLower(value.buffer)});
-            
+
             // In debug builds, also print as string if it looks like valid UTF-8
             if (std.debug.runtime_safety) {
                 if (std.unicode.utf8ValidateSlice(value.buffer)) {
@@ -478,19 +487,21 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             min_item_gas: types.Gas,
             /// Gas limit for on_transfer operations (tm)
             min_memo_gas: types.Gas,
-            /// Total number of items in storage (ti)
-            total_items: u32,
             /// Total storage size in bytes (tl)
             total_storage_size: u64,
+            /// Total number of items in storage (ti)
+            total_items: u32,
         };
 
         /// Host call implementation for info service (Ω_I)
         pub fn infoService(
             exec_ctx: *PVM.ExecutionContext,
-            host_ctx: anytype,
+            host_ctx_: anytype,
         ) PVM.HostCallResult {
             const span = trace.span(.host_call_info);
             defer span.deinit();
+
+            const host_ctx: Context = host_ctx_;
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
@@ -503,7 +514,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             span.debug("Output pointer: 0x{x}", .{output_ptr});
 
             // Get service account based on special cases as per graypaper
-            const service_account = if (service_id == 0xFFFFFFFFFFFFFFFF) blk: {
+            const service_account: ?*const ServiceAccount = if (service_id == 0xFFFFFFFFFFFFFFFF) blk: {
                 span.debug("Using current service ID: {d}", .{host_ctx.service_id});
                 break :blk host_ctx.service_accounts.getReadOnly(host_ctx.service_id);
             } else blk: {
@@ -533,10 +544,6 @@ pub fn GeneralHostCalls(comptime params: Params) type {
 
             var service_info_buffer: [@sizeOf(ServiceInfo)]u8 = undefined;
             var fb = std.io.fixedBufferStream(&service_info_buffer);
-
-            // // FIXME: this is to conform to JamDuna format
-            // // remove once fixed
-            // fb.writer().writeByte(0x07) catch {};
 
             // Serialize
             @import("../codec.zig").serialize(

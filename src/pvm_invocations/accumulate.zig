@@ -307,20 +307,20 @@ pub const AccumulationOperand = struct {
     o: []const u8,
 
     /// Encodes according to graypaper C.29: E(xh, xe, xa, xy, xg, O(xd), ↕xo)
-    pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
+    pub fn encode(self: *const @This(), params: anytype, writer: anytype) !void {
         // E(xh, xe, xa, xy, xg, O(xd), ↕xo)
         try writer.writeAll(&self.h); // xh
         try writer.writeAll(&self.e); // xe
         try writer.writeAll(&self.a); // xa
         try writer.writeAll(&self.y); // xy
         try codec.writeInteger(self.g, writer); // xg
-        try self.d.encode(.{}, writer); // O(xd)
+        try self.d.encode(params, writer); // O(xd)
         // ↕xo - length-prefixed authorization output
         try codec.writeInteger(@intCast(self.o.len), writer);
         try writer.writeAll(self.o);
     }
 
-    pub fn decode(_: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
+    pub fn decode(params: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
         var self: @This() = undefined;
 
         // Read fields in C.29 order: E(xh, xe, xa, xy, xg, O(xd), ↕xo)
@@ -329,7 +329,7 @@ pub const AccumulationOperand = struct {
         try reader.readNoEof(&self.a); // xa
         try reader.readNoEof(&self.y); // xy
         self.g = try codec.readInteger(reader); // xg
-        self.d = try Output.decode(.{}, reader, allocator); // O(xd)
+        self.d = try Output.decode(params, reader, allocator); // O(xd)
 
         // ↕xo - length-prefixed authorization output
         const o_len = try codec.readInteger(reader);

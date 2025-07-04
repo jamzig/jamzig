@@ -1306,7 +1306,7 @@ pub fn HostCalls(comptime params: Params) type {
                 // TODO: double check this in other memory access patterns
                 const v = data[f..][0..l];
                 if (v.len == 0) {
-                    span.debug("No data to fetch after offset and limit, returning NONE", .{});
+                    span.debug("Zero len offset requested, returning size: {d}", .{data.len});
                     exec_ctx.registers[7] = data.len;
                     return .play;
                 }
