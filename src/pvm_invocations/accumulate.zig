@@ -23,11 +23,19 @@ const HostCallMap = @import("accumulate/host_calls_map.zig");
 // Add tracing import
 const trace = @import("../tracing.zig").scoped(.accumulate);
 
-// The to be encoded arguments
+// Replace the AccumulateArgs struct definition with this:
 const AccumulateArgs = struct {
     timeslot: types.TimeSlot,
     service_id: types.ServiceId,
-    operands: []const AccumulationOperand,
+    operand_count: u64, // |o| - just the count, not the operands themselves
+
+    /// Encodes according to JAM specification E(t, s, |o|) using varint encoding
+    pub fn encode(self: *const @This(), writer: anytype) !void {
+        // E(t, s, |o|) - all three values are varint encoded
+        try codec.writeInteger(self.timeslot, writer); // t
+        try codec.writeInteger(self.service_id, writer); // s
+        try codec.writeInteger(self.operand_count, writer); // |o|
+    }
 };
 
 /// Accumulation Invocation
@@ -63,14 +71,15 @@ pub fn invoke(
     const arguments = AccumulateArgs{
         .timeslot = tau,
         .service_id = service_id,
-        .operands = accumulation_operands,
+        .operand_count = @intCast(accumulation_operands.len), // Just the count!
     };
 
-    span.trace("AccumulateArgs:  {}\n", .{types.fmt.format(arguments)});
+    span.trace("AccumulateArgs: timeslot={d}, service_id={d}, operand_count={d}", .{ arguments.timeslot, arguments.service_id, arguments.operand_count });
 
-    try codec.serialize(AccumulateArgs, .{}, args_buffer.writer(), arguments);
+    // Use the proper JAM varint encoding instead of generic serialization
+    try arguments.encode(args_buffer.writer());
 
-    span.trace("AccumulateArgs Encoded: {}", .{std.fmt.fmtSliceHexLower(args_buffer.items)});
+    span.trace("AccumulateArgs Encoded ({d} bytes): {}", .{ args_buffer.items.len, std.fmt.fmtSliceHexLower(args_buffer.items) });
 
     span.debug("Setting up host call functions", .{});
     var host_call_map = try HostCallMap.buildOrGetCached(params, allocator);
