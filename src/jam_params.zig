@@ -18,7 +18,7 @@ pub const Params = struct {
     // C: The total number of cores
     core_count: u16 = 341, // C
     // D: The period in timeslots after which an unreferenced preimage may be expunged
-    preimage_expungement_period: u32 = 28_800, // D
+    preimage_expungement_period: u32 = 19_200, // D
     // E: The number of slots in an epoch
     epoch_length: u32 = 600, // E
     // F: The audit bias factor, expected additional auditors per no-show
@@ -27,11 +27,11 @@ pub const Params = struct {
     // See: https://github.com/w3f/jamtestvectors/pull/20#issuecomment-2526203035
     gas_alloc_accumulation: u32 = 10_000_000, // GA
     // GI: The gas allocated to invoke a work-package Is-Authorized logic
-    gas_alloc_is_authorized: u32 = 1_000_000, // GI
+    gas_alloc_is_authorized: u32 = 50_000_000, // GI
     // GR: The total gas allocated for a work-package Refine logic
-    gas_alloc_refine: u32 = 500_000_000, // GR
+    gas_alloc_refine: u64 = 5_000_000_000, // GR
     // GT: The total gas allocated across all cores for Accumulation
-    total_gas_alloc_accumulation: u32 = 35_000_000, // GT
+    total_gas_alloc_accumulation: u64 = 3_500_000_000, // GT
     // H: The size of recent history, in blocks
     recent_history_size: u8 = 8, // H
     // I: The maximum amount of work items in a package
@@ -78,7 +78,7 @@ pub const Params = struct {
     // WP: The number of erasure-coded pieces in a segment
     erasure_coded_pieces_per_segment: u8 = 6, // WP
     // WR: The maximum size of an encoded work-report in octets
-    max_work_report_size: u32 = 96 * (1 << 10), // WR = 98,304
+    max_work_report_size: u32 = 48 * (1 << 10), // WR
     // WS: The size of an exported segment in erasure-coded pieces (same as WP)
     exported_segment_size: u8 = 6, // WS
     // WT: The size of a transfer memo in octets
