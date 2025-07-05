@@ -498,7 +498,10 @@ pub const PVM = struct {
                 const args = i.args.TwoReg;
                 const size = context.registers[args.second_register_index];
 
-                const result = try context.memory.allocate(@truncate(size));
+                // Call the graypaper-compliant sbrk implementation
+                const result = context.memory.sbrk(@truncate(size)) catch |err| {
+                    return err;
+                };
 
                 context.registers[args.first_register_index] = result;
             },
