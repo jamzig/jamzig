@@ -33,7 +33,19 @@ pub fn processAccumulateReports(
         &stx,
         test_case.input.reports,
     );
-    defer results.deinit(allocator);
+    errdefer results.deinit(allocator);
+
+    // Call validator stats transition to update Pi with accumulation statistics
+    const validator_stats_input = @import("../stf/validator_stats.zig").ValidatorStatsInput.Empty;
+
+    try @import("../stf/validator_stats.zig").transition(
+        params,
+        &stx,
+        validator_stats_input,
+        &[_]types.WorkReport{}, // empty ready reports - already processed in accumulation
+        &results.accumulation_stats,
+        &results.transfer_stats,
+    );
 
     // Merge prime into base
     try stx.mergePrimeOntoBase();
@@ -50,6 +62,8 @@ pub fn runAccumulateTest(comptime params: Params, allocator: std.mem.Allocator, 
     var expected_state = try converters.convertTestStateIntoJamState(params, allocator, test_case.post_state);
     defer expected_state.deinit(allocator);
 
+    std.debug.print("State: {s}\n", .{expected_state});
+
     // Process the work reports using StateTransition
     const process_result = processAccumulateReports(
         params,
@@ -58,15 +72,12 @@ pub fn runAccumulateTest(comptime params: Params, allocator: std.mem.Allocator, 
         &pre_state,
     );
 
-    // Print delta if availabe
-    var delta = try state_diff.JamStateDiff(params).build(allocator, &pre_state, &expected_state);
-    defer delta.deinit();
-    delta.printToStdErr();
-
-    // Check expected output
+    // Check expected output first
     switch (test_case.output) {
         .err => {
-            if (process_result) |_| {
+            if (process_result) |result| {
+                var mutable_result = result;
+                mutable_result.deinit(allocator);
                 std.debug.print("\nGot success, expected error\n", .{});
                 return error.UnexpectedSuccess;
             } else |_| {
@@ -74,20 +85,28 @@ pub fn runAccumulateTest(comptime params: Params, allocator: std.mem.Allocator, 
             }
         },
         .ok => |expected_root| {
-            if (process_result) |actual_root| {
-                if (!std.mem.eql(u8, &actual_root.accumulate_root, &expected_root)) {
+            if (process_result) |result| {
+                var mutable_result = result;
+                defer mutable_result.deinit(allocator);
+
+                if (!std.mem.eql(u8, &result.accumulate_root, &expected_root)) {
                     std.debug.print("Mismatch: actual root != expected root\n", .{});
                     return error.RootMismatch;
+                }
+
+                // Print delta if available
+                var delta = try state_diff.JamStateDiff(params).build(allocator, &pre_state, &expected_state);
+                defer delta.deinit();
+                delta.printToStdErr();
+
+                // If we have a diff return error
+                if (delta.hasChanges()) {
+                    return error.StateDiffDetected;
                 }
             } else |err| {
                 std.debug.print("UnexpectedError: {any}\n", .{err});
                 return error.UnexpectedError;
             }
         },
-    }
-
-    // If we have a diff return error
-    if (delta.hasChanges()) {
-        return error.StateDiffDetected;
     }
 }
