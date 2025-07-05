@@ -20,6 +20,11 @@ pub const PVM = struct {
 
     pub const ExecutionContext = @import("./pvm/execution_context.zig").ExecutionContext;
 
+    // Helper to log memory writes for execution trace
+    fn logMemoryWrite(context: *ExecutionContext, addr: u32, value: u64, size: usize) void {
+        context.exec_trace.logMemoryWrite(addr, value, size);
+    }
+
     pub const HostCallInvocation = struct {
         /// Host call index
         idx: u32,
@@ -93,6 +98,9 @@ pub const PVM = struct {
         const span = trace.span(.execute_step);
         defer span.deinit();
 
+        // Track gas before execution for trace logging
+        const gas_before = context.gas;
+
         // Check if we're at the start of a new basic block
         if (isNewBasicBlock(context)) {
             // Calculate the total gas cost for this block
@@ -113,8 +121,16 @@ pub const PVM = struct {
 
         span.debug("Executing instruction at PC: 0x{d:0>8}: {}", .{ context.pc, instruction });
 
+        // Log execution step for trace
+        context.exec_trace.logStep(context.pc, gas_before, context.gas, &instruction);
+
         // Execute instruction (no per-instruction gas charge)
-        return executeInstruction(context, instruction);
+        const result = executeInstruction(context, instruction);
+
+        // Check for register changes after execution
+        context.exec_trace.checkRegisterChanges(&context.registers);
+
+        return result;
     }
 
     pub const BasicInvocationResult = union(enum) {
@@ -319,6 +335,15 @@ pub const PVM = struct {
             // A.5.4 Instructions with Arguments of Two Immediates
             .store_imm_u8, .store_imm_u16, .store_imm_u32, .store_imm_u64 => {
                 const args = i.args.TwoImm;
+                const addr = @as(u32, @truncate(args.first_immediate));
+                const value = args.second_immediate;
+                const size = switch (i.instruction) {
+                    .store_imm_u8 => @as(usize, 1),
+                    .store_imm_u16 => @as(usize, 2),
+                    .store_imm_u32 => @as(usize, 4),
+                    .store_imm_u64 => @as(usize, 8),
+                    else => unreachable,
+                };
 
                 (switch (i.instruction) {
                     .store_imm_u8 => context.memory.writeInt(u8, @truncate(args.first_immediate), @truncate(args.second_immediate)),
@@ -332,6 +357,9 @@ pub const PVM = struct {
                     }
                     return err;
                 };
+
+                // Log memory write
+                logMemoryWrite(context, addr, value, size);
             },
 
             // A.5.5 Instructions with Arguments of One Offset

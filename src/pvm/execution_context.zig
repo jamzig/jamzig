@@ -6,6 +6,7 @@ const codec = @import("../codec.zig");
 const Program = @import("program.zig").Program;
 const Decoder = @import("decoder.zig").Decoder;
 const Memory = @import("memory.zig").Memory;
+const ExecutionTrace = @import("execution_trace.zig").ExecutionTrace;
 
 const trace = @import("../tracing.zig").scoped(.pvm);
 
@@ -20,6 +21,7 @@ pub const ExecutionContext = struct {
     gas: i64,
     pc: u32,
     error_data: ?ErrorData,
+    exec_trace: ExecutionTrace,
 
     pub const HostCallResult = union(enum) {
         play,
@@ -255,6 +257,12 @@ pub const ExecutionContext = struct {
 
         span.debug("Program decoded successfully, creating execution context", .{});
         // Initialize registers according to specification
+        // Check if execution tracing is enabled via tracing scope
+        const exec_trace_enabled = if (@hasDecl(@import("../tracing.zig"), "boption_scope_configs"))
+            @import("../tracing.zig").findScope("pvm_exec") != null
+        else
+            false;
+        
         return ExecutionContext{
             .memory = memory,
             .decoder = Decoder.init(program.code, program.mask),
@@ -264,6 +272,7 @@ pub const ExecutionContext = struct {
             .pc = 0,
             .error_data = null,
             .gas = max_gas,
+            .exec_trace = ExecutionTrace.init(max_gas, exec_trace_enabled),
         };
     }
 
@@ -284,6 +293,9 @@ pub const ExecutionContext = struct {
             self.registers[7],
             self.registers[8],
         });
+        
+        // Initialize register tracking for execution trace
+        self.exec_trace.initRegisterTracking(&self.registers);
     }
 
     /// Clear all registers by setting them to zero

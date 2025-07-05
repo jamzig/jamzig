@@ -107,6 +107,9 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             defer span.deinit();
             span.debug("Host call: gas remaining", .{});
 
+            // Log host call with gas charge
+            exec_ctx.exec_trace.logHostCall("gasRemaining", 1, 10);
+
             exec_ctx.gas -= 10;
             const remaining_gas = exec_ctx.gas;
             exec_ctx.registers[7] = @intCast(remaining_gas);
