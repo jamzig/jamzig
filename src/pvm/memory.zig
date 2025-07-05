@@ -612,11 +612,13 @@ pub const Memory = struct {
         // Stack is already zero-initialized by initWithCapacity
         span.debug("Stack is zero-initialized, size: {d} bytes", .{stack_size_in_bytes});
 
-        // Initialize heap_top to the base of the heap + read-write data size
+        // Initialize heap_top to the end of the allocated heap section (section-aligned)
+        // This matches PolkaVM's behavior where the heap starts at the section boundary,
+        // not immediately after the RW data. This ensures compatibility with PolkaVM.
         const heap_base = try HEAP_BASE_ADDRESS(@intCast(ro_pages * Z_P));
-        memory.heap_top = heap_base + @as(u32, @intCast(read_write.len));
+        memory.heap_top = heap_base + (@as(u32, heap_pages) * Z_P);
 
-        span.debug("Memory initialization complete with heap_top set to 0x{X:0>8}", .{memory.heap_top});
+        span.debug("Memory initialization complete with heap_top set to 0x{X:0>8} (section-aligned)", .{memory.heap_top});
         return memory;
     }
 
