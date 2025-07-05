@@ -1,7 +1,6 @@
 const std = @import("std");
 const converters = @import("./converters.zig");
 const tvector = @import("../jamtestvectors/accumulate.zig");
-const accumulate = @import("../accumulate.zig");
 const state = @import("../state.zig");
 const types = @import("../types.zig");
 const helpers = @import("../tests/helpers.zig");
@@ -15,7 +14,7 @@ pub fn processAccumulateReports(
     allocator: std.mem.Allocator,
     test_case: *const tvector.TestCase,
     base_state: *state.JamState(params),
-) !accumulate.ProcessAccumulationResult {
+) !@import("../accumulate/execution.zig").ProcessAccumulationResult {
     // Create a StateTransition using the provided base_state
     var stx = try state_delta.StateTransition(params).init(
         allocator,
@@ -27,9 +26,10 @@ pub fn processAccumulateReports(
     // Transition time, with input slot
     try @import("../stf/time.zig").transition(params, &stx, test_case.input.slot);
 
-    // Process the newly available reports
-    var results = try accumulate.processAccumulateReports(
+    // Process the newly available reports using STF function
+    var results = try @import("../stf/accumulate.zig").transition(
         params,
+        allocator,
         &stx,
         test_case.input.reports,
     );
@@ -42,7 +42,7 @@ pub fn processAccumulateReports(
         params,
         &stx,
         validator_stats_input,
-        &[_]types.WorkReport{}, // empty ready reports - already processed in accumulation
+        &[_]types.WorkReport{}, // empty ready reports, these stats are not in the test vector
         &results.accumulation_stats,
         &results.transfer_stats,
     );
