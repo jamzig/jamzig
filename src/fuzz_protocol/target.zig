@@ -65,6 +65,8 @@ pub const TargetServer = struct {
         const address = try net.Address.initUnix(self.socket_path);
 
         // Create and bind server socket
+        // SOCK_STREAM is used for reliable, ordered, and error-checked delivery
+        // https://github.com/davxy/jam-stuff/issues/3
         var server_socket = try address.listen(.{});
         defer server_socket.deinit();
 
