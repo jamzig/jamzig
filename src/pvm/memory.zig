@@ -288,8 +288,6 @@ pub const Memory = struct {
 
     pub const Error = error{
         PageFault,
-        CrossPageWrite,
-        CrossPageRead,
         OutOfMemory,
         CouldNotFindRwPage,
         MemoryLimitExceeded,
@@ -970,8 +968,7 @@ pub const Memory = struct {
         }
     }
 
-    /// Write a slice to memory, not allowing cross-page writes
-    /// FIXME: this should be able to cross pages
+    /// Write a slice to memory, supporting cross-page writes
     pub fn writeSlice(self: *Memory, address: u32, slice: []const u8) !void {
         const span = trace.span(.memory_write_slice);
         defer span.deinit();
@@ -1008,20 +1005,66 @@ pub const Memory = struct {
         const end_offset = offset + slice.len;
         span.trace("Write range: offset 0x{X} to 0x{X} (page size: 0x{X})", .{ offset, end_offset, Z_P });
 
+        // Support cross-page writes
         if (end_offset > Z_P) {
-            span.err("Cross-page write detected - write would span page boundary", .{});
-            return Error.CrossPageWrite;
-        }
+            span.trace("Cross-page write detected - splitting write across pages", .{});
 
-        // Write slice to page data
-        @memcpy(page.page.data[offset..][0..slice.len], slice);
+            // Write to first page (remaining bytes in current page)
+            const first_page_bytes = Z_P - offset;
+            @memcpy(page.page.data[offset..Z_P], slice[0..first_page_bytes]);
+            span.trace("Wrote {d} bytes to first page at offset 0x{X}", .{ first_page_bytes, offset });
+
+            // Write remaining bytes to subsequent pages
+            var remaining_slice = slice[first_page_bytes..];
+            var current_address = page.page.address + Z_P;
+
+            while (remaining_slice.len > 0) {
+                // Find or create the next page
+                const next_page = self.page_table.findPageOfAddresss(current_address) orelse {
+                    span.err("Page fault during cross-page write at address 0x{X:0>8}", .{current_address});
+                    self.last_violation = ViolationInfo{
+                        .violation_type = .NonAllocated,
+                        .address = current_address,
+                        .attempted_size = remaining_slice.len,
+                        .page = null,
+                    };
+                    return Error.PageFault;
+                };
+
+                // Check write permissions on subsequent page
+                if (next_page.page.flags == .ReadOnly) {
+                    span.err("Write protection violation during cross-page write at 0x{X:0>8}", .{current_address});
+                    self.last_violation = ViolationInfo{
+                        .violation_type = .WriteProtection,
+                        .address = current_address,
+                        .attempted_size = remaining_slice.len,
+                        .page = next_page.page,
+                    };
+                    return Error.PageFault;
+                }
+
+                // Write to this page
+                const bytes_to_write = @min(remaining_slice.len, Z_P);
+                @memcpy(next_page.page.data[0..bytes_to_write], remaining_slice[0..bytes_to_write]);
+                span.trace("Wrote {d} bytes to page at 0x{X:0>8}", .{ bytes_to_write, current_address });
+
+                // Update for next iteration
+                remaining_slice = remaining_slice[bytes_to_write..];
+                current_address += Z_P;
+            }
+
+            span.debug("Successfully completed cross-page write of {d} bytes", .{slice.len});
+        } else {
+            // Single page write
+            @memcpy(page.page.data[offset..][0..slice.len], slice);
+            span.debug("Successfully wrote {d} bytes within single page", .{slice.len});
+        }
 
         if (slice.len <= 64) {
             span.trace("Written data: {any}", .{std.fmt.fmtSliceHexLower(slice)});
         } else {
             span.trace("First 64 bytes: {any}", .{std.fmt.fmtSliceHexLower(slice[0..@min(64, slice.len)])});
         }
-        span.debug("Successfully wrote {d} bytes", .{slice.len});
     }
 
     /// Initilialize a slice to memory not cross-page, will err on cross page
@@ -1176,35 +1219,35 @@ pub const Memory = struct {
 
     // Helper methods for common types
     pub fn readU8(self: *Memory, address: u32) !u8 {
-        return self.readInt(address, u8);
+        return self.readInt(u8, address);
     }
 
     pub fn readU16(self: *Memory, address: u32) !u16 {
-        return self.readInt(address, u16);
+        return self.readInt(u16, address);
     }
 
     pub fn readU32(self: *Memory, address: u32) !u32 {
-        return self.readInt(address, u32);
+        return self.readInt(u32, address);
     }
 
     pub fn readU64(self: *Memory, address: u32) !u64 {
-        return self.readInt(address, u64);
+        return self.readInt(u64, address);
     }
 
     pub fn writeU8(self: *Memory, address: u32, value: u8) !void {
-        return self.writeInt(address, value);
+        return self.writeInt(u8, address, value);
     }
 
     pub fn writeU16(self: *Memory, address: u32, value: u16) !void {
-        return self.writeInt(address, value);
+        return self.writeInt(u16, address, value);
     }
 
     pub fn writeU32(self: *Memory, address: u32, value: u32) !void {
-        return self.writeInt(address, value);
+        return self.writeInt(u32, address, value);
     }
 
     pub fn writeU64(self: *Memory, address: u32, value: u64) !void {
-        return self.writeInt(address, value);
+        return self.writeInt(u64, address, value);
     }
 
     pub fn deinit(self: *Memory) void {
