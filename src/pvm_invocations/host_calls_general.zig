@@ -492,6 +492,22 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             total_storage_size: u64,
             /// Total number of items in storage (ti)
             total_items: u32,
+
+            pub fn encode(
+                self: ServiceInfo,
+                writer: anytype,
+            ) !void {
+                const codec = @import("../codec.zig");
+
+                // Serialize the ServiceInfo struct to the provided writer
+                try codec.serialize([32]u8, .{}, writer, self.code_hash);
+                try codec.writeInteger(self.balance, writer);
+                try codec.writeInteger(self.threshold_balance, writer);
+                try codec.writeInteger(self.min_item_gas, writer);
+                try codec.writeInteger(self.min_memo_gas, writer);
+                try codec.writeInteger(self.total_storage_size, writer);
+                try codec.writeInteger(self.total_items, writer);
+            }
         };
 
         /// Host call implementation for info service (Ω_I)
@@ -543,22 +559,17 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 .total_items = fprint.a_i,
             };
 
+            // Since we are varint encoding will only be smaller
             var service_info_buffer: [@sizeOf(ServiceInfo)]u8 = undefined;
             var fb = std.io.fixedBufferStream(&service_info_buffer);
 
-            // Serialize
-            @import("../codec.zig").serialize(
-                ServiceInfo,
-                .{},
-                fb.writer(),
-                service_info,
-            ) catch {
-                span.err("Problem serializing ServiceInfo", .{});
+            service_info.encode(fb.writer()) catch {
+                span.err("Problem encoding ServiceInfo", .{});
                 return .{ .terminal = .panic };
             };
+            const encoded = fb.getWritten();
 
             // Write the info to memory
-            const encoded = fb.getWritten();
             span.debug("Writing info encoded in {d} bytes to memory at 0x{x}", .{ encoded.len, output_ptr });
             span.trace("Encoded Info: {s}", .{std.fmt.fmtSliceHexLower(encoded)});
             exec_ctx.memory.writeSlice(@truncate(output_ptr), encoded) catch {
