@@ -171,16 +171,33 @@ pub fn runStateTransitionTests(
 ) !void {
     std.debug.print("\nRunning state transition tests from: {s}\n", .{test_dir});
 
+    // Read the OFFSET env var to start from a certain offset
+    const offset_str = std.process.getEnvVarOwned(allocator, "OFFSET") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (offset_str) |s| allocator.free(s);
+
+    const offset = if (offset_str) |s| try std.fmt.parseInt(usize, s, 10) else 0;
+
     var state_transition_vectors = try jamtestnet.state_transitions.collectStateTransitions(test_dir, allocator);
     defer state_transition_vectors.deinit(allocator);
     std.debug.print("Collected {d} state transition vectors\n", .{state_transition_vectors.items().len});
+    
+    if (offset > 0) {
+        if (offset >= state_transition_vectors.items().len) {
+            std.debug.print("Warning: Offset {d} is >= total vectors {d}, no tests will run\n", .{ offset, state_transition_vectors.items().len });
+        } else {
+            std.debug.print("Starting from offset: {d}\n", .{offset});
+        }
+    }
 
     var current_state: ?state.JamState(params) = null;
     defer {
         if (current_state) |*cs| cs.deinit(allocator);
     }
 
-    for (state_transition_vectors.items()) |state_transition_vector| {
+    for (state_transition_vectors.items()[offset..]) |state_transition_vector| {
         // This is sometimes placed in the dir
         if (std.mem.eql(u8, state_transition_vector.bin.name, "genesis.bin")) {
             continue;
