@@ -19,6 +19,12 @@ const MachineInvocationResult = struct {
     }
 };
 
+/// Machine invocation function implementing the Y function from the JAM specification.
+/// Y: (Y, Y_{:Z_I}) → (Y, regs, ram)?
+/// 
+/// The function takes a program blob (p) and argument data (a) as separate parameters,
+/// where the program blob contains the encoded format: E_3(|o|) ∥ E_3(|w|) ∥ E_2(z) ∥ E_3(s) ∥ o ∥ w ∥ E_4(|c|) ∥ c
+/// and the argument data is passed separately and limited to Z_I bytes.
 pub fn machineInvocation(
     allocator: std.mem.Allocator,
     program_code: []const u8,

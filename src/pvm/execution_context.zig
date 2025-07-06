@@ -61,6 +61,11 @@ pub const ExecutionContext = struct {
         );
     }
 
+    /// Initialize execution context with standard program code format.
+    /// This implements the Y function initialization from the JAM specification.
+    /// 
+    /// @param program_code The program blob containing: E_3(|o|) ∥ E_3(|w|) ∥ E_2(z) ∥ E_3(s) ∥ o ∥ w ∥ E_4(|c|) ∥ c
+    /// @param input The argument data (a) passed separately from the program blob, limited to Z_I bytes
     pub fn initStandardProgramCodeFormat(
         allocator: Allocator,
         program_code: []const u8,
