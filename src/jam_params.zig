@@ -40,7 +40,7 @@ pub const Params = struct {
     // lookup dictionary and the number of pre-requisites for a work item
     max_number_of_dependencies_for_work_reports: u16 = 8, // J
     // K: The maximum number of tickets which may be submitted in a single extrinsic
-    max_tickets_per_extrinsic: u32 = 16, // K
+    max_tickets_per_extrinsic: u16 = 16, // K
     // L: The maximum age in timeslots of the lookup anchor
     max_lookup_anchor_age: u32 = 14_400, // L
     // N: The number of ticket entries per validator
@@ -52,7 +52,7 @@ pub const Params = struct {
     // Q: The maximum number of items in the authorizations queue
     max_authorizations_queue_items: u16 = 80, // Q
     // R: The rotation period of validator-core assignments, in timeslots
-    validator_rotation_period: u32 = 10, // R
+    validator_rotation_period: u16 = 10, // R
     // S: The maximum number of entries in the accumulation queue
     max_accumulation_queue_entries: u32 = 1024, // S
     // T: The maximum number of extrinsics in a work-package
@@ -60,7 +60,7 @@ pub const Params = struct {
     // U: The period in timeslots after which reported but unavailable work may be replaced
     work_replacement_period: u16 = 5, // U
     // V: The total number of validators
-    validators_count: u32 = 1023, // V
+    validators_count: u16 = 1023, // V
     // V_s: The number of validators required for a super-majority
     validators_super_majority: u32 = 683,
     // WA: The maximum size of authorization code in octets
