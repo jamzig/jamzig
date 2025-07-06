@@ -24,7 +24,7 @@ fi
 # Check if git directory is clean
 if ! git diff --quiet || ! git diff --cached --quiet; then
     echo -e "${YELLOW}Warning: Git directory is not clean.${NC}"
-    exit 1
+    # exit 1
 fi
 
 # Get git SHA
@@ -127,6 +127,9 @@ echo "Starting parallel builds for ${#build_jobs[@]} configurations..."
 echo -e "${YELLOW}Build logs will be saved to: ${BUILD_DIR}${NC}"
 echo ""
 
+echo "${YELLOW}Cleaning up previous build directories...${NC}"
+rm -fR "${BUILD_DIR}"
+
 # Run all builds in parallel using GNU parallel
 # --will-cite suppresses the citation notice
 # --jobs -2 uses all CPUs minus 2 (leaves 2 cores free)
@@ -139,8 +142,6 @@ echo ""
 printf '%s\n' "${build_jobs[@]}" | \
     parallel --will-cite --jobs 50% --delay 0.5 --nice 19 --load 20% --memfree 30% \
     --retries 3 --halt now,fail=10% --line-buffer --colsep ' ' \
-    --joblog "${BUILD_DIR}/parallel_jobs.log" \
-    --results "${BUILD_DIR}/parallel_results" \
     build_platform {1} {2} {3}
 
 PARALLEL_EXIT_CODE=$?

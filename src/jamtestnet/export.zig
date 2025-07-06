@@ -19,10 +19,6 @@ pub const KeyVal = struct {
         try writer.write(self.key);
         try writer.write(self.val);
 
-        if (self.metadata) |mdata| {
-            try writer.write(mdata);
-        }
-
         try writer.endArray();
     }
 
@@ -152,7 +148,6 @@ pub const StateTransition = struct {
         for (keyvals) |keyval| {
             const key = keyval.key;
 
-            // Create DictEntry with proper metadata
             try dict.entries.put(key, .{
                 .key = key,
                 .value = try allocator.dupe(u8, keyval.val),
@@ -283,7 +278,6 @@ fn buildKeyValsFromState(
         try keyvals.append(.{
             .key = key,
             .val = try allocator.dupe(u8, dict_entry.value),
-            .metadata = dict_entry.metadata,
         });
     }
 

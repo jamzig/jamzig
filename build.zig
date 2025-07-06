@@ -18,7 +18,7 @@ fn applyBuildConfig(options: *std.Build.Step.Options, config: BuildConfig) void 
     options.addOption([]const u8, "enable_tracing_level", config.tracing_level);
     options.addOption(@TypeOf(config.tracing_mode), "tracing_mode", config.tracing_mode);
     if (config.conformance_params) |conformance_params| {
-        options.addOption(@TypeOf(config.conformance_params), "conformance_params", conformance_params);
+        options.addOption(ConformanceParams, "conformance_params", conformance_params);
     }
 }
 
