@@ -50,6 +50,7 @@ pub fn build(b: *std.Build) !void {
         .tracing_scopes = base_config.tracing_scopes,
         .tracing_level = base_config.tracing_level,
         .tracing_mode = .runtime, // Force runtime tracing for conformance tools
+        .conformance_params = base_config.conformance_params,
     };
 
     // Create build options objects

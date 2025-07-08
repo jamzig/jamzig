@@ -314,28 +314,33 @@ pub const Fuzzer = struct {
             defer block_span.deinit();
             block_span.debug("Processing block {d}/{d}", .{ block_num + 1, num_blocks });
 
-            // Generate next block
-            var block = try self.block_builder.buildNextBlock();
-            errdefer block.deinit(self.allocator);
+            var local_root: messages.StateRootHash = undefined;
 
-            // Process locally
-            const local_root = try self.processBlockLocally(block);
+            // Scope for block generation and ownership transfer
+            {
+                // Generate next block
+                var block = try self.block_builder.buildNextBlock();
+                errdefer block.deinit(self.allocator);
 
-            // Update latest block
-            self.latest_block.?.deinit(self.allocator);
-            self.latest_block = block;
+                // Process locally
+                local_root = try self.processBlockLocally(block);
 
-            sequoia.logging.printBlockEntropyDebug(messages.FUZZ_PARAMS, &block, self.current_jam_state);
+                // Update latest block - ownership transfers here
+                self.latest_block.?.deinit(self.allocator);
+                self.latest_block = block;
+            }
+
+            sequoia.logging.printBlockEntropyDebug(messages.FUZZ_PARAMS, &self.latest_block.?, self.current_jam_state);
 
             // Send to target
-            const target_root = try self.sendBlock(block);
+            const target_root = try self.sendBlock(self.latest_block.?);
 
             // Compare state roots
             if (!compareStateRoots(local_root, target_root)) {
                 block_span.debug("State root mismatch detected!", .{});
 
                 // Retrieve full target state for analysis
-                const block_header_hash = try block.header.header_hash(messages.FUZZ_PARAMS, self.allocator);
+                const block_header_hash = try self.latest_block.?.header.header_hash(messages.FUZZ_PARAMS, self.allocator);
                 const target_state = self.getState(block_header_hash) catch |err| blk: {
                     block_span.err("Failed to retrieve target state: {s}", .{@errorName(err)});
                     break :blk null;
@@ -344,7 +349,7 @@ pub const Fuzzer = struct {
                 // Create mismatch entry
                 const mismatch = report.Mismatch{
                     .block_number = block_num,
-                    .block = try block.deepClone(self.allocator),
+                    .block = try self.latest_block.?.deepClone(self.allocator),
                     .local_state_root = local_root,
                     .target_state_root = target_root,
                     .target_state = target_state,
