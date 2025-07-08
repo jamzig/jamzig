@@ -115,18 +115,9 @@ pub const TargetServer = struct {
             span.debug("Received message: {s}", .{@tagName(request_message.value)});
 
             // Process message and generate response
-            const response_message = try self.processMessage(request_message.value);
-            defer if (response_message) |msg| {
-                // Only deinit if we allocated memory for response
-                switch (msg) {
-                    .state => |state| {
-                        for (state) |kv| {
-                            self.allocator.free(kv.value);
-                        }
-                        self.allocator.free(state);
-                    },
-                    else => {},
-                }
+            var response_message = try self.processMessage(request_message.value);
+            defer if (response_message) |*msg| {
+                msg.deinit(self.allocator);
             };
 
             // Send response if one was generated

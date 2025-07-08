@@ -67,6 +67,27 @@ pub const Message = union(enum) {
     state: State,
     state_root: StateRoot,
     kill: void,
+
+    /// Free any allocated memory for this message
+    pub fn deinit(self: *Message, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .state => |state| {
+                // Free all key-value pairs
+                for (state) |kv| {
+                    allocator.free(kv.value);
+                }
+                allocator.free(state);
+            },
+            // Other message types don't allocate memory
+            .peer_info,
+            .import_block,
+            .set_state,
+            .get_state,
+            .state_root,
+            .kill,
+            => {},
+        }
+    }
 };
 
 /// Encode a message using JAM codec
