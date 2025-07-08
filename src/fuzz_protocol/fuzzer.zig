@@ -8,6 +8,7 @@ const target = @import("target.zig");
 const state_converter = @import("state_converter.zig");
 const shared = @import("tests/shared.zig");
 const report = @import("report.zig");
+const version = @import("version.zig");
 
 const sequoia = @import("../sequoia.zig");
 const types = @import("../types.zig");
@@ -149,7 +150,7 @@ pub const Fuzzer = struct {
 
         // Send fuzzer peer info
         const fuzzer_peer_info = messages.PeerInfo{
-            .name = "jamzig-fuzzer",
+            .name = "jamzig-fuzzer", // NOTE: static string here => no deinit
             .version = .{ .major = 0, .minor = 1, .patch = 0 },
             .protocol_version = .{ .major = 0, .minor = 6, .patch = 6 },
         };
@@ -160,9 +161,9 @@ pub const Fuzzer = struct {
 
         // Receive target peer info
         var response = try self.readMessage();
-        defer response.deinit();
+        defer response.deinit(self.allocator);
 
-        switch (response.value) {
+        switch (response) {
             .peer_info => |peer_info| {
                 span.debug("Received peer info from: {s}", .{peer_info.name});
                 // TODO: Validate protocol compatibility
@@ -189,9 +190,9 @@ pub const Fuzzer = struct {
 
         // Receive StateRoot response
         var response = try self.readMessage();
-        defer response.deinit();
+        defer response.deinit(self.allocator);
 
-        switch (response.value) {
+        switch (response) {
             .state_root => |state_root| {
                 self.state = .state_initialized;
                 span.debug("State set successfully, root: {s}", .{std.fmt.fmtSliceHexLower(&state_root)});
@@ -211,14 +212,14 @@ pub const Fuzzer = struct {
             return error.StateNotInitialized;
         }
 
-        // Send ImportBlock message
+        // Send ImportBlock message, do not free message we do not own the block
         try self.sendMessage(.{ .import_block = block });
 
         // Receive StateRoot response
         var response = try self.readMessage();
-        defer response.deinit();
+        defer response.deinit(self.allocator);
 
-        switch (response.value) {
+        switch (response) {
             .state_root => |state_root| {
                 try self.state.assertReachedState(.state_initialized);
                 span.debug("Block processed, state root: {s}", .{std.fmt.fmtSliceHexLower(&state_root)});
@@ -241,14 +242,14 @@ pub const Fuzzer = struct {
 
         // Receive State response
         var response = try self.readMessage();
-        defer response.deinit();
+        defer response.deinit(self.allocator);
 
-        switch (response.value) {
+        switch (response) {
             .state => |state| {
                 span.debug("Received state with {d} key-value pairs", .{state.items.len});
                 // Transfer ownership to caller - clear response to prevent double-free
                 const result = state;
-                response.value = .{ .state = messages.State.Empty };
+                response = .{ .state = messages.State.Empty };
                 return result;
             },
             else => return error.UnexpectedGetStateResponse,
@@ -441,7 +442,7 @@ pub const Fuzzer = struct {
     }
 
     /// Helper to read a message from socket
-    fn readMessage(self: *Fuzzer) !messages.codec.Deserialized(messages.Message) {
+    fn readMessage(self: *Fuzzer) !messages.Message {
         const socket = self.socket orelse return error.NotConnected;
         const frame_data = try frame.readFrame(self.allocator, socket);
         defer self.allocator.free(frame_data);
