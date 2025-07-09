@@ -11,11 +11,9 @@ const messages = @import("fuzz_protocol/messages.zig");
 
 fn showHelp(params: anytype) !void {
     std.debug.print(
-        \\JAM Conformance Target: Reference implementation for JAM protocol conformance testing
+        \\JamZig⚡ Conformance Target for JAM Fuzz protocol conformance testing
         \\
-        \\This server listens on a Unix domain socket and processes JAM protocol messages
-        \\according to the specification. It is used as a reference implementation for
-        \\conformance testing of other JAM implementations.
+        \\This server listens on a Unix domain socket and processes JAM fuzzing protocol messages according to the JAM fuzz protocol specification.
         \\
         \\
     , .{});
@@ -48,8 +46,6 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-
-    tracing.runtime.init(allocator);
 
     // Parse command line arguments
     const params = comptime clap.parseParamsComptime(

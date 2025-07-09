@@ -11,7 +11,6 @@ const state_dictionary = @import("../state_dictionary.zig");
 pub const KeyVal = struct {
     key: types.StateKey,
     val: []const u8,
-    metadata: ?state_dictionary.DictMetadata,
 
     // Add custom JSON serialization as array [key, val, id, desc]
     pub fn jsonStringify(self: *const KeyVal, writer: anytype) !void {
@@ -19,10 +18,6 @@ pub const KeyVal = struct {
 
         try writer.write(self.key);
         try writer.write(self.val);
-
-        if (self.metadata) |mdata| {
-            try writer.write(mdata);
-        }
 
         try writer.endArray();
     }
@@ -153,11 +148,9 @@ pub const StateTransition = struct {
         for (keyvals) |keyval| {
             const key = keyval.key;
 
-            // Create DictEntry with proper metadata
             try dict.entries.put(key, .{
                 .key = key,
                 .value = try allocator.dupe(u8, keyval.val),
-                .metadata = keyval.metadata,
             });
         }
 
@@ -285,7 +278,6 @@ fn buildKeyValsFromState(
         try keyvals.append(.{
             .key = key,
             .val = try allocator.dupe(u8, dict_entry.value),
-            .metadata = dict_entry.metadata,
         });
     }
 

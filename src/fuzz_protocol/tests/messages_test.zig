@@ -2,12 +2,12 @@ const std = @import("std");
 const testing = std.testing;
 const messages = @import("../messages.zig");
 
-test "message encoding and decoding" {
+test "message_encoding_and_decoding" {
     const allocator = testing.allocator;
 
     // Test PeerInfo message
     const peer_info = messages.PeerInfo{
-        .name = "test-peer",
+        .name = "test-peer", // NOTE we use a stric string here, no deinit on the Peerinfo or message here
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
         .protocol_version = .{ .major = 0, .minor = 6, .patch = 6 },
     };
@@ -23,10 +23,10 @@ test "message encoding and decoding" {
 
     // Decode message
     var decoded = try messages.decodeMessage(allocator, encoded);
-    defer decoded.deinit();
+    defer decoded.deinit(allocator);
 
     // Verify decoded message matches original
-    switch (decoded.value) {
+    switch (decoded) {
         .peer_info => |decoded_peer_info| {
             try testing.expectEqualStrings(peer_info.name, decoded_peer_info.name);
             try testing.expectEqual(peer_info.version.major, decoded_peer_info.version.major);
@@ -40,7 +40,7 @@ test "message encoding and decoding" {
     }
 }
 
-test "state root message" {
+test "state_root_message" {
     const allocator = testing.allocator;
 
     const state_root: messages.StateRootHash = [_]u8{0x12} ** 32;
@@ -51,10 +51,10 @@ test "state root message" {
     defer allocator.free(encoded);
 
     var decoded = try messages.decodeMessage(allocator, encoded);
-    defer decoded.deinit();
+    defer decoded.deinit(allocator);
 
     // Verify decoded message
-    switch (decoded.value) {
+    switch (decoded) {
         .state_root => |decoded_root| {
             try testing.expectEqualSlices(u8, &state_root, &decoded_root);
         },
@@ -62,7 +62,7 @@ test "state root message" {
     }
 }
 
-test "key-value state message" {
+test "key-value_state_message" {
     const allocator = testing.allocator;
 
     const kv1 = messages.KeyValue{
@@ -74,26 +74,26 @@ test "key-value state message" {
         .value = "test_value_2",
     };
 
-    const state = [_]messages.KeyValue{ kv1, kv2 };
-    const message = messages.Message{ .state = &state };
+    const state_items = [_]messages.KeyValue{ kv1, kv2 };
+    const state = messages.State{ .items = &state_items };
+    const message = messages.Message{ .state = state };
 
     // Encode and decode
     const encoded = try messages.encodeMessage(allocator, message);
     defer allocator.free(encoded);
 
     var decoded = try messages.decodeMessage(allocator, encoded);
-    defer decoded.deinit();
+    defer decoded.deinit(allocator);
 
     // Verify decoded message
-    switch (decoded.value) {
+    switch (decoded) {
         .state => |decoded_state| {
-            try testing.expectEqual(@as(usize, 2), decoded_state.len);
-            try testing.expectEqualSlices(u8, &kv1.key, &decoded_state[0].key);
-            try testing.expectEqualStrings(kv1.value, decoded_state[0].value);
-            try testing.expectEqualSlices(u8, &kv2.key, &decoded_state[1].key);
-            try testing.expectEqualStrings(kv2.value, decoded_state[1].value);
+            try testing.expectEqual(@as(usize, 2), decoded_state.items.len);
+            try testing.expectEqualSlices(u8, &kv1.key, &decoded_state.items[0].key);
+            try testing.expectEqualStrings(kv1.value, decoded_state.items[0].value);
+            try testing.expectEqualSlices(u8, &kv2.key, &decoded_state.items[1].key);
+            try testing.expectEqualStrings(kv2.value, decoded_state.items[1].value);
         },
         else => try testing.expect(false),
     }
 }
-

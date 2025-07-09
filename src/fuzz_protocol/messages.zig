@@ -32,6 +32,26 @@ pub const PeerInfo = struct {
     name: []const u8,
     version: Version,
     protocol_version: Version,
+
+    // Static constructor for PeerInfo
+    pub fn buildFromStaticString(
+        allocator: std.mem.Allocator,
+        name: []const u8,
+        version: Version,
+        protocol_version: Version,
+    ) !PeerInfo {
+        const name_bytes = try allocator.dupe(u8, name);
+        return PeerInfo{
+            .name = name_bytes,
+            .version = version,
+            .protocol_version = protocol_version,
+        };
+    }
+
+    pub fn deinit(self: *PeerInfo, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        self.* = undefined;
+    }
 };
 
 /// Key-value pair for state representation
@@ -41,7 +61,20 @@ pub const KeyValue = struct {
 };
 
 /// State as a sequence of key-value pairs
-pub const State = []const KeyValue;
+pub const State = struct {
+    items: []const KeyValue,
+
+    pub const Empty = State{ .items = &[_]KeyValue{} };
+
+    /// Free all allocated memory for the state
+    pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
+        for (self.items) |kv| {
+            allocator.free(kv.value);
+        }
+        allocator.free(self.items);
+        self.* = undefined;
+    }
+};
 
 /// Block import message using complex JAM types
 pub const ImportBlock = types.Block;
@@ -50,6 +83,13 @@ pub const ImportBlock = types.Block;
 pub const SetState = struct {
     header: types.Header,
     state: State,
+
+    pub fn deinit(self: *SetState, allocator: std.mem.Allocator) void {
+        self.header.deinit(allocator);
+        self.state.deinit(allocator);
+        // No need to deinit header as it does not allocate memory
+        self.* = undefined;
+    }
 };
 
 /// Get state request by header hash
@@ -67,18 +107,39 @@ pub const Message = union(enum) {
     state: State,
     state_root: StateRoot,
     kill: void,
+
+    /// Free any allocated memory for this message
+    pub fn deinit(self: *Message, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .state => |*state| {
+                state.deinit(allocator);
+            },
+            // Other message types don't allocate memory
+            .peer_info => |*peer_info| {
+                peer_info.deinit(allocator);
+            },
+            .import_block => |*block| {
+                block.deinit(allocator);
+            },
+            .set_state => |*set_state| {
+                set_state.deinit(allocator);
+            },
+            .get_state,
+            .state_root,
+            .kill,
+            => {},
+        }
+        self.* = undefined;
+    }
 };
 
 /// Encode a message using JAM codec
 pub fn encodeMessage(allocator: std.mem.Allocator, message: Message) ![]u8 {
-    var encoded_content = std.ArrayList(u8).init(allocator);
-    defer encoded_content.deinit();
-
     return try codec.serializeAlloc(Message, FUZZ_PARAMS, allocator, message);
 }
 
 /// Decode a message from bytes using JAM codec
-pub fn decodeMessage(allocator: std.mem.Allocator, data: []const u8) !codec.Deserialized(Message) {
+pub fn decodeMessage(allocator: std.mem.Allocator, data: []const u8) !Message {
     var stream = std.io.fixedBufferStream(data);
-    return try codec.deserialize(Message, FUZZ_PARAMS, allocator, stream.reader());
+    return try codec.deserializeAlloc(Message, FUZZ_PARAMS, allocator, stream.reader());
 }

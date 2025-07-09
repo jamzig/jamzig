@@ -13,10 +13,9 @@ const trace = @import("tracing.zig").scoped(.jam_conformance_fuzzer);
 
 fn showHelp(params: anytype) !void {
     std.debug.print(
-        \\JAM Conformance Fuzzer: Protocol conformance testing tool for JAM implementations
+        \\JamZig⚡ Conformance Fuzzer: Protocol conformance testing tool for JAM implementations
         \\
-        \\This tool connects to a JAM protocol target server and performs conformance testing
-        \\by generating deterministic blocks and comparing state transitions.
+        \\This tool connects to a JAM protocol target server and performs conformance testing according to the JAM fuzz protocol specification by generating deterministic blocks and comparing state transitions.
         \\
         \\
     , .{});
@@ -27,8 +26,6 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-
-    tracing.runtime.init(allocator);
 
     // Parse command line arguments
     const params = comptime clap.parseParamsComptime(
@@ -144,7 +141,7 @@ pub fn main() !void {
     // Run fuzzing cycle
     std.debug.print("Starting conformance testing with {d} blocks...\n", .{num_blocks});
     var result = try fuzzer.runFuzzCycle(num_blocks);
-    defer result.deinit();
+    defer result.deinit(allocator);
 
     // End session
     fuzzer.endSession();

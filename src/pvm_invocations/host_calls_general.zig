@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../types.zig");
 const state = @import("../state.zig");
+const ServiceAccount = @import("../services.zig").ServiceAccount;
 const state_keys = @import("../state_keys.zig");
 const PVM = @import("../pvm.zig").PVM;
 const Params = @import("../jam_params.zig").Params;
@@ -104,6 +105,9 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             defer span.deinit();
             span.debug("Host call: gas remaining", .{});
 
+            // Host call logging is now handled in hostcallInvocation with enhanced information
+            // exec_ctx.exec_trace.logHostCall("gasRemaining", 1, 10);
+
             exec_ctx.gas -= 10;
             const remaining_gas = exec_ctx.gas;
             exec_ctx.registers[7] = @intCast(remaining_gas);
@@ -194,11 +198,12 @@ pub fn GeneralHostCalls(comptime params: Params) type {
         /// Host call implementation for read storage (Ω_R)
         pub fn readStorage(
             exec_ctx: *PVM.ExecutionContext,
-            host_ctx: anytype,
+            host_ctx_: anytype,
         ) PVM.HostCallResult {
             const span = trace.span(.host_call_read);
             defer span.deinit();
 
+            const host_ctx: Context = host_ctx_;
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
@@ -209,28 +214,22 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             const output_ptr = exec_ctx.registers[10]; // Output buffer pointer (o)
             const offset = exec_ctx.registers[11]; // Offset in the value (f)
             const limit = exec_ctx.registers[12]; // Length limit (l)
+            //
+            const resolved_service_id = if (service_id == 0xFFFFFFFFFFFFFFFF) host_ctx.service_id else @as(u32, @intCast(service_id));
 
-            span.debug("Host call: read storage for service {d}", .{service_id});
+            span.debug("Host call: read storage for service {d}", .{resolved_service_id});
             span.trace("Key ptr: 0x{x}, Key size: {d}, Output ptr: 0x{x}", .{
                 k_o, k_z, output_ptr,
             });
             span.debug("Offset: {d}, Limit: {d}", .{ offset, limit });
 
             // Get service account based on special cases as per graypaper B.7
-            const service_account = if (service_id == 0xFFFFFFFFFFFFFFFF) blk: {
-                span.debug("Using current service ID: {d}", .{host_ctx.service_id});
-                break :blk host_ctx.service_accounts.getReadOnly(host_ctx.service_id);
-            } else blk: {
-                span.debug("Looking up service ID: {d}", .{service_id});
-                break :blk host_ctx.service_accounts.getReadOnly(@intCast(service_id));
-            };
-
-            if (service_account == null) {
+            const service_account = host_ctx.service_accounts.getReadOnly(host_ctx.service_id) orelse {
                 span.debug("Service not found, returning NONE", .{});
                 // Service not found, return error status
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                 return .play;
-            }
+            };
 
             // Read key data from memory
             span.debug("Reading key data from memory at 0x{x} (len={d})", .{ k_o, k_z });
@@ -241,23 +240,35 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             defer key_data.deinit();
             span.trace("Key = {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
+            // Determine actual service ID first
+            span.info("Service ID for storage key: {d}", .{resolved_service_id});
+
             // Hash the key_data first before constructing storage key
+            // According to graypaper, we might need to hash ℰ₄(s) ⌢ k
             span.debug("Hashing key data", .{});
+            span.info("Raw key data to hash (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
+
+            // Prepare data to hash: service_id (4 bytes little-endian) + key_data
             var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+            var service_id_bytes: [4]u8 = undefined;
+            std.mem.writeInt(u32, &service_id_bytes, resolved_service_id, .little);
+            hasher.update(&service_id_bytes);
             hasher.update(key_data.buffer);
+
             var key_hash: [32]u8 = undefined;
             hasher.final(&key_hash);
+            span.info("Resulting hash: {s}", .{std.fmt.fmtSliceHexLower(&key_hash)});
 
             // Construct storage key using the hash
             span.debug("Constructing PVM storage key", .{});
-            const actual_service_id = if (service_id == 0xFFFFFFFFFFFFFFFF) host_ctx.service_id else @as(u32, @intCast(service_id));
 
-            const storage_key = state_keys.constructStorageKey(actual_service_id, key_hash);
+            const storage_key = state_keys.constructStorageKey(resolved_service_id, key_hash);
             span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
+            span.info("Final storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
             // Look up the value in storage
             span.debug("Looking up value in storage", .{});
-            const value = service_account.?.storage.get(storage_key) orelse {
+            const value = service_account.storage.get(storage_key) orelse {
                 // Key not found
                 span.debug("Key not found in storage, returning NONE", .{});
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
@@ -275,9 +286,17 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 std.fmt.fmtSliceHexLower(value[f..][0..l]),
             });
 
+            // Double check if we have any data to fetch
+            const value_slice = value[f..][0..l];
+            if (value_slice.len == 0) {
+                span.debug("Zero len offset requested, returning size: {d}", .{value.len});
+                exec_ctx.registers[7] = value.len;
+                return .play;
+            }
+
             // Write the value to memory
             span.debug("Writing value to memory at 0x{x}", .{output_ptr});
-            exec_ctx.memory.writeSlice(@truncate(output_ptr), value[f..][0..l]) catch {
+            exec_ctx.memory.writeSlice(@truncate(output_ptr), value_slice) catch {
                 span.err("Memory access failed while writing value", .{});
                 return .{ .terminal = .panic };
             };
@@ -312,7 +331,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
 
             // Get service account - always use the current service for writing
             span.debug("Looking up service account", .{});
-            const service_account = host_ctx.service_accounts.getMutable(host_ctx.service_id) catch {
+            const service_account: *ServiceAccount = host_ctx.service_accounts.getMutable(host_ctx.service_id) catch {
                 // Service not found, should never happen but handle gracefully
                 span.err("Could get create mutable instance of service accounts", .{});
                 return .{ .terminal = .panic };
@@ -332,17 +351,29 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             span.trace("Key data: {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
             // Hash the key_data first before constructing storage key
+            // According to graypaper, we might need to hash ℰ₄(s) ⌢ k
             span.debug("Hashing key data", .{});
+            span.info("Raw key data to hash (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
+
+            // Prepare data to hash: service_id (4 bytes little-endian) + key_data
+            var service_id_bytes: [4]u8 = undefined;
+            std.mem.writeInt(u32, &service_id_bytes, host_ctx.service_id, .little);
+
             var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+            hasher.update(&service_id_bytes);
             hasher.update(key_data.buffer);
             var key_hash: [32]u8 = undefined;
             hasher.final(&key_hash);
 
+            span.info("Resulting hash: {s}", .{std.fmt.fmtSliceHexLower(&key_hash)});
+
             // Construct storage key using the hash
             span.debug("Constructing PVM storage key", .{});
+            span.info("Service ID for storage key: {d}", .{host_ctx.service_id});
 
             const storage_key = state_keys.constructStorageKey(host_ctx.service_id, key_hash);
             span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
+            span.info("Final storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
             // Check if this is a removal operation (v_z == 0)
             if (v_z == 0) {
@@ -373,6 +404,14 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 value.buffer.len,
                 std.fmt.fmtSliceHexLower(value.buffer[0..@min(32, value.buffer.len)]),
             });
+            span.trace("Value data: {s}", .{std.fmt.fmtSliceHexLower(value.buffer)});
+
+            // In debug builds, also print as string if it looks like valid UTF-8
+            if (std.debug.runtime_safety) {
+                if (std.unicode.utf8ValidateSlice(value.buffer)) {
+                    span.trace("Value as string: {s}", .{value.buffer});
+                }
+            }
 
             // Write and get the prior value owned
             var maybe_prior_value: ?[]const u8 = pv: {
@@ -414,12 +453,6 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 span.debug("Enough balance for storage", .{});
             }
 
-            // Return the previous length per graypaper
-            // DONE: (JAMDUNA) returns here 12
-            // exec_ctx.registers[7] = value.len;
-            // https://github.com/jam-duna/jamtestnet/issues/144
-            // Wed 12 Mar 2025 17:11:17 CET Can be removed
-
             // This is GP
             exec_ctx.registers[7] = if (maybe_prior_value) |_|
                 maybe_prior_value.?.len
@@ -441,19 +474,37 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             min_item_gas: types.Gas,
             /// Gas limit for on_transfer operations (tm)
             min_memo_gas: types.Gas,
-            /// Total number of items in storage (ti)
-            total_items: u32,
             /// Total storage size in bytes (tl)
             total_storage_size: u64,
+            /// Total number of items in storage (ti)
+            total_items: u32,
+
+            pub fn encode(
+                self: ServiceInfo,
+                writer: anytype,
+            ) !void {
+                const codec = @import("../codec.zig");
+
+                // Serialize the ServiceInfo struct to the provided writer
+                try codec.serialize([32]u8, .{}, writer, self.code_hash);
+                try codec.writeInteger(self.balance, writer);
+                try codec.writeInteger(self.threshold_balance, writer);
+                try codec.writeInteger(self.min_item_gas, writer);
+                try codec.writeInteger(self.min_memo_gas, writer);
+                try codec.writeInteger(self.total_storage_size, writer);
+                try codec.writeInteger(self.total_items, writer);
+            }
         };
 
         /// Host call implementation for info service (Ω_I)
         pub fn infoService(
             exec_ctx: *PVM.ExecutionContext,
-            host_ctx: anytype,
+            host_ctx_: anytype,
         ) PVM.HostCallResult {
             const span = trace.span(.host_call_info);
             defer span.deinit();
+
+            const host_ctx: Context = host_ctx_;
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
@@ -466,7 +517,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             span.debug("Output pointer: 0x{x}", .{output_ptr});
 
             // Get service account based on special cases as per graypaper
-            const service_account = if (service_id == 0xFFFFFFFFFFFFFFFF) blk: {
+            const service_account: ?*const ServiceAccount = if (service_id == 0xFFFFFFFFFFFFFFFF) blk: {
                 span.debug("Using current service ID: {d}", .{host_ctx.service_id});
                 break :blk host_ctx.service_accounts.getReadOnly(host_ctx.service_id);
             } else blk: {
@@ -494,26 +545,17 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 .total_items = fprint.a_i,
             };
 
+            // Since we are varint encoding will only be smaller
             var service_info_buffer: [@sizeOf(ServiceInfo)]u8 = undefined;
             var fb = std.io.fixedBufferStream(&service_info_buffer);
 
-            // // FIXME: this is to conform to JamDuna format
-            // // remove once fixed
-            // fb.writer().writeByte(0x07) catch {};
-
-            // Serialize
-            @import("../codec.zig").serialize(
-                ServiceInfo,
-                .{},
-                fb.writer(),
-                service_info,
-            ) catch {
-                span.err("Problem serializing ServiceInfo", .{});
+            service_info.encode(fb.writer()) catch {
+                span.err("Problem encoding ServiceInfo", .{});
                 return .{ .terminal = .panic };
             };
+            const encoded = fb.getWritten();
 
             // Write the info to memory
-            const encoded = fb.getWritten();
             span.debug("Writing info encoded in {d} bytes to memory at 0x{x}", .{ encoded.len, output_ptr });
             span.trace("Encoded Info: {s}", .{std.fmt.fmtSliceHexLower(encoded)});
             exec_ctx.memory.writeSlice(@truncate(output_ptr), encoded) catch {

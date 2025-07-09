@@ -19,12 +19,13 @@ pub fn encodeJamParams(allocator: std.mem.Allocator, params_val: Params) ![]u8 {
         H: u16, // max_recent_blocks
         I: u16, // max_number_of_items
         J: u16, // max_number_of_dependency_items
+        K: u16, // max_tickets_per_extrinsic
         L: u32, // max_timeslots_for_preimage
+        N: u16, // max_ticket_entries_per_validator
         O: u16, // max_authorizers_per_core
         P: u16, // slot_period_in_seconds
         Q: u16, // pending_authorizers_queue_size
         R: u16, // validator_rotation_period
-        S: u16, // max_accumulation_queue_entries
         T: u16, // max_number_of_extrinsics
         U: u16, // work_report_timeout_period
         V: u16, // number_of_validators
@@ -32,7 +33,6 @@ pub fn encodeJamParams(allocator: std.mem.Allocator, params_val: Params) ![]u8 {
         WB: u32, // max_work_package_size
         WC: u32, // max_size_service_code
         WE: u32, // erasure_coding_chunk_size
-        WG: u32, // exported_segment_size
         WM: u32, // max_number_of_imports_exports
         WP: u32, // number_of_erasure_codec_pieces_in_segment
         WR: u32, // max_work_package_size_bytes
@@ -55,30 +55,29 @@ pub fn encodeJamParams(allocator: std.mem.Allocator, params_val: Params) ![]u8 {
         .H = params_val.recent_history_size,
         .I = params_val.max_work_items_per_package,
         .J = params_val.max_number_of_dependencies_for_work_reports,
+        .K = params_val.max_tickets_per_extrinsic,
         .L = params_val.max_lookup_anchor_age,
+        .N = params_val.max_ticket_entries_per_validator,
         .O = params_val.max_authorizations_pool_items,
         .P = params_val.slot_period,
         .Q = params_val.max_authorizations_queue_items,
-        .R = @truncate(params_val.validator_rotation_period),
-        .S = @truncate(params_val.max_accumulation_queue_entries),
+        .R = params_val.validator_rotation_period,
         .T = params_val.max_extrinsics_per_work_package,
         .U = params_val.work_replacement_period,
-        .V = @truncate(params_val.validators_count),
+        .V = params_val.validators_count,
         .WA = params_val.max_authorization_code_size,
         .WB = params_val.max_work_package_size_with_extrinsics,
         .WC = params_val.max_service_code_size,
         .WE = params_val.erasure_coded_piece_size,
-        .WG = params_val.exported_segment_size,
         .WM = params_val.max_imports_per_work_package,
-        .WP = params_val.exported_segment_size,
+        .WP = params_val.erasure_coded_pieces_per_segment,
         .WR = params_val.max_work_report_size,
         .WT = params_val.transfer_memo_size,
         .WX = params_val.max_exports_per_work_package,
         .Y = params_val.ticket_submission_end_epoch_slot,
     };
 
-    const codec = @import("../codec.zig");
-    return try codec.serializeAlloc(EncodeMap, .{}, allocator, constants);
+    return try @import("../codec.zig").serializeAlloc(EncodeMap, .{}, allocator, constants);
 }
 
 /// Encode operand tuples array for accumulate context

@@ -22,6 +22,14 @@ pub const ValidatorStatsInput = struct {
     /// The list of preimages
     preimages: []const types.Preimage,
 
+    pub const Empty = ValidatorStatsInput{
+        .author_index = null,
+        .guarantees = &[_]types.ReportGuarantee{},
+        .assurances = &[_]types.AvailAssurance{},
+        .tickets_count = 0,
+        .preimages = &[_]types.Preimage{},
+    };
+
     /// Create a ValidatorStatsInput from a Block
     pub fn fromBlock(block: *const types.Block) ValidatorStatsInput {
         return ValidatorStatsInput{

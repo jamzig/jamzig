@@ -145,8 +145,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     total_size += result_size;
                 }
 
-                // TODO: use a constant here
-                const max_size = comptime 48 * std.math.pow(usize, 2, 10);
+                const max_size = params.max_work_report_size;
                 size_span.debug("Total size: {d} bytes, limit: {d} bytes", .{ total_size, max_size });
 
                 if (total_size > max_size) {
@@ -231,7 +230,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             });
 
             // Report must be from current  rotation
-            if (report_rotation < current_rotation - 1) {
+            if (report_rotation < current_rotation -| 1) {
                 rotation_span.err(
                     "Report from rotation {d} is too old (current: {d})",
                     .{
@@ -246,7 +245,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             const anchor_span = span.child(.validate_anchor);
             defer anchor_span.deinit();
 
-            const beta: *const state.Beta = try stx.ensure(.beta);
+            const beta: *const state.Beta = try stx.ensure(.beta_prime);
             if (beta.getBlockInfoByHash(guarantee.report.context.anchor)) |binfo| {
                 anchor_span.debug("Found anchor block, validating roots", .{});
                 anchor_span.trace("Block info - hash: {s}, state root: {s}", .{

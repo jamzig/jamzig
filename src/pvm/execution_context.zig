@@ -6,6 +6,7 @@ const codec = @import("../codec.zig");
 const Program = @import("program.zig").Program;
 const Decoder = @import("decoder.zig").Decoder;
 const Memory = @import("memory.zig").Memory;
+const ExecutionTrace = @import("execution_trace.zig").ExecutionTrace;
 
 const trace = @import("../tracing.zig").scoped(.pvm);
 
@@ -20,6 +21,7 @@ pub const ExecutionContext = struct {
     gas: i64,
     pc: u32,
     error_data: ?ErrorData,
+    exec_trace: ExecutionTrace,
 
     pub const HostCallResult = union(enum) {
         play,
@@ -59,6 +61,11 @@ pub const ExecutionContext = struct {
         );
     }
 
+    /// Initialize execution context with standard program code format.
+    /// This implements the Y function initialization from the JAM specification.
+    /// 
+    /// @param program_code The program blob containing: E_3(|o|) ∥ E_3(|w|) ∥ E_2(z) ∥ E_3(s) ∥ o ∥ w ∥ E_4(|c|) ∥ c
+    /// @param input The argument data (a) passed separately from the program blob, limited to Z_I bytes
     pub fn initStandardProgramCodeFormat(
         allocator: Allocator,
         program_code: []const u8,
@@ -255,6 +262,21 @@ pub const ExecutionContext = struct {
 
         span.debug("Program decoded successfully, creating execution context", .{});
         // Initialize registers according to specification
+        // Determine trace mode from tracing scope
+        const trace_mode = blk: {
+            if (@hasDecl(@import("../tracing.zig"), "boption_scope_configs")) {
+                // Check for pvm_exec=compact
+                if (@import("../tracing.zig").findScope("pvm_exec_compact") != null) {
+                    break :blk ExecutionTrace.TraceMode.compact;
+                }
+                // Check for pvm_exec (verbose)
+                if (@import("../tracing.zig").findScope("pvm_exec") != null) {
+                    break :blk ExecutionTrace.TraceMode.verbose;
+                }
+            }
+            break :blk ExecutionTrace.TraceMode.disabled;
+        };
+
         return ExecutionContext{
             .memory = memory,
             .decoder = Decoder.init(program.code, program.mask),
@@ -264,6 +286,7 @@ pub const ExecutionContext = struct {
             .pc = 0,
             .error_data = null,
             .gas = max_gas,
+            .exec_trace = ExecutionTrace.initWithMode(max_gas, trace_mode),
         };
     }
 
@@ -284,6 +307,9 @@ pub const ExecutionContext = struct {
             self.registers[7],
             self.registers[8],
         });
+
+        // Initialize register tracking for execution trace
+        self.exec_trace.initRegisterTracking(&self.registers);
     }
 
     /// Clear all registers by setting them to zero

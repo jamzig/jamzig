@@ -154,10 +154,7 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path
             .panic => test_vector.expected_status == .panic,
             .page_fault => |addr| test_vector.expected_status == .page_fault and
                 test_vector.expected_page_fault_address == addr,
-            else => {
-                std.debug.print("UnexpectedErrStatus: {}", .{err});
-                return error.UnexpectedErrStatusFromResult;
-            },
+            .out_of_gas => test_vector.expected_status == .panic, // NOTE: old vectors panic when out of gas
         },
     };
 

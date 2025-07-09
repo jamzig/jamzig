@@ -9,7 +9,7 @@ const BuildConfig = struct {
     tracing_scopes: []const []const u8,
     tracing_level: []const u8,
     tracing_mode: TracingMode,
-    conformance_params: ConformanceParams,
+    conformance_params: ?ConformanceParams = null,
 };
 
 // Helper function to apply build configuration to options
@@ -17,7 +17,9 @@ fn applyBuildConfig(options: *std.Build.Step.Options, config: BuildConfig) void 
     options.addOption([]const []const u8, "enable_tracing_scopes", config.tracing_scopes);
     options.addOption([]const u8, "enable_tracing_level", config.tracing_level);
     options.addOption(@TypeOf(config.tracing_mode), "tracing_mode", config.tracing_mode);
-    options.addOption(@TypeOf(config.conformance_params), "conformance_params", config.conformance_params);
+    if (config.conformance_params) |conformance_params| {
+        options.addOption(ConformanceParams, "conformance_params", conformance_params);
+    }
 }
 
 pub fn build(b: *std.Build) !void {
@@ -26,7 +28,7 @@ pub fn build(b: *std.Build) !void {
 
     // Parse command-line options
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &[0][]const u8{};
-    
+
     // Create base configuration from command-line options
     const base_config = BuildConfig{
         .tracing_scopes = b.option([][]const u8, "tracing-scope", "Enable detailed tracing by scope") orelse &[_][]const u8{},
@@ -43,12 +45,23 @@ pub fn build(b: *std.Build) !void {
         .conformance_params = base_config.conformance_params,
     };
 
+    // Create conformance configuration with runtime tracing
+    const testing_config = BuildConfig{
+        .tracing_scopes = base_config.tracing_scopes,
+        .tracing_level = base_config.tracing_level,
+        .tracing_mode = .runtime, // Force runtime tracing for conformance tools
+        .conformance_params = base_config.conformance_params,
+    };
+
     // Create build options objects
     const build_options = b.addOptions();
     applyBuildConfig(build_options, base_config);
 
     const conformance_build_options = b.addOptions();
     applyBuildConfig(conformance_build_options, conformance_config);
+
+    const testing_build_options = b.addOptions();
+    applyBuildConfig(testing_build_options, testing_config);
 
     // Dependencies
     const dep_opts = .{ .target = target, .optimize = optimize };
@@ -215,7 +228,7 @@ pub fn build(b: *std.Build) !void {
         .filters = test_filters,
     });
 
-    unit_tests.root_module.addOptions("build_options", build_options);
+    unit_tests.root_module.addOptions("build_options", testing_build_options);
 
     unit_tests.root_module.addImport("pretty", pretty_module);
     unit_tests.root_module.addImport("diffz", diffz_module);

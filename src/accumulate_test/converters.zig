@@ -7,8 +7,10 @@ const accumulate = @import("../accumulate.zig");
 const services = @import("../services.zig");
 const state_theta = @import("../reports_ready.zig");
 const state_keys = @import("../state_keys.zig");
+const validator_stats = @import("../validator_stats.zig");
 
 const tv_types = @import("../jamtestvectors/accumulate.zig");
+const jam_types = @import("../jamtestvectors/jam_types.zig");
 const Params = @import("../jam_params.zig").Params;
 
 pub fn convertTestStateIntoJamState(
@@ -52,6 +54,14 @@ pub fn convertTestStateIntoJamState(
         test_state.accumulated,
     );
 
+    // Convert and set the Pi (validator statistics) component
+    jam_state.pi = try convertServiceStatistics(
+        allocator,
+        test_state.statistics,
+        params.validators_count,
+        params.core_count,
+    );
+
     return jam_state;
 }
 
@@ -84,6 +94,28 @@ pub fn convertServiceAccount(allocator: std.mem.Allocator, account: tv_types.Ser
         const preimage_key = state_keys.constructServicePreimageKey(account.id, preimage.hash);
         try service_account.addPreimage(preimage_key, preimage.blob);
         try service_account.registerPreimageAvailable(account.id, preimage.hash, @intCast(preimage.blob.len), null);
+    }
+
+    // Add all storage entries
+    for (account.data.storage) |storage_entry| {
+        var storage_key: types.StateKey = undefined;
+
+        // Prepare data to hash: service_id (4 bytes little-endian) + key_data
+        var service_id_bytes: [4]u8 = undefined;
+        std.mem.writeInt(u32, &service_id_bytes, account.id, .little);
+
+        // The test vector provides raw key data that needs to be hashed
+        // This matches how PVM host calls work: hash the key data first
+        var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+        hasher.update(&service_id_bytes);
+        hasher.update(storage_entry.key);
+        var key_hash: [32]u8 = undefined;
+        hasher.final(&key_hash);
+
+        // Construct the storage key using service ID and hash
+        storage_key = state_keys.constructStorageKey(account.id, key_hash);
+
+        try service_account.writeStorageFreeOldValue(storage_key, try allocator.dupe(u8, storage_entry.value));
     }
 
     return service_account;
@@ -157,4 +189,41 @@ pub fn convertAccumulatedQueue(
     }
 
     return xi;
+}
+
+pub fn convertServiceStatistics(
+    allocator: std.mem.Allocator,
+    statistics: jam_types.ServiceStatistics,
+    validator_count: usize,
+    core_count: usize,
+) !validator_stats.Pi {
+    var pi = try validator_stats.Pi.init(allocator, validator_count, core_count);
+    errdefer pi.deinit();
+
+    // Convert service statistics from test vectors
+    for (statistics.stats) |stat_entry| {
+        const service_id = stat_entry.id;
+        const record = stat_entry.record;
+        
+        // Get or create the service stats entry
+        const service_stats = try pi.getOrCreateServiceStats(service_id);
+        
+        // Map all the statistics fields from test vector to internal representation
+        service_stats.accumulate_count = record.accumulate_count;
+        service_stats.accumulate_gas_used = record.accumulate_gas_used;
+        service_stats.on_transfers_count = record.on_transfers_count;
+        service_stats.on_transfers_gas_used = record.on_transfers_gas_used;
+        
+        // Also map the other fields that exist in ServiceActivityRecord
+        service_stats.provided_count = record.provided_count;
+        service_stats.provided_size = record.provided_size;
+        service_stats.refinement_count = record.refinement_count;
+        service_stats.refinement_gas_used = record.refinement_gas_used;
+        service_stats.imports = record.imports;
+        service_stats.exports = record.exports;
+        service_stats.extrinsic_size = record.extrinsic_size;
+        service_stats.extrinsic_count = record.extrinsic_count;
+    }
+
+    return pi;
 }

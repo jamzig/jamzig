@@ -20,6 +20,11 @@ pub const PVM = struct {
 
     pub const ExecutionContext = @import("./pvm/execution_context.zig").ExecutionContext;
 
+    // Helper to log memory writes for execution trace
+    fn logMemoryWrite(context: *ExecutionContext, addr: u32, value: u64, size: usize) void {
+        context.exec_trace.logMemoryWrite(addr, value, size);
+    }
+
     pub const HostCallInvocation = struct {
         /// Host call index
         idx: u32,
@@ -93,30 +98,32 @@ pub const PVM = struct {
         const span = trace.span(.execute_step);
         defer span.deinit();
 
+        const pc_before = context.pc;
+        const gas_before = context.gas;
+
         // Decode instruction
         const instruction = try context.decoder.decodeInstruction(context.pc);
-        const pc_before = context.pc;
-        defer span.trace("JAMDUNA PC {d} {s} g={d} reg={any}", .{ pc_before, instruction, context.gas, context.registers });
-        defer {
-            const memvalue = context.memory.readInt(i32, 0xFEFF000B) catch 42;
-            defer span.trace("JAMDUNA MEM {d} ", .{memvalue});
-        }
-        //  PC 2512 STORE_IMM_IND_U8            g=9071 pvmHash=b4dc..84ac reg="[8 4278056032 0 256 0 2953942612 4278058975 9071 1 4278056408 8 4278056408 0]"
         span.debug("Executing instruction at PC: 0x{d:0>8}: {}", .{ context.pc, instruction });
 
         // Check gas
         const gas_cost = getInstructionGasCost(instruction);
+        context.gas -= gas_cost;
+
         span.trace("Instruction gas cost: {d}", .{gas_cost});
 
+        // Execute instruction (no per-instruction gas charge)
+        const result = executeInstruction(context, instruction);
+
+        // After execute instruction, as instructions also deduct gas
         if (context.gas < gas_cost) {
             span.debug("Out of gas - remaining: {d}, required: {d}", .{ context.gas, gas_cost });
             return .{ .terminal = .out_of_gas };
         }
-        context.gas -= gas_cost;
-        span.trace("Remaining gas: {d}", .{context.gas});
 
-        // Execute instruction
-        return executeInstruction(context, instruction);
+        // Log execution step for trace
+        context.exec_trace.logStepAuto(pc_before, gas_before, context.gas, &instruction, &context.registers);
+
+        return result;
     }
 
     pub const BasicInvocationResult = union(enum) {
@@ -146,8 +153,6 @@ pub const PVM = struct {
                 },
                 .terminal => |result| switch (result) {
                     .page_fault => |addr| {
-                        // FIXME: this to make gas accounting work against test vectors
-                        // context.gas -= 1;
                         return .{ .terminal = .{ .page_fault = addr } };
                     },
                     else => {
@@ -167,14 +172,30 @@ pub const PVM = struct {
     };
 
     // Host call invocation invocation
-    // Calls basicInvocation until we against
     pub fn hostcallInvocation(context: *ExecutionContext, call_ctx: *anyopaque) Error!HostCallInvocationResult {
         switch (try basicInvocation(context)) {
             .host_call => |params| {
                 if (context.host_calls) |host_calls| {
                     if (host_calls.get(params.idx)) |host_call_fn| {
+                        const gas_before = context.gas;
+                        const pc_before = context.pc;
+                        const registers_before = context.registers;
+                        
                         switch (host_call_fn(context, call_ctx)) {
                             .play => {
+                                // Log the host call with comprehensive information
+                                context.exec_trace.logHostCall(
+                                    params.idx,
+                                    gas_before,
+                                    context.gas,
+                                    &registers_before,
+                                    &context.registers,
+                                    pc_before,
+                                    params.next_pc,
+                                );
+                                
+                                // Update total gas used
+                                context.exec_trace.total_gas_used += gas_before - context.gas;
                                 context.pc = params.next_pc;
                                 return try hostcallInvocation(context, call_ctx);
                             },
@@ -246,7 +267,7 @@ pub const PVM = struct {
         //     // .jump => 3,
         //     else => 1,
         // };
-        return 0;
+        return 1;
     }
 
     const PcOffset = i32;
@@ -276,6 +297,15 @@ pub const PVM = struct {
             // A.5.4 Instructions with Arguments of Two Immediates
             .store_imm_u8, .store_imm_u16, .store_imm_u32, .store_imm_u64 => {
                 const args = i.args.TwoImm;
+                const addr = @as(u32, @truncate(args.first_immediate));
+                const value = args.second_immediate;
+                const size = switch (i.instruction) {
+                    .store_imm_u8 => @as(usize, 1),
+                    .store_imm_u16 => @as(usize, 2),
+                    .store_imm_u32 => @as(usize, 4),
+                    .store_imm_u64 => @as(usize, 8),
+                    else => unreachable,
+                };
 
                 (switch (i.instruction) {
                     .store_imm_u8 => context.memory.writeInt(u8, @truncate(args.first_immediate), @truncate(args.second_immediate)),
@@ -289,6 +319,9 @@ pub const PVM = struct {
                     }
                     return err;
                 };
+
+                // Log memory write
+                logMemoryWrite(context, addr, value, size);
             },
 
             // A.5.5 Instructions with Arguments of One Offset
@@ -427,7 +460,10 @@ pub const PVM = struct {
                 const args = i.args.TwoReg;
                 const size = context.registers[args.second_register_index];
 
-                const result = try context.memory.allocate(@truncate(size));
+                // Call the graypaper-compliant sbrk implementation
+                const result = context.memory.sbrk(@truncate(size)) catch |err| {
+                    return err;
+                };
 
                 context.registers[args.first_register_index] = result;
             },

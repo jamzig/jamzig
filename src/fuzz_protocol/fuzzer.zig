@@ -8,6 +8,7 @@ const target = @import("target.zig");
 const state_converter = @import("state_converter.zig");
 const shared = @import("tests/shared.zig");
 const report = @import("report.zig");
+const version = @import("version.zig");
 
 const sequoia = @import("../sequoia.zig");
 const types = @import("../types.zig");
@@ -15,6 +16,7 @@ const stf = @import("../stf.zig");
 const jam_params = @import("../jam_params.zig");
 const JamState = @import("../state.zig").JamState;
 const state_merklization = @import("../state_merklization.zig");
+const state_dictionary = @import("../state_dictionary.zig");
 
 const trace = @import("../tracing.zig").scoped(.fuzz_protocol);
 
@@ -148,7 +150,7 @@ pub const Fuzzer = struct {
 
         // Send fuzzer peer info
         const fuzzer_peer_info = messages.PeerInfo{
-            .name = "jamzig-fuzzer",
+            .name = "jamzig-fuzzer", // NOTE: static string here => no deinit
             .version = .{ .major = 0, .minor = 1, .patch = 0 },
             .protocol_version = .{ .major = 0, .minor = 6, .patch = 6 },
         };
@@ -159,9 +161,9 @@ pub const Fuzzer = struct {
 
         // Receive target peer info
         var response = try self.readMessage();
-        defer response.deinit();
+        defer response.deinit(self.allocator);
 
-        switch (response.value) {
+        switch (response) {
             .peer_info => |peer_info| {
                 span.debug("Received peer info from: {s}", .{peer_info.name});
                 // TODO: Validate protocol compatibility
@@ -177,7 +179,7 @@ pub const Fuzzer = struct {
     pub fn setState(self: *Fuzzer, header: types.Header, state: messages.State) !messages.StateRootHash {
         const span = trace.span(.fuzzer_set_state);
         defer span.deinit();
-        span.debug("Setting state on target with {d} key-value pairs", .{state.len});
+        span.debug("Setting state on target with {d} key-value pairs", .{state.items.len});
 
         if (self.state != .handshake_complete) {
             return error.HandshakeNotComplete;
@@ -188,9 +190,9 @@ pub const Fuzzer = struct {
 
         // Receive StateRoot response
         var response = try self.readMessage();
-        defer response.deinit();
+        defer response.deinit(self.allocator);
 
-        switch (response.value) {
+        switch (response) {
             .state_root => |state_root| {
                 self.state = .state_initialized;
                 span.debug("State set successfully, root: {s}", .{std.fmt.fmtSliceHexLower(&state_root)});
@@ -210,14 +212,14 @@ pub const Fuzzer = struct {
             return error.StateNotInitialized;
         }
 
-        // Send ImportBlock message
+        // Send ImportBlock message, do not free message we do not own the block
         try self.sendMessage(.{ .import_block = block });
 
         // Receive StateRoot response
         var response = try self.readMessage();
-        defer response.deinit();
+        defer response.deinit(self.allocator);
 
-        switch (response.value) {
+        switch (response) {
             .state_root => |state_root| {
                 try self.state.assertReachedState(.state_initialized);
                 span.debug("Block processed, state root: {s}", .{std.fmt.fmtSliceHexLower(&state_root)});
@@ -240,14 +242,14 @@ pub const Fuzzer = struct {
 
         // Receive State response
         var response = try self.readMessage();
-        defer response.deinit();
+        defer response.deinit(self.allocator);
 
-        switch (response.value) {
+        switch (response) {
             .state => |state| {
-                span.debug("Received state with {d} key-value pairs", .{state.len});
+                span.debug("Received state with {d} key-value pairs", .{state.items.len});
                 // Transfer ownership to caller - clear response to prevent double-free
                 const result = state;
-                response.value = .{ .state = &[_]messages.KeyValue{} };
+                response = .{ .state = messages.State.Empty };
                 return result;
             },
             else => return error.UnexpectedGetStateResponse,
@@ -314,40 +316,81 @@ pub const Fuzzer = struct {
             defer block_span.deinit();
             block_span.debug("Processing block {d}/{d}", .{ block_num + 1, num_blocks });
 
-            // Generate next block
-            var block = try self.block_builder.buildNextBlock();
-            errdefer block.deinit(self.allocator);
+            var local_root: messages.StateRootHash = undefined;
 
-            // Process locally
-            const local_root = try self.processBlockLocally(block);
+            // Scope for block generation and ownership transfer
+            {
+                // Generate next block
+                var block = try self.block_builder.buildNextBlock();
+                errdefer block.deinit(self.allocator);
 
-            // Update latest block
-            self.latest_block.?.deinit(self.allocator);
-            self.latest_block = block;
+                // Process locally
+                local_root = try self.processBlockLocally(block);
 
-            sequoia.logging.printBlockEntropyDebug(messages.FUZZ_PARAMS, &block, self.current_jam_state);
+                // Update latest block - ownership transfers here
+                self.latest_block.?.deinit(self.allocator);
+                self.latest_block = block;
+            }
+
+            sequoia.logging.printBlockEntropyDebug(messages.FUZZ_PARAMS, &self.latest_block.?, self.current_jam_state);
 
             // Send to target
-            const target_root = try self.sendBlock(block);
+            const reported_target_root = self.sendBlock(self.latest_block.?) catch |err| {
+                block_span.err("Error sending block to target: {s}", .{@errorName(err)});
+
+                // Return partial result with the error
+                return report.FuzzResult{
+                    .seed = self.seed,
+                    .blocks_processed = block_num,
+                    .mismatch = null,
+                    .success = false,
+                    .err = err,
+                };
+            };
 
             // Compare state roots
-            if (!compareStateRoots(local_root, target_root)) {
+            if (!compareStateRoots(local_root, reported_target_root)) {
                 block_span.debug("State root mismatch detected!", .{});
 
+                // Build local dictionary
+                var local_dict = try state_dictionary.buildStateMerklizationDictionary(
+                    messages.FUZZ_PARAMS,
+                    self.allocator,
+                    self.current_jam_state,
+                );
+                errdefer local_dict.deinit();
+
                 // Retrieve full target state for analysis
-                const block_header_hash = try block.header.header_hash(messages.FUZZ_PARAMS, self.allocator);
-                const target_state = self.getState(block_header_hash) catch |err| blk: {
+                const block_header_hash = try self.latest_block.?.header.header_hash(messages.FUZZ_PARAMS, self.allocator);
+                var target_state: ?messages.State = self.getState(block_header_hash) catch |err| blk: {
                     block_span.err("Failed to retrieve target state: {s}", .{@errorName(err)});
                     break :blk null;
                 };
+                defer if (target_state) |*ts| {
+                    ts.deinit(self.allocator);
+                };
+
+                // Build target dictionary and validate if we got state
+                var target_dict: ?state_dictionary.MerklizationDictionary = null;
+                var target_computed_root: ?messages.StateRootHash = null;
+                if (target_state) |ts| {
+                    // Convert to MerklizationDictionary
+                    target_dict = try state_converter.fuzzStateToMerklizationDictionary(self.allocator, ts);
+                    errdefer if (target_dict) |*td| td.deinit();
+
+                    // Verify state root
+                    const computed_root = try target_dict.?.buildStateRoot(self.allocator);
+                    target_computed_root = computed_root;
+                }
 
                 // Create mismatch entry
                 const mismatch = report.Mismatch{
                     .block_number = block_num,
-                    .block = try block.deepClone(self.allocator),
-                    .local_state_root = local_root,
-                    .target_state_root = target_root,
-                    .target_state = target_state,
+                    .block = try self.latest_block.?.deepClone(self.allocator),
+                    .reported_state_root = reported_target_root,
+                    .local_dict = local_dict,
+                    .target_dict = target_dict,
+                    .target_computed_root = target_computed_root,
                 };
 
                 // Create result
@@ -356,7 +399,6 @@ pub const Fuzzer = struct {
                     .blocks_processed = block_num,
                     .mismatch = mismatch,
                     .success = false,
-                    .allocator = self.allocator,
                 };
             } else {
                 block_span.debug("State roots match: {s}", .{std.fmt.fmtSliceHexLower(&local_root)});
@@ -371,7 +413,6 @@ pub const Fuzzer = struct {
             .blocks_processed = num_blocks,
             .mismatch = null,
             .success = true,
-            .allocator = self.allocator,
         };
     }
 
@@ -401,7 +442,7 @@ pub const Fuzzer = struct {
     }
 
     /// Helper to read a message from socket
-    fn readMessage(self: *Fuzzer) !messages.codec.Deserialized(messages.Message) {
+    fn readMessage(self: *Fuzzer) !messages.Message {
         const socket = self.socket orelse return error.NotConnected;
         const frame_data = try frame.readFrame(self.allocator, socket);
         defer self.allocator.free(frame_data);

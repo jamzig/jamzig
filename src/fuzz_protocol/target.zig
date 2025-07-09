@@ -65,6 +65,8 @@ pub const TargetServer = struct {
         const address = try net.Address.initUnix(self.socket_path);
 
         // Create and bind server socket
+        // SOCK_STREAM is used for reliable, ordered, and error-checked delivery
+        // https://github.com/davxy/jam-stuff/issues/3
         var server_socket = try address.listen(.{});
         defer server_socket.deinit();
 
@@ -108,23 +110,14 @@ pub const TargetServer = struct {
                 }
                 return err;
             };
-            defer request_message.deinit();
+            defer request_message.deinit(self.allocator);
 
-            span.debug("Received message: {s}", .{@tagName(request_message.value)});
+            span.debug("Received message: {s}", .{@tagName(request_message)});
 
             // Process message and generate response
-            const response_message = try self.processMessage(request_message.value);
-            defer if (response_message) |msg| {
-                // Only deinit if we allocated memory for response
-                switch (msg) {
-                    .state => |state| {
-                        for (state) |kv| {
-                            self.allocator.free(kv.value);
-                        }
-                        self.allocator.free(state);
-                    },
-                    else => {},
-                }
+            var response_message = try self.processMessage(request_message);
+            defer if (response_message) |*msg| {
+                msg.deinit(self.allocator);
             };
 
             // Send response if one was generated
@@ -136,7 +129,7 @@ pub const TargetServer = struct {
     }
 
     /// Read a message from the stream
-    pub fn readMessage(self: *Self, stream: net.Stream) !messages.codec.Deserialized(messages.Message) {
+    pub fn readMessage(self: *Self, stream: net.Stream) !messages.Message {
         const frame_data = try frame.readFrame(self.allocator, stream);
         defer self.allocator.free(frame_data);
 
@@ -161,12 +154,14 @@ pub const TargetServer = struct {
             .peer_info => |peer_info| {
                 span.debug("Processing PeerInfo from: {s}", .{peer_info.name});
 
-                // Respond with our own peer info
-                const our_peer_info = messages.PeerInfo{
-                    .name = version.TARGET_NAME,
-                    .version = version.FUZZ_TARGET_VERSION,
-                    .protocol_version = version.PROTOCOL_VERSION,
-                };
+                // Respond with our own peer info, need to allocate
+                // as we are moving ownership to calling scope which will deinit
+                const our_peer_info = try messages.PeerInfo.buildFromStaticString(
+                    self.allocator,
+                    version.TARGET_NAME,
+                    version.FUZZ_TARGET_VERSION,
+                    version.PROTOCOL_VERSION,
+                );
 
                 self.server_state = .handshake_complete;
                 return messages.Message{ .peer_info = our_peer_info };
@@ -175,7 +170,7 @@ pub const TargetServer = struct {
             .set_state => |set_state| {
                 if (self.server_state != .handshake_complete and self.server_state != .ready) return error.HandshakeNotComplete;
 
-                span.debug("Processing SetState with {d} key-value pairs", .{set_state.state.len});
+                span.debug("Processing SetState with {d} key-value pairs", .{set_state.state.items.len});
 
                 // Clear current state
                 if (self.current_state) |*s| s.deinit(self.allocator);
@@ -207,6 +202,15 @@ pub const TargetServer = struct {
                 );
                 defer state_transition.deinitHeap();
 
+                // SET TO TRUE to simulate a failing state transition
+                if (false) {
+                    var pi_prime: *@import("../state.zig").Pi = state_transition.get(.pi_prime) catch |err| {
+                        span.err("State transition failed: {s}", .{@errorName(err)});
+                        return err;
+                    };
+                    pi_prime.current_epoch_stats.items[0].blocks_produced += 1; // Increment epoch stats for testing
+                }
+
                 // Merge the transition results into our current state
                 try state_transition.mergePrimeOntoBase();
 
@@ -229,7 +233,7 @@ pub const TargetServer = struct {
                 );
                 // Transfer ownership to the message response
                 const state = result.state;
-                result.state = &[_]messages.KeyValue{}; // Clear to prevent double-free
+                result.state = messages.State.Empty; // Clear to prevent double-free
                 result.deinit(); // Clean up the result struct
 
                 return messages.Message{ .state = state };

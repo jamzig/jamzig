@@ -23,11 +23,19 @@ const HostCallMap = @import("accumulate/host_calls_map.zig");
 // Add tracing import
 const trace = @import("../tracing.zig").scoped(.accumulate);
 
-// The to be encoded arguments
+// Replace the AccumulateArgs struct definition with this:
 const AccumulateArgs = struct {
     timeslot: types.TimeSlot,
     service_id: types.ServiceId,
-    operands: []const AccumulationOperand,
+    operand_count: u64, // |o| - just the count, not the operands themselves
+
+    /// Encodes according to JAM specification E(t, s, |o|) using varint encoding
+    pub fn encode(self: *const @This(), writer: anytype) !void {
+        // E(t, s, |o|) - all three values are varint encoded
+        try codec.writeInteger(self.timeslot, writer); // t
+        try codec.writeInteger(self.service_id, writer); // s
+        try codec.writeInteger(self.operand_count, writer); // |o|
+    }
 };
 
 /// Accumulation Invocation
@@ -63,14 +71,15 @@ pub fn invoke(
     const arguments = AccumulateArgs{
         .timeslot = tau,
         .service_id = service_id,
-        .operands = accumulation_operands,
+        .operand_count = @intCast(accumulation_operands.len), // Just the count!
     };
 
-    span.trace("AccumulateArgs:  {}\n", .{types.fmt.format(arguments)});
+    span.trace("AccumulateArgs: timeslot={d}, service_id={d}, operand_count={d}", .{ arguments.timeslot, arguments.service_id, arguments.operand_count });
 
-    try codec.serialize(AccumulateArgs, .{}, args_buffer.writer(), arguments);
+    // Use the proper JAM varint encoding instead of generic serialization
+    try arguments.encode(args_buffer.writer());
 
-    span.trace("AccumulateArgs Encoded: {}", .{std.fmt.fmtSliceHexLower(args_buffer.items)});
+    span.trace("AccumulateArgs Encoded ({d} bytes): {}", .{ args_buffer.items.len, std.fmt.fmtSliceHexLower(args_buffer.items) });
 
     span.debug("Setting up host call functions", .{});
     var host_call_map = try HostCallMap.buildOrGetCached(params, allocator);
@@ -88,6 +97,7 @@ pub fn invoke(
         .new_service_id = service_util.generateServiceId(&context.service_accounts, service_id, entropy, tau),
         .deferred_transfers = std.ArrayList(DeferredTransfer).init(allocator),
         .accumulation_output = null,
+        .operands = accumulation_operands,
     });
     defer host_call_context.deinit();
     span.debug("Generated new service ID: {d}", .{host_call_context.regular.new_service_id});
@@ -279,63 +289,10 @@ pub const AccumulationOperands = struct {
 
 /// 12.18 AccumulationOperand represents a wrangled tuple of operands used by the PVM Accumulation function.
 /// It contains the rephrased work items for a specific service within work reports.
-/// Following JAM protocol naming conventions: h, e, a, o, y, d
+/// Following JAM protocol naming conventions: h, e, a, y, g, d, o
+/// Encoded according to graypaper C.29: E(xh, xe, xa, xy, xg, O(xd), ↕xo)
 pub const AccumulationOperand = struct {
-    pub const Output = union(enum) {
-        /// Represents possible error types from work execution
-        const WorkExecutionError = enum(u8) {
-            OutOfGas = 1, // ∞
-            ProgramTermination = 2, // ☇
-            InvalidExportCount = 3, // ⊚
-            ServiceCodeUnavailable = 4, // BAD
-            ServiceCodeTooLarge = 5, // BIG
-        };
-
-        /// Successful execution output as an octet sequence
-        success: []const u8,
-        /// Error code if execution failed
-        err: WorkExecutionError,
-
-        pub fn encode(value: *const @This(), _: anytype, writer: anytype) !void {
-            // First write a tag byte based on the union variant
-            switch (value.*) {
-                .success => |data| {
-                    // For success, write 0 followed by the length and data
-                    try writer.writeByte(0);
-                    try codec.writeInteger(@intCast(data.len), writer);
-                    try writer.writeAll(data);
-                },
-                .err => |err_code| {
-                    // For error types, simply write the error code's integer value
-                    try writer.writeByte(@intFromEnum(err_code));
-                },
-            }
-        }
-
-        pub fn decode(_: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
-            // Read the tag byte to determine the variant
-            const tag = try reader.readByte();
-
-            // Tag 0 indicates success, other values map to error codes
-            return switch (tag) {
-                0 => blk: {
-                    // Success variant contains length-prefixed data
-                    const length = try codec.readInteger(reader);
-                    const data = try allocator.alloc(u8, @intCast(length)); // FIXME: check on max size before allocating
-                    errdefer allocator.free(data);
-
-                    try reader.readNoEof(data);
-                    break :blk .{ .success = data };
-                },
-                1 => .{ .err = .OutOfGas },
-                2 => .{ .err = .ProgramTermination },
-                3 => .{ .err = .InvalidExportCount },
-                4 => .{ .err = .ServiceCodeUnavailable },
-                5 => .{ .err = .ServiceCodeTooLarge },
-                else => error.InvalidOutputTag,
-            };
-        }
-    };
+    pub const Output = types.WorkExecResult;
 
     /// h: The hash of the work package
     h: [32]u8,
@@ -346,14 +303,51 @@ pub const AccumulationOperand = struct {
     /// a: The authorizer hash
     a: [32]u8,
 
-    /// o: The authorization output blob
-    o: []const u8,
-
     /// y: The hash of the payload within the work item
     y: [32]u8,
 
+    /// g: Gas used/allocated for this operand
+    g: types.Gas,
+
     /// d: The data output (success or error)
     d: Output,
+
+    /// o: The authorization output blob (variable length)
+    o: []const u8,
+
+    /// Encodes according to graypaper C.29: E(xh, xe, xa, xy, xg, O(xd), ↕xo)
+    pub fn encode(self: *const @This(), params: anytype, writer: anytype) !void {
+        // E(xh, xe, xa, xy, xg, O(xd), ↕xo)
+        try writer.writeAll(&self.h); // xh
+        try writer.writeAll(&self.e); // xe
+        try writer.writeAll(&self.a); // xa
+        try writer.writeAll(&self.y); // xy
+        try codec.writeInteger(self.g, writer); // xg
+        try self.d.encode(params, writer); // O(xd)
+        // ↕xo - length-prefixed authorization output
+        try codec.writeInteger(@intCast(self.o.len), writer);
+        try writer.writeAll(self.o);
+    }
+
+    pub fn decode(params: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
+        var self: @This() = undefined;
+
+        // Read fields in C.29 order: E(xh, xe, xa, xy, xg, O(xd), ↕xo)
+        try reader.readNoEof(&self.h); // xh
+        try reader.readNoEof(&self.e); // xe
+        try reader.readNoEof(&self.a); // xa
+        try reader.readNoEof(&self.y); // xy
+        self.g = try codec.readInteger(reader); // xg
+        self.d = try Output.decode(params, reader, allocator); // O(xd)
+
+        // ↕xo - length-prefixed authorization output
+        const o_len = try codec.readInteger(reader);
+        self.o = try allocator.alloc(u8, @intCast(o_len));
+        errdefer allocator.free(self.o);
+        try reader.readNoEof(self.o);
+
+        return self;
+    }
 
     pub fn deepClone(self: @This(), alloc: std.mem.Allocator) !@This() {
         // Create a new operand with deep copies of all dynamic data
@@ -398,26 +392,7 @@ pub const AccumulationOperand = struct {
         // Create an AccumulationOperand for each result in the report
         for (report.results, 0..) |result, i| {
             // Map output type from WorkExecResult to AccumulationOperand.output
-            const output: Output = switch (result.result) {
-                .ok => |data| .{
-                    .success = try allocator.dupe(u8, data),
-                },
-                .out_of_gas => .{
-                    .err = .OutOfGas,
-                },
-                .panic => .{
-                    .err = .ProgramTermination,
-                },
-                .bad_exports => .{
-                    .err = .InvalidExportCount,
-                },
-                .bad_code => .{
-                    .err = .ServiceCodeUnavailable,
-                },
-                .code_oversize => .{
-                    .err = .ServiceCodeTooLarge,
-                },
-            };
+            const output: Output = try result.result.deepClone(allocator);
 
             // Set up the operand according to JAM protocol fields (h, e, a, o, y, d)
             operands[i] = .{
@@ -425,6 +400,7 @@ pub const AccumulationOperand = struct {
                     .h = report.package_spec.hash, // Work package hash
                     .e = report.package_spec.exports_root, // Segment root
                     .a = report.authorizer_hash, // Authorizer hash
+                    .g = result.accumulate_gas,
                     .o = try allocator.dupe(u8, report.auth_output), // Authorization output
                     .y = result.payload_hash, // Payload hash
                     .d = output, // Data output (success or error)
@@ -436,10 +412,7 @@ pub const AccumulationOperand = struct {
     }
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        if (self.d == .success) {
-            allocator.free(self.d.success);
-        }
-
+        self.d.deinit(allocator);
         // Free the authorization output
         allocator.free(self.o);
         self.* = undefined;
@@ -454,12 +427,12 @@ test "AccumulationOperand.Output encode/decode" {
 
     // Test all possible Output variants
     const test_cases = [_]AccumulationOperand.Output{
-        .{ .success = try alloc.dupe(u8, &[_]u8{ 1, 2, 3, 4, 5 }) },
-        .{ .err = .OutOfGas },
-        .{ .err = .ProgramTermination },
-        .{ .err = .InvalidExportCount },
-        .{ .err = .ServiceCodeUnavailable },
-        .{ .err = .ServiceCodeTooLarge },
+        .{ .ok = try alloc.dupe(u8, &[_]u8{ 1, 2, 3, 4, 5 }) },
+        .{ .out_of_gas = {} },
+        .{ .panic = {} },
+        .{ .bad_exports = {} },
+        .{ .bad_code = {} },
+        .{ .code_oversize = {} },
     };
 
     for (test_cases) |output| {
@@ -475,8 +448,8 @@ test "AccumulationOperand.Output encode/decode" {
         const reader = fbs.reader();
         const decoded = try AccumulationOperand.Output.decode(.{}, reader, alloc);
         defer {
-            if (decoded == .success) {
-                alloc.free(decoded.success);
+            if (decoded == .ok) {
+                alloc.free(decoded.ok);
             }
         }
 
@@ -484,12 +457,10 @@ test "AccumulationOperand.Output encode/decode" {
         try testing.expectEqual(@as(std.meta.Tag(AccumulationOperand.Output), output), @as(std.meta.Tag(AccumulationOperand.Output), decoded));
 
         switch (output) {
-            .success => |data| {
-                try testing.expectEqualSlices(u8, data, decoded.success);
+            .ok => |data| {
+                try testing.expectEqualSlices(u8, data, decoded.ok);
             },
-            .err => |code| {
-                try testing.expectEqual(code, decoded.err);
-            },
+            else => {},
         }
     }
 }

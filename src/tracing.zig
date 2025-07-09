@@ -113,7 +113,7 @@ const RuntimeTracingConfig = if (tracing_mode == .runtime) struct {
         if (self.config.fetchRemove(scope_name)) |existing| {
             self.allocator.free(existing.key);
         }
-        
+
         const owned_name = try self.allocator.dupe(u8, scope_name);
         try self.config.put(owned_name, level);
     }
@@ -137,44 +137,37 @@ const RuntimeTracingConfig = if (tracing_mode == .runtime) struct {
     }
 } else void;
 
-// Global runtime configuration (only exists in runtime mode)
-var runtime_config: RuntimeTracingConfig = if (tracing_mode == .runtime) 
-    undefined // Will be initialized in runtime.init()
+// Pre-allocated buffer for runtime configuration (only compiled in runtime mode)
+const RUNTIME_BUFFER_SIZE = 4096; // Should be enough for typical use cases
+var runtime_buffer: if (tracing_mode == .runtime) [RUNTIME_BUFFER_SIZE]u8 else void = if (tracing_mode == .runtime) undefined else {};
+var runtime_fba: if (tracing_mode == .runtime) std.heap.FixedBufferAllocator else void = if (tracing_mode == .runtime) 
+    std.heap.FixedBufferAllocator.init(&runtime_buffer)
 else {};
 
-// Track whether runtime tracing has been initialized
-var runtime_initialized: bool = false;
+// Global runtime configuration (only exists in runtime mode)
+var runtime_config: RuntimeTracingConfig = if (tracing_mode == .runtime)
+    RuntimeTracingConfig.init(runtime_fba.allocator())
+else {};
+
 
 // Runtime tracing API (only available in runtime mode)
 pub const runtime = if (tracing_mode == .runtime) struct {
-    pub fn init(allocator: std.mem.Allocator) void {
-        runtime_config = RuntimeTracingConfig.init(allocator);
-        runtime_initialized = true;
-    }
-
-    pub fn deinit() void {
+    /// Reset all runtime configuration
+    pub fn reset() void {
         runtime_config.deinit();
-        runtime_initialized = false;
+        runtime_fba.reset();
+        runtime_config = RuntimeTracingConfig.init(runtime_fba.allocator());
     }
 
     pub fn setScope(scope_name: []const u8, level: LogLevel) !void {
-        if (std.debug.runtime_safety and !runtime_initialized) {
-            std.debug.panic("Runtime tracing used before initialization. Call tracing.runtime.init() first!", .{});
-        }
         try runtime_config.setScope(scope_name, level);
     }
 
     pub fn disableScope(scope_name: []const u8) !void {
-        if (std.debug.runtime_safety and !runtime_initialized) {
-            std.debug.panic("Runtime tracing used before initialization. Call tracing.runtime.init() first!", .{});
-        }
         try runtime_config.setScope(scope_name, null);
     }
 
     pub fn getConfig() std.StringHashMap(?LogLevel) {
-        if (std.debug.runtime_safety and !runtime_initialized) {
-            std.debug.panic("Runtime tracing used before initialization. Call tracing.runtime.init() first!", .{});
-        }
         return runtime_config.config;
     }
 
@@ -183,25 +176,23 @@ pub const runtime = if (tracing_mode == .runtime) struct {
     }
 
     pub fn setDefaultLevel(level: ?LogLevel) void {
-        if (std.debug.runtime_safety and !runtime_initialized) {
-            std.debug.panic("Runtime tracing used before initialization. Call tracing.runtime.init() first!", .{});
-        }
         runtime_config.setDefaultLevel(level);
     }
 
     pub fn getDefaultLevel() ?LogLevel {
-        if (std.debug.runtime_safety and !runtime_initialized) {
-            std.debug.panic("Runtime tracing used before initialization. Call tracing.runtime.init() first!", .{});
-        }
         return runtime_config.getDefaultLevel();
     }
 } else struct {
-    pub fn init(_: std.mem.Allocator) void {}
-    pub fn deinit() void {}
-    pub fn setScope(_: []const u8, _: LogLevel) void {}
-    pub fn disableScope(_: []const u8) void {}
+    pub fn reset() void {}
+    pub fn setScope(_: []const u8, _: LogLevel) !void {}
+    pub fn disableScope(_: []const u8) !void {}
     pub fn setDefaultLevel(_: ?LogLevel) void {}
-    pub fn getDefaultLevel() ?LogLevel { return null; }
+    pub fn getDefaultLevel() ?LogLevel {
+        return null;
+    }
+    pub fn listAvailableScopes() []const ScopeConfig {
+        return &[_]ScopeConfig{};
+    }
 };
 
 threadlocal var current_depth: usize = 0;
@@ -223,7 +214,7 @@ pub const LogLevel = enum {
         return error.InvalidLogLevel;
     }
 
-    pub fn format(self: LogLevel) []const u8 {
+    pub fn formatSymbol(self: LogLevel) []const u8 {
         return switch (self) {
             .trace => "\x1b[90m•", // bright black/gray bullet
             .debug => "\x1b[36m•", // cyan bullet
@@ -283,11 +274,7 @@ pub const TracingScope = struct {
     fn spanRuntime(comptime self: *const Self, operation: @Type(.enum_literal)) SpanUnion {
         // Runtime behavior - check runtime config first, then build config
         if (comptime tracing_mode == .runtime) {
-            // Check if runtime tracing has been initialized (only in debug builds)
-            if (std.debug.runtime_safety and !runtime_initialized) {
-                std.debug.panic("Runtime tracing used before initialization. Call tracing.runtime.init() first!", .{});
-            }
-            
+
             // Check runtime configuration first
             if (runtime_config.config.get(self.name)) |runtime_level| {
                 if (runtime_level == null) {
@@ -429,7 +416,7 @@ pub const Span = struct {
 
         std.debug.print("  ", .{});
 
-        std.debug.print("{s} ", .{level.format()});
+        std.debug.print("{s} ", .{level.formatSymbol()});
         std.debug.print(fmt ++ "\x1b[0m\n", args);
     }
 };

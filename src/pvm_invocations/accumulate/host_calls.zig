@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
+const state_keys = @import("../../state_keys.zig");
 
 const general = @import("../host_calls_general.zig");
 
@@ -47,6 +48,7 @@ pub fn HostCalls(comptime params: Params) type {
             new_service_id: types.ServiceId,
             deferred_transfers: std.ArrayList(DeferredTransfer),
             accumulation_output: ?types.AccumulateRoot,
+            operands: []const @import("../accumulate.zig").AccumulationOperand,
 
             pub fn commit(self: *@This()) !void {
                 try self.context.commit();
@@ -61,6 +63,7 @@ pub fn HostCalls(comptime params: Params) type {
                     .new_service_id = self.new_service_id,
                     .deferred_transfers = try self.deferred_transfers.clone(),
                     .accumulation_output = self.accumulation_output,
+                    .operands = self.operands,
                 };
 
                 return new_context;
@@ -901,6 +904,7 @@ pub fn HostCalls(comptime params: Params) type {
 
             // Try to solicit the preimage
             span.debug("Attempting to solicit preimage", .{});
+
             if (service_account.solicitPreimage(ctx_regular.service_id, hash, @intCast(preimage_size), current_timeslot)) |_| {
                 // Success, preimage solicited
                 span.debug("Preimage solicited successfully: {any}", .{service_account.getPreimageLookup(ctx_regular.service_id, hash, @intCast(preimage_size))});
@@ -1182,7 +1186,7 @@ pub fn HostCalls(comptime params: Params) type {
             const selector = exec_ctx.registers[10]; // Data selector
             const index1 = @as(u32, @intCast(exec_ctx.registers[11])); // Index 1
 
-            span.debug("Host call: fetch selector={d}", .{selector});
+            span.debug("Host call: fetch selector={d} index1={d}", .{ selector, index1 });
             span.debug("Output ptr: 0x{x}, offset: {d}, limit: {d}", .{ output_ptr, offset, limit });
 
             // Determine what data to fetch based on selector
@@ -1210,42 +1214,30 @@ pub fn HostCalls(comptime params: Params) type {
 
                 14 => {
                     // Selector 14: Encoded operand tuples
-                    if (ctx_regular.context.operand_tuples) |operand_tuples| {
-                        const operand_tuples_data = encoding_utils.encodeOperandTuples(ctx_regular.allocator, operand_tuples) catch {
-                            span.err("Failed to encode operand tuples", .{});
-                            exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
-                            return .play;
-                        };
-                        span.debug("Operand tuples encoded successfully, count={d}", .{operand_tuples.len});
-                        data_to_fetch = operand_tuples_data;
-                        needs_cleanup = true;
-                    } else {
-                        span.debug("Operand tuples not available in accumulate context", .{});
+                    const operand_tuples_data = encoding_utils.encodeOperandTuples(ctx_regular.allocator, ctx_regular.operands) catch {
+                        span.err("Failed to encode operand tuples", .{});
                         exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                         return .play;
-                    }
+                    };
+                    span.debug("Operand tuples encoded successfully, count={d}", .{ctx_regular.operands.len});
+                    data_to_fetch = operand_tuples_data;
+                    needs_cleanup = true;
                 },
 
                 15 => {
                     // Selector 15: Specific operand tuple
-                    if (ctx_regular.context.operand_tuples) |operand_tuples| {
-                        if (index1 < operand_tuples.len) {
-                            const operand_tuple = &operand_tuples[index1];
-                            const operand_tuple_data = encoding_utils.encodeOperandTuple(ctx_regular.allocator, operand_tuple) catch {
-                                span.err("Failed to encode operand tuple", .{});
-                                exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
-                                return .play;
-                            };
-                            span.debug("Operand tuple encoded successfully: index={d}", .{index1});
-                            data_to_fetch = operand_tuple_data;
-                            needs_cleanup = true;
-                        } else {
-                            span.debug("Operand tuple index out of bounds: index={d}, count={d}", .{ index1, operand_tuples.len });
+                    if (index1 < ctx_regular.operands.len) {
+                        const operand_tuple = &ctx_regular.operands[index1];
+                        const operand_tuple_data = encoding_utils.encodeOperandTuple(ctx_regular.allocator, operand_tuple) catch {
+                            span.err("Failed to encode operand tuple", .{});
                             exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                             return .play;
-                        }
+                        };
+                        span.debug("Operand tuple encoded successfully: index={d}", .{index1});
+                        data_to_fetch = operand_tuple_data;
+                        needs_cleanup = true;
                     } else {
-                        span.debug("Operand tuples not available in accumulate context", .{});
+                        span.debug("Operand tuple index out of bounds: index={d}, count={d}", .{ index1, ctx_regular.operands.len });
                         exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
                         return .play;
                     }
@@ -1308,7 +1300,16 @@ pub fn HostCalls(comptime params: Params) type {
                 const f = @min(offset, data.len);
                 const l = @min(limit, data.len - f);
 
-                span.debug("Fetching {d} bytes from offset {d}", .{ l, f });
+                span.debug("Fetching {d} bytes from offset {d} from data_to_fetch", .{ l, f });
+
+                // Double check if we have any data to fetch
+                // TODO: double check this in other memory access patterns
+                const v = data[f..][0..l];
+                if (v.len == 0) {
+                    span.debug("Zero len offset requested, returning size: {d}", .{data.len});
+                    exec_ctx.registers[7] = data.len;
+                    return .play;
+                }
 
                 // Write data to memory
                 exec_ctx.memory.writeSlice(@truncate(output_ptr), data[f..][0..l]) catch {
