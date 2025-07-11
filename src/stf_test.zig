@@ -52,6 +52,7 @@ test "sequoia: State transition with sequoia-generated blocks" {
 
         // Perform state transition
         var result = try block_importer.importBlock(current_state, &block);
+        defer result.deinit();
         try result.commit();
 
         // OLD WAY

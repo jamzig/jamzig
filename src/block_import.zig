@@ -34,6 +34,13 @@ pub fn BlockImporter(comptime params: jam_params.Params) type {
                 // Commit the state transition to the heap
                 try self.state_transition.mergePrimeOntoBase();
             }
+
+            pub fn deinit(self: *ImportResult) void {
+                // Deinitialize the state transition
+                self.state_transition.deinitHeap();
+                // Clear the struct to avoid dangling pointers
+                self.* = undefined;
+            }
         };
 
         pub fn init(allocator: std.mem.Allocator) Self {

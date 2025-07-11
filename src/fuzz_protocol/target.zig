@@ -201,14 +201,14 @@ pub const TargetServer = struct {
                 span.debug("Processing ImportBlock", .{});
 
                 // Use unified block importer with validation
-                const result = self.block_importer.importBlock(
+                var result = self.block_importer.importBlock(
                     &self.current_state.?,
                     &block,
                 ) catch |err| {
                     std.debug.print("Failed to import block: {s}. State remains unchanged.\n", .{@errorName(err)});
                     return messages.Message{ .state_root = self.current_state_root.? };
                 };
-                defer result.state_transition.deinitHeap();
+                defer result.deinit();
 
                 span.debug("Block imported successfully, sealed with tickets: {}", .{result.sealed_with_tickets});
 
