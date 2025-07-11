@@ -449,11 +449,6 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 tickets_mark = .{ .tickets = try safrole.ordering.outsideInOrdering(types.TicketBody, self.allocator, self.state.gamma.?.a) };
             }
 
-            const entropy_source = switch (self.state.gamma.?.s) {
-                .tickets => |tickets| try generateEntropySourceTicket(author_keys, tickets[self.block_time.current_slot_in_epoch]),
-                .keys => try generateEntropySourceFallback(author_keys, &self.state.eta.?),
-            };
-
             // TODO: Get eta_prime for this slot
             const eta_current = &self.state.eta.?;
             var eta_prime = self.state.eta.?;
@@ -463,6 +458,11 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 eta_prime[2] = eta_current[1];
                 eta_prime[1] = eta_current[0];
             }
+
+            const entropy_source = switch (self.state.gamma.?.s) {
+                .tickets => |tickets| try generateEntropySourceTicket(author_keys, tickets[self.block_time.current_slot_in_epoch]),
+                .keys => try generateEntropySourceFallback(author_keys, &eta_prime),
+            };
             eta_prime[0] = @import("entropy.zig").update(self.state.eta.?[0], try entropy_source.outputHash());
 
             const tickets = types.TicketsExtrinsic{ .data = &[_]types.TicketEnvelope{} };
