@@ -395,7 +395,7 @@ const BlockSealGenerator = struct {
 const TicketSubmissionManager = struct {
     // Constants for ticket submission probability
     const PROBABILITY_RANGE = 10;
-    const PROBABILITY_THRESHOLD = 3; // 20% chance when random value < 2 out of 10
+    const PROBABILITY_THRESHOLD = 2; // 20% chance when random value < 2 out of 10
 
     const GeneratedTicket = struct {
         envelope: types.TicketEnvelope,
@@ -535,7 +535,14 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                     return .{ true, .{ .tickets = try @import("safrole/ordering.zig").outsideInOrdering(types.TicketBody, self.allocator, self.state.gamma.?.a) } };
                 } else {
                     span.debug("Using keys for gamma_s_prime", .{});
-                    return .{ true, .{ .keys = try self.state.gamma.?.k.getBandersnatchPublicKeys(self.allocator) } };
+                    return .{ true, .{
+                        .keys = try safrole.epoch_handler.entropyBasedKeySelector(
+                            self.allocator,
+                            self.state.eta.?[2],
+                            params.epoch_length,
+                            self.state.kappa.?,
+                        ),
+                    } };
                 }
             }
             span.debug("NOT isConsecutiveEpoch using state gamma_s_prime", .{});
@@ -833,6 +840,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
             // Validate inputs
             if (keys.len != params.epoch_length) {
+                span.err("Invalid key count: expected {d}, got {d}", .{ params.validators_count, keys.len });
                 return error.InvalidKeyCount;
             }
             if (slot_in_epoch >= params.epoch_length) {
