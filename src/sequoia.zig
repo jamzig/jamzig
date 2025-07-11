@@ -521,6 +521,9 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                 },
             };
 
+            // Now we set the ticket extrinsic hash in the header
+            header.extrinsic_hash = try extrinsic.calculateHash(params, self.allocator);
+
             // Assemble complete block
             const block = types.Block{
                 .header = header,
