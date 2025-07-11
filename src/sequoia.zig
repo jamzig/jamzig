@@ -326,7 +326,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         ) !Bandersnatch.Signature {
             const span = trace.span(.generate_entropy_source_ticket);
             defer span.deinit();
-            span.debug("Generating entropy source using fallback method", .{});
+            span.debug("Generating entropy source using ticket method", .{});
 
             // Now sign with our Bandersnatch keypair
             const context = "jam_entropy" ++ ticket.id;
@@ -335,7 +335,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
             span.debug("Generating Bandersnatch signature", .{});
             const entropy_source = try author_keys.bandersnatch_keypair
-                .sign(&[_]u8{}, context);
+                .sign(context, &[_]u8{});
 
             span.debug("Generated entropy source signature", .{});
             span.trace("Entropy source bytes: {any}", .{std.fmt.fmtSliceHexLower(&entropy_source.toBytes())});
@@ -374,7 +374,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             // Generate and return the seal signature
             span.debug("Generating Bandersnatch signature", .{});
             const signature = try author_keys.bandersnatch_keypair
-                .sign(header_unsigned, context);
+                .sign(context, header_unsigned);
 
             span.debug("Generated block seal signature", .{});
             span.trace("Seal signature bytes: {any}", .{std.fmt.fmtSliceHexLower(&signature.toBytes())});
@@ -684,6 +684,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
             // Get ticket for this slot
             const ticket = tickets[slot_in_epoch];
+            span.debug("Selected ticket: {s}", .{std.fmt.fmtSliceHexLower(&ticket.id)});
 
             // Look up the validator who created this ticket
             if (self.ticket_registry_previous.get(ticket.id)) |entry| {

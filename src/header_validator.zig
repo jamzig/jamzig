@@ -403,7 +403,10 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
                 };
 
                 if (!std.mem.eql(u8, &ticket.id, &seal_vrf_output)) {
-                    span.err("Ticket ID mismatch", .{});
+                    span.err("Ticket ID mismatch: Ticket ID={s}, VRF output={s}", .{
+                        std.fmt.fmtSliceHexLower(&ticket.id),
+                        std.fmt.fmtSliceHexLower(&seal_vrf_output),
+                    });
                     return HeaderValidationError.InvalidTicketId;
                 }
 
