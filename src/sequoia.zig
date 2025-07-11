@@ -391,6 +391,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             // Ensure new slot is greater than parent
             // Process epoch transition if needed
             self.block_time = self.block_time.progressSlots(1);
+            self.last_state_root = try self.state.buildStateRoot(self.allocator);
 
             span.debug("Building next block at slot {d} (epoch {d}, slot in epoch {d})", .{
                 self.block_time.current_slot,
@@ -529,7 +530,6 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
             // Update block history
             self.last_header_hash = try block.header.header_hash(params, self.allocator);
-            self.last_state_root = try self.state.buildStateRoot(self.allocator);
 
             span.trace("block:\n{s}", .{types.fmt.format(&block)});
 
