@@ -8,6 +8,8 @@ const jam_params = @import("jam_params.zig");
 const jam_params_format = @import("jam_params_format.zig");
 const build_options = @import("build_options");
 const messages = @import("fuzz_protocol/messages.zig");
+const param_formatter = @import("fuzz_protocol/param_formatter.zig");
+const trace_config = @import("fuzz_protocol/trace_config.zig");
 
 fn showHelp(params: anytype) !void {
     std.debug.print(
@@ -78,32 +80,7 @@ pub fn main() !void {
     }
 
     // Handle parameter dumping
-    if (res.args.@"dump-params" != 0) {
-        const format = res.args.format orelse "text";
-        const params_type = if (@hasDecl(build_options, "conformance_params") and build_options.conformance_params == .tiny) "TINY" else "FULL";
-
-        const stdout = std.io.getStdOut().writer();
-
-        if (std.mem.eql(u8, format, "json")) {
-            jam_params_format.formatParamsJson(messages.FUZZ_PARAMS, params_type, stdout) catch |err| {
-                // Handle BrokenPipe error gracefully (e.g., when piping to head)
-                if (err == error.BrokenPipe) {
-                    std.process.exit(0);
-                }
-                return err;
-            };
-        } else if (std.mem.eql(u8, format, "text")) {
-            jam_params_format.formatParamsText(messages.FUZZ_PARAMS, params_type, stdout) catch |err| {
-                // Handle BrokenPipe error gracefully (e.g., when piping to head)
-                if (err == error.BrokenPipe) {
-                    std.process.exit(0);
-                }
-                return err;
-            };
-        } else {
-            std.debug.print("Error: Invalid format '{s}'. Use 'json' or 'text'.\n", .{format});
-            std.process.exit(1);
-        }
+    if (try param_formatter.handleParamDump(res.args.@"dump-params" != 0, res.args.format)) {
         return;
     }
 
@@ -111,47 +88,13 @@ pub fn main() !void {
     const socket_path = res.args.socket orelse "/tmp/jam_conformance.sock";
     const verbose = res.args.verbose != 0;
 
-    // Initialize runtime tracing if any trace options are provided
-    if (res.args.@"trace-all" != null or res.args.trace != null or res.args.@"trace-quiet" != null) {
-
-        // Apply default level first if specified
-        if (res.args.@"trace-all") |default_level_str| {
-            const default_level = tracing.LogLevel.fromString(default_level_str) catch {
-                std.debug.print("Error: Invalid log level '{s}'\n", .{default_level_str});
-                std.debug.print("Valid levels: trace, debug, info, warn, err\n", .{});
-                return error.InvalidLogLevel;
-            };
-            tracing.runtime.setDefaultLevel(default_level);
-            std.debug.print("Set default trace level to: {s}\n", .{default_level_str});
-        }
-
-        // Apply quiet scopes (set them to info level)
-        if (res.args.@"trace-quiet") |quiet_scopes| {
-            try applyQuietScopes(quiet_scopes);
-        }
-
-        // Then apply specific overrides if provided (these can override quiet scopes)
-        if (res.args.trace) |trace_config| {
-            try applyTraceConfig(trace_config);
-        }
-    }
-
-    try tracing.runtime.setScope("codec", .info); // Keep codec quiet by default
-    if (res.args.verbose == 1) {
-        try tracing.runtime.setScope("fuzz_protocol", .debug);
-        try tracing.runtime.setScope("jam_conformance_target", .debug);
-        try tracing.runtime.setScope("header_validator", .debug);
-    } else if (res.args.verbose == 2) {
-        try tracing.runtime.setScope("fuzz_protocol", .trace);
-        try tracing.runtime.setScope("jam_conformance_target", .trace);
-        try tracing.runtime.setScope("header_validator", .trace);
-    } else if (res.args.verbose == 3) {
-        tracing.runtime.setDefaultLevel(.debug);
-    } else if (res.args.verbose == 4) {
-        tracing.runtime.setDefaultLevel(.trace);
-    } else if (res.args.verbose == 5) {
-        try tracing.runtime.setScope("codec", .debug);
-    }
+    // Configure tracing
+    try trace_config.configureTracing(.{
+        .verbose = res.args.verbose,
+        .trace_all = res.args.@"trace-all",
+        .trace = res.args.trace,
+        .trace_quiet = res.args.@"trace-quiet",
+    });
 
     std.debug.print("JAM Conformance Target Server\n", .{});
     std.debug.print("=============================\n", .{});
@@ -165,11 +108,19 @@ pub fn main() !void {
     defer server.deinit();
 
     // Setup signal handler for graceful shutdown
+    // Note: Signal handlers must use global state as they can't capture context
+    const shutdown_requested = struct {
+        var server_ref: ?*TargetServer = null;
+    };
+    shutdown_requested.server_ref = &server;
+    
     var sigaction = std.posix.Sigaction{
         .handler = .{ .handler = struct {
             fn handler(_: c_int) callconv(.C) void {
-                std.debug.print("\nReceived signal, shutting down...\n", .{});
-                std.process.exit(0);
+                // Signal handlers must be async-signal-safe
+                if (shutdown_requested.server_ref) |srv| {
+                    srv.shutdown();
+                }
             }
         }.handler },
         .mask = std.posix.empty_sigset,
@@ -187,52 +138,3 @@ pub fn main() !void {
     try server.start();
 }
 
-/// Apply quiet scopes by setting them to info level
-fn applyQuietScopes(quiet_scopes_str: []const u8) !void {
-    var iter = std.mem.splitSequence(u8, quiet_scopes_str, ",");
-    var count: usize = 0;
-
-    while (iter.next()) |scope_name| {
-        const trimmed = std.mem.trim(u8, scope_name, " \t");
-        if (trimmed.len == 0) continue;
-
-        tracing.runtime.setScope(trimmed, .info) catch {
-            std.debug.print("Warning: Failed to set quiet scope '{s}' to info level\n", .{trimmed});
-        };
-        count += 1;
-    }
-
-    if (count > 0) {
-        std.debug.print("Set {d} scope(s) to info level: {s}\n", .{ count, quiet_scopes_str });
-    }
-}
-
-/// Parse and apply trace configuration string
-fn applyTraceConfig(config_str: []const u8) !void {
-    // Parse config string like "pvm=debug,net=info"
-    var iter = std.mem.splitSequence(u8, config_str, ",");
-    while (iter.next()) |scope_config| {
-        if (scope_config.len == 0) continue;
-
-        if (std.mem.indexOf(u8, scope_config, "=")) |equals_pos| {
-            const scope_name = scope_config[0..equals_pos];
-            const level_str = scope_config[equals_pos + 1 ..];
-
-            // Parse level
-            const level = tracing.LogLevel.fromString(level_str) catch {
-                std.debug.print("Warning: Invalid log level '{s}' for scope '{s}'\n", .{ level_str, scope_name });
-                continue;
-            };
-
-            // Apply configuration
-            tracing.runtime.setScope(scope_name, level) catch {
-                std.debug.print("Warning: Failed to set tracing for scope '{s}'\n", .{scope_name});
-            };
-        } else {
-            // Just scope name, default to debug
-            tracing.runtime.setScope(scope_config, .debug) catch {
-                std.debug.print("Warning: Failed to set tracing for scope '{s}'\n", .{scope_config});
-            };
-        }
-    }
-}

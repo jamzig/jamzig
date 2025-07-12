@@ -82,7 +82,7 @@ pub fn jamStateToFuzzState(
     const root = try dict.buildStateRoot(allocator);
 
     // Convert to KeyValue array
-    const kv_array = try dict.toKeyValueArray();
+    const kv_array = try dict.toKeyValueArrayOwned();
     defer allocator.free(kv_array);
 
     // Convert to messages.State format using capacity-hinted builder

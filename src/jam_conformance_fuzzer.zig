@@ -8,6 +8,8 @@ const jam_params = @import("jam_params.zig");
 const jam_params_format = @import("jam_params_format.zig");
 const build_options = @import("build_options");
 const messages = @import("fuzz_protocol/messages.zig");
+const param_formatter = @import("fuzz_protocol/param_formatter.zig");
+const trace_config = @import("fuzz_protocol/trace_config.zig");
 
 const trace = @import("tracing.zig").scoped(.jam_conformance_fuzzer);
 
@@ -57,50 +59,16 @@ pub fn main() !void {
         return;
     }
 
-    try tracing.runtime.setScope("codec", .info); // Keep codec quiet by default
-    if (res.args.verbose == 1) {
-        try tracing.runtime.setScope("fuzz_protocol", .debug);
-        try tracing.runtime.setScope("jam_conformance_fuzzer", .debug);
-        try tracing.runtime.setScope("header_validator", .debug);
-    } else if (res.args.verbose == 2) {
-        try tracing.runtime.setScope("fuzz_protocol", .trace);
-        try tracing.runtime.setScope("jam_conformance_fuzzer", .trace);
-        try tracing.runtime.setScope("header_validator", .trace);
-    } else if (res.args.verbose == 3) {
-        tracing.runtime.setDefaultLevel(.debug);
-    } else if (res.args.verbose == 4) {
-        tracing.runtime.setDefaultLevel(.trace);
-    } else if (res.args.verbose == 5) {
-        try tracing.runtime.setScope("codec", .debug);
-    }
+    // Configure tracing
+    try trace_config.configureTracing(.{
+        .verbose = res.args.verbose,
+        .trace_all = null,
+        .trace = null,
+        .trace_quiet = null,
+    });
 
     // Handle parameter dumping
-    if (res.args.@"dump-params" != 0) {
-        const format = res.args.format orelse "text";
-        const params_type = if (@hasDecl(build_options, "conformance_params") and build_options.conformance_params == .tiny) "TINY" else "FULL";
-
-        const stdout = std.io.getStdOut().writer();
-
-        if (std.mem.eql(u8, format, "json")) {
-            jam_params_format.formatParamsJson(messages.FUZZ_PARAMS, params_type, stdout) catch |err| {
-                // Handle BrokenPipe error gracefully (e.g., when piping to head)
-                if (err == error.BrokenPipe) {
-                    std.process.exit(0);
-                }
-                return err;
-            };
-        } else if (std.mem.eql(u8, format, "text")) {
-            jam_params_format.formatParamsText(messages.FUZZ_PARAMS, params_type, stdout) catch |err| {
-                // Handle BrokenPipe error gracefully (e.g., when piping to head)
-                if (err == error.BrokenPipe) {
-                    std.process.exit(0);
-                }
-                return err;
-            };
-        } else {
-            std.debug.print("Error: Invalid format '{s}'. Use 'json' or 'text'.\n", .{format});
-            std.process.exit(1);
-        }
+    if (try param_formatter.handleParamDump(res.args.@"dump-params" != 0, res.args.format)) {
         return;
     }
 
@@ -130,11 +98,17 @@ pub fn main() !void {
     std.debug.print("\n", .{});
 
     // Setup signal handler for graceful shutdown
+    // Note: Using a global atomic is necessary for signal handlers which can't capture context
+    const shutdown_requested = struct {
+        var atomic: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+    };
+    
     var sigaction = std.posix.Sigaction{
         .handler = .{ .handler = struct {
             fn handler(_: c_int) callconv(.C) void {
-                std.debug.print("\nReceived signal, shutting down...\n", .{});
-                std.process.exit(0);
+                // Signal handlers must be async-signal-safe
+                // Only set atomic flag, don't do I/O or complex operations
+                shutdown_requested.atomic.store(true, .monotonic);
             }
         }.handler },
         .mask = std.posix.empty_sigset,
@@ -166,9 +140,20 @@ pub fn main() !void {
         break :blk try fuzzer.runTraceMode(dir);
     } else blk: {
         std.debug.print("Starting conformance testing with {d} blocks...\n", .{num_blocks});
-        break :blk try fuzzer.runFuzzCycle(num_blocks);
+        // Pass shutdown check function
+        const check_shutdown = struct {
+            fn check() bool {
+                return shutdown_requested.atomic.load(.monotonic);
+            }
+        }.check;
+        break :blk try fuzzer.runFuzzCycleWithShutdown(num_blocks, check_shutdown);
     };
     defer result.deinit(allocator);
+    
+    // Check if we were interrupted
+    if (shutdown_requested.atomic.load(.monotonic)) {
+        std.debug.print("\nReceived signal, shutting down gracefully...\n", .{});
+    }
 
     // End session
     fuzzer.endSession();

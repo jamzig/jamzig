@@ -68,15 +68,27 @@ pub const Fuzzer = struct {
 
         // Create fuzzer struct first to ensure stable addresses
         const fuzzer = try allocator.create(Fuzzer);
-        fuzzer.* = undefined;
-        fuzzer.socket_path = socket_path;
-        fuzzer.allocator = allocator;
-        fuzzer.prng = std.Random.DefaultPrng.init(seed);
+        errdefer allocator.destroy(fuzzer);
+
+        // Initialize fields to safe defaults
+        fuzzer.* = .{
+            .allocator = allocator,
+            .socket_path = socket_path,
+            .prng = std.Random.DefaultPrng.init(seed),
+            .rng = undefined,
+            .seed = seed,
+            .block_builder = undefined,
+            .block_importer = undefined,
+            .current_jam_state = undefined,
+            .latest_block = null,
+            .socket = null,
+            .state = .initial,
+        };
 
         // Initialize the rng from the prng stored in fuzzer
         fuzzer.rng = fuzzer.prng.random();
-        //
-        // // Create a block builder using the stable rng
+
+        // Create a block builder using the stable rng
         var config = try sequoia.GenesisConfig(messages.FUZZ_PARAMS).buildWithRng(allocator, &fuzzer.rng);
         errdefer config.deinit(allocator);
 
@@ -84,19 +96,18 @@ pub const Fuzzer = struct {
         errdefer fuzzer.block_builder.deinit();
 
         fuzzer.block_importer = block_import.BlockImporter(messages.FUZZ_PARAMS).init(allocator);
-
         fuzzer.current_jam_state = &fuzzer.block_builder.state;
 
-        // // Process the first (genesis) block to get proper state
-        var first_block = try fuzzer.block_builder.buildNextBlock();
-        errdefer first_block.deinit(allocator);
+        // Process the first (genesis) block to get proper state
+        var genesis_block = try fuzzer.block_builder.buildNextBlock();
+        errdefer genesis_block.deinit(allocator);
 
-        fuzzer.latest_block = first_block;
+        fuzzer.latest_block = genesis_block;
 
         // Process the genesis block with block importer to get proper header and state
         var import_result = try fuzzer.block_importer.importBlock(
             fuzzer.current_jam_state,
-            &first_block,
+            &genesis_block,
         );
         defer import_result.deinit();
 
@@ -112,9 +123,12 @@ pub const Fuzzer = struct {
         const span = trace.span(.fuzzer_deinit);
         defer span.deinit();
 
-        // // Clean up JAM components
+        // Ensure socket is closed before destroying
+        self.disconnect();
+
+        // Clean up JAM components
         self.block_builder.deinit();
-        //
+
         if (self.latest_block) |*b| b.deinit(self.allocator);
 
         const allocator = self.allocator;
@@ -136,9 +150,16 @@ pub const Fuzzer = struct {
 
     /// Disconnect from target
     pub fn disconnect(self: *Fuzzer) void {
+        const span = trace.span(.disconnect_target);
+        defer span.deinit();
+
         if (self.socket) |socket| {
             socket.close();
             self.socket = null;
+            self.state = .connected; // Reset state to connected
+            span.debug("Disconnected from target", .{});
+        } else {
+            span.debug("No active connection to disconnect", .{});
         }
     }
 
@@ -291,6 +312,11 @@ pub const Fuzzer = struct {
 
     /// Run a complete fuzzing cycle with the specified number of blocks
     pub fn runFuzzCycle(self: *Fuzzer, num_blocks: usize) !report.FuzzResult {
+        return self.runFuzzCycleWithShutdown(num_blocks, null);
+    }
+
+    /// Run a complete fuzzing cycle with optional shutdown check
+    pub fn runFuzzCycleWithShutdown(self: *Fuzzer, num_blocks: usize, should_shutdown: ?*const fn () bool) !report.FuzzResult {
         const span = trace.span(.fuzzer_run_cycle);
         defer span.deinit();
         span.debug("Starting fuzz cycle with {d} blocks", .{num_blocks});
@@ -323,13 +349,31 @@ pub const Fuzzer = struct {
 
         // Process blocks
         for (0..num_blocks) |block_num| {
+            // Check for shutdown signal
+            if (should_shutdown) |check_fn| {
+                if (check_fn()) {
+                    span.debug("Shutdown requested, stopping at block {d}", .{block_num});
+                    return report.FuzzResult{
+                        .seed = self.seed,
+                        .blocks_processed = block_num,
+                        .mismatch = null,
+                        .success = true, // Clean shutdown is considered success
+                        .err = null,
+                    };
+                }
+            }
+
             const block_span = span.child(.process_block);
             defer block_span.deinit();
 
             block_span.debug("Processing block {d}/{d}", .{ block_num + 1, num_blocks });
 
+            // Generate next block
+            var block = try self.block_builder.buildNextBlock();
+            errdefer block.deinit(self.allocator);
+
             // Send to target
-            const reported_target_root = self.sendBlock(self.latest_block.?) catch |err| {
+            const reported_target_root = self.sendBlock(block) catch |err| {
                 block_span.err("Error sending block to target: {s}", .{@errorName(err)});
 
                 // Return partial result with the error
@@ -353,9 +397,6 @@ pub const Fuzzer = struct {
 
             // Scope for block generation and ownership transfer
             {
-                // Generate next block
-                var block = try self.block_builder.buildNextBlock();
-                errdefer block.deinit(self.allocator);
 
                 // Process locally
                 local_root = try self.processBlockLocally(block);
