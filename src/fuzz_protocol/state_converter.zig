@@ -105,7 +105,7 @@ pub fn dictionaryToFuzzState(
     dict: *const state_dictionary.MerklizationDictionary,
 ) !messages.State {
     // Convert to KeyValue array
-    const kv_array = try dict.toKeyValueArray();
+    const kv_array = try dict.toKeyValueArrayOwned();
     defer allocator.free(kv_array);
 
     // Convert to messages.State format

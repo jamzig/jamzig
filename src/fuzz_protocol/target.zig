@@ -74,10 +74,9 @@ pub const TargetServer = struct {
         var server_socket = try address.listen(.{});
         defer server_socket.deinit();
 
-        span.debug("Server bound and listening on Unix socket", .{});
-
         // Accept connections loop
         while (true) {
+            span.debug("Server bound and listening on Unix socket", .{});
             const connection = server_socket.accept() catch |err| {
                 span.err("Failed to accept connection: {s}", .{@errorName(err)});
                 continue;
@@ -89,7 +88,7 @@ pub const TargetServer = struct {
             self.handleConnection(connection.stream) catch |err| {
                 if (err == error.UnexpectedEndOfStream) {
                     span.debug("Connection closed by server", .{});
-                    break; // Just skip this connection
+                    // break; // Just skip this connection
 
                 }
                 span.err("Error handling connection: {s}", .{@errorName(err)});
@@ -199,6 +198,7 @@ pub const TargetServer = struct {
                 if (self.server_state != .ready) return error.StateNotReady;
 
                 span.debug("Processing ImportBlock", .{});
+                span.trace("{}", .{types.fmt.format(block)});
 
                 // Use unified block importer with validation
                 var result = self.block_importer.importBlock(

@@ -37,6 +37,7 @@ pub fn main() !void {
         \\-o, --output <str>     Output report file (optional, prints to stdout if not specified)
         \\--dump-params          Dump JAM protocol parameters and exit
         \\--format <str>         Output format for parameter dump: json or text (default: text)
+        \\--trace-dir <str>      Directory containing W3F format traces to replay
     );
 
     var diag = clap.Diagnostic{};
@@ -56,19 +57,19 @@ pub fn main() !void {
         return;
     }
 
-    if (res.args.verbose != 0) {
+    try tracing.runtime.setScope("codec", .info); // Keep codec quiet by default
+    if (res.args.verbose == 1) {
         try tracing.runtime.setScope("fuzz_protocol", .debug);
         try tracing.runtime.setScope("jam_conformance_fuzzer", .debug);
-
-        if (res.args.verbose > 1) {
-            try tracing.runtime.setScope("codec", .debug);
-        }
-        if (res.args.verbose > 2) {
-            tracing.runtime.setDefaultLevel(.debug);
-        }
-        if (res.args.verbose > 2) {
-            tracing.runtime.setDefaultLevel(.trace);
-        }
+    } else if (res.args.verbose == 2) {
+        try tracing.runtime.setScope("fuzz_protocol", .trace);
+        try tracing.runtime.setScope("jam_conformance_fuzzer", .trace);
+    } else if (res.args.verbose == 3) {
+        tracing.runtime.setDefaultLevel(.debug);
+    } else if (res.args.verbose == 4) {
+        tracing.runtime.setDefaultLevel(.trace);
+    } else if (res.args.verbose == 5) {
+        try tracing.runtime.setScope("codec", .debug);
     }
 
     // Handle parameter dumping
@@ -106,13 +107,19 @@ pub fn main() !void {
     const seed = res.args.seed orelse @as(u64, @intCast(std.time.timestamp()));
     const num_blocks = res.args.blocks orelse 100;
     const output_file = res.args.output;
+    const trace_dir = res.args.@"trace-dir";
 
     // Print configuration
     std.debug.print("JAM Conformance Fuzzer\n", .{});
     std.debug.print("======================\n", .{});
     std.debug.print("Socket path: {s}\n", .{socket_path});
-    std.debug.print("Seed: {d}\n", .{seed});
-    std.debug.print("Blocks to process: {d}\n", .{num_blocks});
+    if (trace_dir) |dir| {
+        std.debug.print("Trace directory: {s}\n", .{dir});
+        std.debug.print("Trace format: W3F\n", .{});
+    } else {
+        std.debug.print("Seed: {d}\n", .{seed});
+        std.debug.print("Blocks to process: {d}\n", .{num_blocks});
+    }
     if (output_file) |f| {
         std.debug.print("Output file: {s}\n", .{f});
     } else {
@@ -143,9 +150,7 @@ pub fn main() !void {
 
     // Connect to target
     fuzzer.connectToTarget() catch |err| {
-        std.debug.print("Error: Failed to connect to target: {s}\n", .{@errorName(err)});
-        std.debug.print("\nMake sure the target server is running:\n", .{});
-        std.debug.print("  ./zig-out/bin/jam_conformance_target --socket {s}\n", .{socket_path});
+        std.debug.print("Error: Failed to connect to target at {s}: {s}\n", .{ socket_path, @errorName(err) });
         return err;
     };
 
@@ -153,9 +158,14 @@ pub fn main() !void {
     try fuzzer.performHandshake();
     std.debug.print("Handshake completed successfully\n\n", .{});
 
-    // Run fuzzing cycle
-    std.debug.print("Starting conformance testing with {d} blocks...\n", .{num_blocks});
-    var result = try fuzzer.runFuzzCycle(num_blocks);
+    // Run fuzzing cycle or trace mode
+    var result = if (trace_dir) |dir| blk: {
+        std.debug.print("Starting trace-based conformance testing from: {s}\n", .{dir});
+        break :blk try fuzzer.runTraceMode(dir);
+    } else blk: {
+        std.debug.print("Starting conformance testing with {d} blocks...\n", .{num_blocks});
+        break :blk try fuzzer.runFuzzCycle(num_blocks);
+    };
     defer result.deinit(allocator);
 
     // End session
@@ -177,7 +187,11 @@ pub fn main() !void {
 
     // Print summary
     if (result.isSuccess()) {
-        std.debug.print("\n✓ Conformance test PASSED - All {d} blocks processed successfully\n", .{num_blocks});
+        if (trace_dir) |_| {
+            std.debug.print("\n✓ Conformance test PASSED - All traces processed successfully\n", .{});
+        } else {
+            std.debug.print("\n✓ Conformance test PASSED - All {d} blocks processed successfully\n", .{num_blocks});
+        }
         std.process.exit(0);
     } else {
         std.debug.print("\n✗ Conformance test FAILED - State mismatch detected\n", .{});

@@ -10,6 +10,10 @@ const shared = @import("tests/shared.zig");
 const report = @import("report.zig");
 const version = @import("version.zig");
 
+const jamtestnet = @import("../jamtestnet/parsers.zig");
+const state_transitions = @import("../jamtestnet/state_transitions.zig");
+const state_dict_reconstruct = @import("../state_dictionary/reconstruct.zig");
+
 const sequoia = @import("../sequoia.zig");
 const types = @import("../types.zig");
 const block_import = @import("../block_import.zig");
@@ -416,6 +420,136 @@ pub const Fuzzer = struct {
             .mismatch = null,
             .success = true,
         };
+    }
+
+    /// Run trace mode - replay W3F format traces from a directory
+    pub fn runTraceMode(self: *Fuzzer, trace_dir: []const u8) !report.FuzzResult {
+        const span = trace.span(.fuzzer_run_trace_mode);
+        defer span.deinit();
+        span.debug("Starting trace mode from directory: {s}", .{trace_dir});
+
+        // Create W3F loader directly
+        const w3f_loader = jamtestnet.w3f.Loader(messages.FUZZ_PARAMS){};
+        const loader = w3f_loader.loader();
+
+        // Collect state transitions from directory
+        var transitions = try state_transitions.collectStateTransitions(trace_dir, self.allocator);
+        defer transitions.deinit(self.allocator);
+
+        // Filter transitions to only keep valid format (digits + .bin)
+        var valid_transitions = std.ArrayList(state_transitions.StateTransitionPair).init(self.allocator);
+        defer valid_transitions.deinit();
+
+        for (transitions.items()) |transition| {
+            // Check if filename matches pattern: digits_digits.bin
+            const name = transition.bin.name;
+            if (std.mem.endsWith(u8, name, ".bin")) // exclude genesis.bin
+            {
+                // Verify it contains only digits and underscore before .bin
+                const basename = name[0 .. name.len - 4];
+                var valid = true;
+                for (basename) |c| {
+                    if (!std.ascii.isDigit(c)) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (valid) {
+                    try valid_transitions.append(transition);
+                }
+            }
+        }
+
+        span.debug("Found {d} valid state transitions", .{valid_transitions.items.len});
+
+        if (valid_transitions.items.len == 0) {
+            // REFACTOR: explain the format of the expected traces
+            return error.NoValidTransitions;
+        }
+
+        // Initialize result
+        var result = report.FuzzResult{
+            .seed = 0, // No seed for trace mode
+            .blocks_processed = 0,
+            .mismatch = null,
+            .success = true,
+        };
+        errdefer result.deinit(self.allocator);
+
+        // Process first transition with SetState
+        {
+            const first_transition = valid_transitions.items[0];
+            span.debug("Processing first transition for SetState: {s}", .{first_transition.bin.name});
+
+            // Load the state transition
+            var state_transition = try loader.loadTestVector(self.allocator, first_transition.bin.path);
+            defer state_transition.deinit(self.allocator);
+
+            // Get the block header
+            var block = state_transition.block();
+            defer block.deinit(self.allocator);
+
+            // Convert pre-state dictionary directly to fuzz format
+            var pre_state_dict = try state_transition.preStateAsMerklizationDict(self.allocator);
+            defer pre_state_dict.deinit();
+
+            var fuzz_state = try state_converter.dictionaryToFuzzState(self.allocator, &pre_state_dict);
+            defer fuzz_state.deinit(self.allocator);
+
+            // Send state to target
+            const target_state_root = try self.setState(block.header, fuzz_state);
+
+            // Verify pre-state root matches
+            const pre_state_root = state_transition.preStateRoot();
+
+            if (!std.mem.eql(u8, &pre_state_root, &target_state_root)) {
+                span.err("Initial state root mismatch at trace {s}", .{first_transition.bin.name});
+                result.mismatch = report.Mismatch{
+                    .block_number = block.header.slot,
+                    .block = try block.deepClone(self.allocator),
+                    .reported_state_root = target_state_root,
+                };
+                result.success = false;
+                return result;
+            }
+
+            span.debug("Initial state set successfully and confirmed on target", .{});
+        }
+
+        // Process remaining transitions by sending blocks
+        for (valid_transitions.items, 0..) |transition, i| {
+            span.debug("Processing block {d}: {s}", .{ i, transition.bin.name });
+
+            // Load the state transition
+            var state_transition = try loader.loadTestVector(self.allocator, transition.bin.path);
+            defer state_transition.deinit(self.allocator);
+
+            // Get the block
+            const block = state_transition.block();
+
+            // Calculate expected state root
+            const expected_state_root = state_transition.postStateRoot();
+
+            // Send block to target
+            const target_state_root_after = try self.sendBlock(block);
+
+            // Compare results
+            if (!std.mem.eql(u8, &expected_state_root, &target_state_root_after)) {
+                span.err("Post-state root mismatch at trace {s}", .{transition.bin.name});
+                result.mismatch = report.Mismatch{
+                    .block_number = block.header.slot,
+                    .block = try block.deepClone(self.allocator),
+                    .reported_state_root = target_state_root_after,
+                };
+                result.success = false;
+                break;
+            }
+
+            span.debug("Trace {s} passed", .{transition.bin.name});
+            result.blocks_processed += 1;
+        }
+
+        return result;
     }
 
     pub fn endSession(self: *Fuzzer) void {
