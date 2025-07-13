@@ -55,6 +55,7 @@ pub fn main() !void {
         \\-h, --help             Display this help and exit.
         \\-s, --socket <str>     Unix socket path to listen on (default: /tmp/jam_conformance.sock)
         \\-v, --verbose          Enable verbose output (can be repeated up to 5 times)
+        \\--exit-on-disconnect   Exit server when client disconnects (default: keep listening)
         \\--dump-params          Dump JAM protocol parameters and exit
         \\--format <str>         Output format for parameter dump: json or text (default: text)
     );
@@ -84,6 +85,7 @@ pub fn main() !void {
     // Extract configuration
     const socket_path = res.args.socket orelse "/tmp/jam_conformance.sock";
     const verbose = res.args.verbose != 0;
+    const exit_on_disconnect = res.args.@"exit-on-disconnect" != 0;
 
     // Configure tracing
     try trace_config.configureTracing(.{
@@ -99,9 +101,13 @@ pub fn main() !void {
     if (verbose) {
         std.debug.print("Verbose mode: enabled\n", .{});
     }
+    if (exit_on_disconnect) {
+        std.debug.print("Exit on disconnect: enabled\n", .{});
+    }
     std.debug.print("\n", .{});
 
-    var server = try TargetServer.init(allocator, socket_path, .restart_on_disconnect);
+    const restart_behavior: RestartBehavior = if (exit_on_disconnect) .exit_on_disconnect else .restart_on_disconnect;
+    var server = try TargetServer.init(allocator, socket_path, restart_behavior);
     defer server.deinit();
 
     // Setup signal handler for graceful shutdown

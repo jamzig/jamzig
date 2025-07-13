@@ -256,7 +256,7 @@ trap cleanup EXIT INT TERM
 # Start the target server in background
 echo "Starting target server..."
  
-$TARGET_BIN $VERBOSE_FLAGS --socket "$SOCKET_PATH" &
+$TARGET_BIN $VERBOSE_FLAGS --socket "$SOCKET_PATH" --exit-on-disconnect &
 TARGET_PID=$!
 
 # Wait for target to be ready

@@ -79,6 +79,9 @@ You can also run the components separately:
 
    # With trace level output (very verbose)
    ./tiny/linux/x86_64/jam_conformance_target --socket /tmp/jam_conformance.sock -v -v -v -v
+
+   # Exit after client disconnects (useful for single-run tests)
+   ./tiny/linux/x86_64/jam_conformance_target --socket /tmp/jam_conformance.sock --exit-on-disconnect
    ```
 
 2. **Run the fuzzer:**
@@ -119,6 +122,7 @@ You can also run the components separately:
 - `-h, --help` - Display help and exit
 - `-s, --socket <path>` - Unix socket path to listen on (default: /tmp/jam_conformance.sock)
 - `-v, --verbose` - Enable verbose output (can be repeated up to 5 times)
+- `--exit-on-disconnect` - Exit server when client disconnects (default: keep listening)
 - `--dump-params` - Dump JAM protocol parameters and exit
 - `--format <format>` - Output format for parameter dump: json or text (default: text)
 
