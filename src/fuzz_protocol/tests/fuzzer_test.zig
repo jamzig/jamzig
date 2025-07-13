@@ -5,6 +5,7 @@ const net = std.net;
 const jam_params = @import("../../jam_params.zig");
 
 const FuzzTargetInThread = @import("../target_manager.zig").FuzzTargetInThread;
+const RestartBehavior = @import("../target.zig").RestartBehavior;
 
 const Fuzzer = @import("../fuzzer.zig").Fuzzer;
 const messages = @import("../messages.zig");
@@ -40,7 +41,7 @@ test "fuzzer_basic_cycle" {
     const seed: u64 = 54321;
 
     // Start the target server in the background
-    var target_manager = FuzzTargetInThread.init(allocator, socket_path);
+    var target_manager = FuzzTargetInThread.init(allocator, socket_path, .exit_on_disconnect);
     defer target_manager.join();
 
     // Start the fuzz target

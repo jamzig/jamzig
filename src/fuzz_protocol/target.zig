@@ -13,6 +13,14 @@ const block_import = @import("../block_import.zig");
 
 const trace = @import("../tracing.zig").scoped(.fuzz_protocol);
 
+/// Server restart behavior after client disconnect
+pub const RestartBehavior = enum {
+    /// Exit the server after client disconnects
+    exit_on_disconnect,
+    /// Restart and wait for new connection after client disconnects
+    restart_on_disconnect,
+};
+
 /// Server state for the fuzz protocol target
 pub const ServerState = enum {
     /// Initial state, no connection established
@@ -37,17 +45,18 @@ pub const TargetServer = struct {
 
     // Block importer
     block_importer: block_import.BlockImporter(messages.FUZZ_PARAMS),
-    
+
     // Server management
-    should_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    restart_behavior: RestartBehavior = .restart_on_disconnect,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, socket_path: []const u8) !Self {
+    pub fn init(allocator: std.mem.Allocator, socket_path: []const u8, restart_behavior: RestartBehavior) !Self {
         return Self{
             .allocator = allocator,
             .socket_path = socket_path,
             .block_importer = block_import.BlockImporter(messages.FUZZ_PARAMS).init(allocator),
+            .restart_behavior = restart_behavior,
         };
     }
 
@@ -68,7 +77,6 @@ pub const TargetServer = struct {
 
     /// Request server shutdown
     pub fn shutdown(self: *Self) void {
-        self.should_shutdown.store(true, .monotonic);
         self.server_state = .shutting_down;
     }
 
@@ -91,13 +99,13 @@ pub const TargetServer = struct {
         defer server_socket.deinit();
 
         // Accept connections loop
-        while (!self.should_shutdown.load(.monotonic)) {
+        while (true) {
             span.debug("Server bound and listening on Unix socket", .{});
-            
-            // Set a timeout for accept to allow periodic shutdown checks
+
+            // TODO: Set a timeout for accept to allow periodic shutdown checks
             // Note: Unix sockets don't support timeouts directly, so we'll accept this limitation
             const connection = server_socket.accept() catch |err| {
-                if (self.should_shutdown.load(.monotonic)) {
+                if (self.server_state == .shutting_down) {
                     span.debug("Server shutting down", .{});
                     break;
                 }
@@ -111,7 +119,7 @@ pub const TargetServer = struct {
             self.handleConnection(connection.stream) catch |err| {
                 const inner_span = trace.span(.handle_error);
                 defer inner_span.deinit();
-                
+
                 switch (err) {
                     error.EndOfStream, error.UnexpectedEndOfStream => {
                         inner_span.debug("Connection closed by client", .{});
@@ -128,6 +136,12 @@ pub const TargetServer = struct {
             // Ensure connection is closed properly
             connection.stream.close();
             span.debug("Connection closed", .{});
+
+            // Check if we should restart or exit after disconnect
+            if (self.restart_behavior == .exit_on_disconnect) {
+                span.debug("restart_behavior is exit_on_disconnect, exiting server loop", .{});
+                break;
+            }
         }
     }
 

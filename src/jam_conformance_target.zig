@@ -2,7 +2,9 @@ const std = @import("std");
 const clap = @import("clap");
 const tracing = @import("tracing.zig");
 
-const TargetServer = @import("fuzz_protocol/target.zig").TargetServer;
+const target = @import("fuzz_protocol/target.zig");
+const TargetServer = target.TargetServer;
+const RestartBehavior = target.RestartBehavior;
 const trace = @import("tracing.zig").scoped(.jam_conformance_target);
 const jam_params = @import("jam_params.zig");
 const jam_params_format = @import("jam_params_format.zig");
@@ -104,7 +106,7 @@ pub fn main() !void {
     }
     std.debug.print("\n", .{});
 
-    var server = try TargetServer.init(allocator, socket_path);
+    var server = try TargetServer.init(allocator, socket_path, .exit_on_disconnect);
     defer server.deinit();
 
     // Setup signal handler for graceful shutdown
