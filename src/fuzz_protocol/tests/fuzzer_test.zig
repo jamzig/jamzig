@@ -67,5 +67,5 @@ test "fuzzer_basic_cycle" {
 
     // For now, we expect success since we're testing against our own target
     // In a real conformance test, there might be mismatches
-    span.debug("Fuzz cycle completed. Success: {}", .{result.isSuccess()});
+    // span.debug("Fuzz cycle completed. Success: {}", .{result.isSuccess()});
 }

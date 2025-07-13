@@ -132,7 +132,6 @@ pub const Fuzzer = struct {
         if (self.latest_block) |*b| b.deinit(self.allocator);
 
         const allocator = self.allocator;
-        self.* = undefined; // Clear the fuzzer struct
         allocator.destroy(self);
     }
 
