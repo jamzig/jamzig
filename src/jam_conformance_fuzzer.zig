@@ -22,6 +22,24 @@ fn showHelp(params: anytype) !void {
         \\
     , .{});
     try clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{ .spacing_between_parameters = 0 });
+    std.debug.print(
+        \\
+        \\Verbose Levels:
+        \\  (no -v)    Normal output
+        \\  -v         Debug level for key scopes (fuzz_protocol, conformance components)
+        \\  -vv        Trace level for key scopes
+        \\  -vvv       Debug level for all scopes
+        \\  -vvvv      Trace level for all scopes (WARNING: very large output)
+        \\  -vvvvv     Trace level with codec debugging (WARNING: extremely large output)
+        \\
+        \\Examples:
+        \\  # Run with debug output for key components
+        \\  jam_conformance_fuzzer -v --blocks 100
+        \\
+        \\  # Run with specific seed and verbose output
+        \\  jam_conformance_fuzzer -vv --seed 12345 --blocks 500
+        \\
+    , .{});
 }
 
 pub fn main() !void {
@@ -32,7 +50,7 @@ pub fn main() !void {
     // Parse command line arguments
     const params = comptime clap.parseParamsComptime(
         \\-h, --help             Display this help and exit.
-        \\-v, --verbose          Enable verbose output
+        \\-v, --verbose          Enable verbose output (can be repeated up to 5 times)
         \\-s, --socket <str>     Unix socket path to connect to (default: /tmp/jam_conformance.sock)
         \\-S, --seed <u64>       Random seed for deterministic execution (default: timestamp)
         \\-b, --blocks <u32>     Number of blocks to process (default: 100)

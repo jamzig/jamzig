@@ -24,21 +24,20 @@ fn showHelp(params: anytype) !void {
     try clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{ .spacing_between_parameters = 0 });
     std.debug.print(
         \\
-        \\Tracing Examples:
-        \\  # Set all scopes to debug level
-        \\  jam_conformance_target --trace-all debug
+        \\Verbose Levels:
+        \\  (no -v)    Normal output
+        \\  -v         Debug level for key scopes (fuzz_protocol, conformance components)
+        \\  -vv        Trace level for key scopes
+        \\  -vvv       Debug level for all scopes
+        \\  -vvvv      Trace level for all scopes (WARNING: very large output)
+        \\  -vvvvv     Trace level with codec debugging (WARNING: extremely large output)
         \\
-        \\  # Set all to debug, but keep codec at info level
-        \\  jam_conformance_target --trace-all debug --trace-quiet codec
+        \\Examples:
+        \\  # Run with debug output for key components
+        \\  jam_conformance_target -v
         \\
-        \\  # Set all to debug, keep codec quiet, but trace STF
-        \\  jam_conformance_target --trace-all debug --trace-quiet codec --trace "stf=trace"
-        \\
-        \\  # Debug everything including codec (override quiet)
-        \\  jam_conformance_target --trace-all debug --trace-quiet codec --trace "codec=debug"
-        \\
-        \\  # Maximum verbosity for everything
-        \\  jam_conformance_target --trace-all trace
+        \\  # Run with maximum verbosity
+        \\  jam_conformance_target -vvvv
         \\
     , .{});
 }
@@ -55,11 +54,7 @@ pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help             Display this help and exit.
         \\-s, --socket <str>     Unix socket path to listen on (default: /tmp/jam_conformance.sock)
-        \\-v, --verbose          Enable verbose output
-        \\--trace-all <str>      Set default trace level for all scopes (trace/debug/info/warn/err)
-        \\--trace-quiet <str>    Comma-separated scopes to keep at info level (e.g., codec,network)
-        \\--trace <str>          Tracing configuration for specific scopes (e.g., stf=trace,accumulate=debug,pvm=trace,fuzz_protocol=debug)
-        \\ 
+        \\-v, --verbose          Enable verbose output (can be repeated up to 5 times)
         \\--dump-params          Dump JAM protocol parameters and exit
         \\--format <str>         Output format for parameter dump: json or text (default: text)
     );
@@ -93,9 +88,9 @@ pub fn main() !void {
     // Configure tracing
     try trace_config.configureTracing(.{
         .verbose = res.args.verbose,
-        .trace_all = res.args.@"trace-all",
-        .trace = res.args.trace,
-        .trace_quiet = res.args.@"trace-quiet",
+        .trace_all = null,
+        .trace = null,
+        .trace_quiet = null,
     });
 
     std.debug.print("JAM Conformance Target Server\n", .{});
