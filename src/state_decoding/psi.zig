@@ -5,8 +5,7 @@ const Psi = disputes.Psi;
 const Hash = disputes.Hash;
 const PublicKey = disputes.PublicKey;
 const decoder = @import("../codec/decoder.zig");
-
-const readInteger = @import("utils.zig").readInteger;
+const codec = @import("../codec.zig");
 
 pub fn decode(allocator: std.mem.Allocator, reader: anytype) !Psi {
     var psi = Psi.init(allocator);
@@ -29,7 +28,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !Psi {
 
 fn decodeHashSet(_: std.mem.Allocator, set: anytype, reader: anytype) !void {
     // Read set length
-    const len = try readInteger(reader);
+    const len = try codec.readInteger(reader);
 
     // Read hashes in order
     var i: usize = 0;

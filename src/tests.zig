@@ -17,7 +17,6 @@ comptime {
 
     _ = @import("codec.zig");
     _ = @import("codec_test.zig");
-    _ = @import("codec/blob_dict.zig");
 
     _ = @import("fisher_yates.zig");
     _ = @import("fisher_yates_test.zig");

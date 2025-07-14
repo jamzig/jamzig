@@ -1,7 +1,13 @@
 const std = @import("std");
+const constants = @import("constants.zig");
+const errors = @import("errors.zig");
 
-/// (271) Function to encode an integer into a specified number of octets in
-/// little-endian format
+/// Encodes an integer into a specified number of octets in little-endian format (eq. 271)
+/// 
+/// Parameters:
+/// - l: Number of octets to encode (must be > 0)
+/// - x: The integer value to encode
+/// - buffer: Output buffer (must have at least l bytes)
 pub fn encodeFixedLengthInteger(l: usize, x: u64, buffer: []u8) void {
     std.debug.assert(l > 0);
     std.debug.assert(buffer.len >= l);
@@ -11,25 +17,27 @@ pub fn encodeFixedLengthInteger(l: usize, x: u64, buffer: []u8) void {
         return;
     }
 
+    // Optimized: write bytes directly without loop variable
     var value: u64 = x;
-    var i: usize = 0;
-
-    while (i < l) : (i += 1) {
-        const masked_value = value & 0xff;
-
-        buffer[i] = @intCast(masked_value);
-        value >>= 8;
+    for (buffer[0..l]) |*byte| {
+        byte.* = @intCast(value & 0xff);
+        value >>= constants.BYTE_SHIFT;
     }
 }
 
-/// Encoding result as specified in the encoding section of the gray paper
-/// can hold up to 9 bytes of data including the prefix, allowing it to store
-/// values up to 2^64.
+/// Result of variable-length integer encoding
+/// Can hold up to 9 bytes of data including the prefix byte,
+/// allowing storage of values up to 2^64 as per graypaper encoding rules.
 pub const EncodingResult = struct {
     data: [9]u8,
     len: u8,
 
-    pub fn build(prefix: ?u8, init_data: []const u8) @This() {
+    /// Constructs an EncodingResult with optional prefix and data
+    /// 
+    /// Parameters:
+    /// - prefix: Optional prefix byte (null if no prefix needed)
+    /// - init_data: The encoded data bytes
+    pub fn build(prefix: ?u8, init_data: []const u8) EncodingResult {
         var self: EncodingResult = .{
             .len = undefined,
             .data = undefined,
@@ -45,24 +53,24 @@ pub const EncodingResult = struct {
         return self;
     }
 
-    pub fn as_slice(self: *const @This()) []const u8 {
+    /// Returns the encoded data as a slice
+    pub fn as_slice(self: *const EncodingResult) []const u8 {
         return self.data[0..@intCast(self.len)];
     }
 };
 
-/// (272) Function to encode an integer (0 to 2^64) into a variable-length.
-/// Will return an `EncodingResult` with the possible outcomes. This function will mainly be used
-/// to store the length prefixes.
-const find_l = @import("util.zig").find_l;
-const encode_l = @import("util.zig").encode_l;
+/// Encodes an integer (0 to 2^64) into variable-length format (eq. 272)
+/// Returns an EncodingResult containing the encoded bytes.
+/// This is primarily used for encoding length prefixes in the codec.
+const util = @import("util.zig");
 pub fn encodeInteger(x: u64) EncodingResult {
     if (x == 0) {
         return EncodingResult.build(null, &[_]u8{0});
-    } else if (x < 0x80) {
+    } else if (x < constants.SINGLE_BYTE_MAX) {
         // optimize the case where the value is less than 128
         return EncodingResult.build(@intCast(x), &[_]u8{});
-    } else if (find_l(x)) |l| {
-        const prefix = encode_l(x, l);
+    } else if (util.findEncodingLength(x)) |l| {
+        const prefix = util.encodePrefixWithQuotient(x, l);
         if (l == 0) {
             // If `l` is 0, the value is stored in the prefix to save space during encoding.
             return EncodingResult.build(prefix, &[_]u8{});
@@ -70,7 +78,7 @@ pub fn encodeInteger(x: u64) EncodingResult {
             // In this case, we need to store the length and pack the value
             // of the remainder at the end.
             var data: [8]u8 = undefined;
-            encodeFixedLengthInteger(l, x % (@as(u64, 1) << @intCast(8 * l)), &data);
+            encodeFixedLengthInteger(l, x % (@as(u64, 1) << @intCast(constants.BYTE_SHIFT * l)), &data);
             return EncodingResult.build(prefix, data[0..l]);
         }
     } else {
@@ -78,10 +86,8 @@ pub fn encodeInteger(x: u64) EncodingResult {
         var data: [8]u8 = undefined;
         encodeFixedLengthInteger(8, x, &data);
 
-        return EncodingResult.build(0xFF, &data);
+        return EncodingResult.build(constants.EIGHT_BYTE_MARKER, &data);
     }
 }
 
-comptime {
-    _ = @import("encoder/tests.zig");
-}
+// Tests are in encoder/tests.zig

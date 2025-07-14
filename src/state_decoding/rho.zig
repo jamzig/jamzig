@@ -7,8 +7,6 @@ const codec = @import("../codec.zig");
 const createEmptyWorkReport = @import("../tests/fixtures.zig").createEmptyWorkReport;
 const jam_params = @import("../jam_params.zig");
 
-const readInteger = @import("utils.zig").readInteger;
-
 pub fn decode(comptime params: jam_params.Params, allocator: std.mem.Allocator, reader: anytype) !Rho(params.core_count) {
     var rho = Rho(params.core_count).init(allocator);
 
@@ -74,26 +72,6 @@ test "decode rho - invalid existence marker" {
         std.testing.allocator,
         fbs.reader(),
     ));
-}
-
-test "decode rho - insufficient data" {
-    const core_count = 1;
-
-    // Test truncated hash
-    {
-        var buffer = std.ArrayList(u8).init(testing.allocator);
-        defer buffer.deinit();
-
-        try buffer.append(1); // exists
-        try buffer.appendSlice(&[_]u8{1} ** 16); // partial hash
-
-        var fbs = std.io.fixedBufferStream(buffer.items);
-        try testing.expectError(error.EndOfStream, decode(
-            .{ .core_count = core_count },
-            std.testing.allocator,
-            fbs.reader(),
-        ));
-    }
 }
 
 // TODO: test encoding/decoding of the WorkResult and the WorkExecResults

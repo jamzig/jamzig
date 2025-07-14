@@ -5,8 +5,6 @@ const types = @import("../types.zig");
 const jam_params = @import("../jam_params.zig");
 const codec = @import("../codec.zig");
 
-const readInteger = @import("utils.zig").readInteger;
-
 pub fn decode(
     comptime params: jam_params.Params,
     allocator: std.mem.Allocator,
@@ -52,7 +50,7 @@ pub fn decode(
     }
 
     // Decode array length for gamma.a
-    const tickets_len = try readInteger(reader);
+    const tickets_len = try codec.readInteger(reader);
     const tickets = try allocator.alloc(types.TicketBody, tickets_len);
     errdefer allocator.free(tickets);
 

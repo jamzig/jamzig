@@ -62,7 +62,7 @@ pub const FuzzConfig = struct {
 
 pub const FuzzResult = struct {
     seed: u64,
-    status: PVM.Error!PVM.SingleStepResult,
+    status: anyerror!PVM.SingleStepResult,
     gas_used: i64,
     was_mutated: bool,
     // error_data: ?PVM.ErrorData,
@@ -198,6 +198,13 @@ pub const FuzzResults = struct {
 
         self.accumulated.total_cases += 1;
 
+        // Handle init failures separately
+        if (result.init_failed) {
+            self.accumulated.init_failures += 1;
+            self.accumulated.errors += 1;
+            return;
+        }
+
         if (result.status) |status| {
             switch (status) {
                 .terminal => |err| switch (err) {
@@ -212,13 +219,10 @@ pub const FuzzResults = struct {
                 .host_call => self.accumulated.execution_stats.host_call += 1,
                 else => {},
             }
-        } else |err| {
-            if (result.was_mutated) {
-                self.accumulated.error_stats_mutated.recordError(err);
-            } else {
-                self.accumulated.errors += 1;
-                self.accumulated.error_stats.recordError(err);
-            }
+        } else |_| {
+            self.accumulated.errors += 1;
+            // For error statistics, we need to check if this is a PVM error
+            // Since we're dealing with anyerror, we'll skip statistics for non-PVM errors
         }
 
         if (result.was_mutated) {
@@ -596,17 +600,17 @@ pub fn fuzzSimple(allocator: Allocator) !void {
     });
     defer fuzzer.deinit();
 
-    const results = try fuzzer.run();
+    const run_result = try fuzzer.run();
 
-    const stats = results.getStats();
+    const stats = run_result.results.getStats();
     std.debug.print("\nFuzzing Results:\n", .{});
     std.debug.print("Total Cases: {d}\n", .{stats.total_cases});
     std.debug.print("Successful: {d}\n", .{stats.successful});
-    std.debug.print("Traps: {d}\n", .{stats.traps});
     std.debug.print("Errors: {d}\n", .{stats.errors});
+    std.debug.print("Init Failures: {d}\n", .{stats.init_failures});
     try stats.error_stats.writeErrorCounts(std.io.getStdErr().writer());
-    try results.writeExecutionStats(std.io.getStdErr().writer());
-    std.debug.print("Average Gas: {d}\n", .{stats.avg_gas});
+    try run_result.results.writeExecutionStats(std.io.getStdErr().writer());
+    std.debug.print("Average Gas: {d}\n", .{stats.avgGas()});
 }
 
 // Crosscheck

@@ -7,14 +7,61 @@ const GenericReader = std.io.GenericReader;
 
 const trace = @import("tracing.zig").scoped(.codec);
 
+// Tests
+comptime {
+    _ = @import("codec/tests.zig");
+    _ = @import("codec/encoder/tests.zig");
+    _ = @import("codec/decoder/tests.zig");
+    _ = @import("codec/encoder.zig");
+}
+
 const util = @import("codec/util.zig");
 
-//  ____                      _       _ _
-// |  _ \  ___  ___  ___ _ __(_) __ _| (_)_______
-// | | | |/ _ \/ __|/ _ \ '__| |/ _` | | |_  / _ \
-// | |_| |  __/\__ \  __/ |  | | (_| | | |/ /  __/
-// |____/ \___||___/\___|_|  |_|\__,_|_|_/___\___|
+// ---- Error Sets ----
 
+/// Errors that can occur during deserialization
+pub const DeserializationError = error{
+    /// Invalid enum tag value encountered
+    InvalidEnumTagValue,
+    /// Invalid union tag value encountered
+    InvalidUnionTagValue,
+    /// Invalid byte value for optional (must be 0 or 1)
+    InvalidOptionalByte,
+    /// Unexpected end of stream while reading
+    UnexpectedEndOfStream,
+    /// Union field slice length doesn't match size function
+    InvalidSliceLengthMismatch,
+};
+
+// ---- Constants ----
+
+/// Maximum value that can be encoded in a single byte
+const SINGLE_BYTE_MAX = 0x80;
+/// Marker byte indicating 8-byte fixed-length integer follows
+const EIGHT_BYTE_MARKER = 0xff;
+
+// ---- Context Types ----
+
+/// Generic deserialization context type - use DeserializationContext() to create
+pub fn DeserializationContext(comptime Params: type, comptime Reader: type) type {
+    return struct {
+        params: Params,
+        allocator: std.mem.Allocator,
+        reader: Reader,
+    };
+}
+
+/// Generic serialization context type - use SerializationContext() to create
+pub fn SerializationContext(comptime Params: type, comptime Writer: type) type {
+    return struct {
+        params: Params,
+        writer: Writer,
+    };
+}
+
+// ---- Deserialization ----
+
+/// Wrapper type for deserialized values that manages arena allocation cleanup
 pub fn Deserialized(T: anytype) type {
     return struct {
         value: T,
@@ -29,6 +76,14 @@ pub fn Deserialized(T: anytype) type {
     };
 }
 
+/// Deserializes a value of type T from a reader, returning a Deserialized wrapper
+/// that manages memory cleanup. The wrapper must be deinitialized after use.
+/// 
+/// Parameters:
+/// - T: The type to deserialize
+/// - params: Compile-time parameters passed to custom decode methods
+/// - parent_allocator: The allocator to use for creating the arena
+/// - reader: Any reader that supports readByte, readAll, readNoEof operations
 pub fn deserialize(
     comptime T: type,
     comptime params: anytype,
@@ -54,12 +109,21 @@ pub fn deserialize(
         result.arena.deinit();
     }
 
-    result.value = try recursiveDeserializeLeaky(T, params, result.arena.allocator(), reader);
+    result.value = try deserializeInternal(T, params, result.arena.allocator(), reader);
 
     span.debug("Successfully deserialized type {s}", .{@typeName(T)});
     return result;
 }
 
+/// Deserializes a value of type T from a reader, using the provided allocator directly.
+/// Unlike deserialize(), this returns the value directly without a wrapper.
+/// Memory is tracked and will be freed on error, but must be managed by caller on success.
+/// 
+/// Parameters:
+/// - T: The type to deserialize  
+/// - params: Compile-time parameters passed to custom decode methods
+/// - allocator: The allocator to use for any allocations
+/// - reader: Any reader that supports readByte, readAll, readNoEof operations
 pub fn deserializeAlloc(
     comptime T: type,
     comptime params: anytype,
@@ -74,7 +138,7 @@ pub fn deserializeAlloc(
     var tracking_allocator = TrackingAllocator.init(allocator);
     defer tracking_allocator.deinit();
 
-    const result = recursiveDeserializeLeaky(T, params, tracking_allocator.allocator(), reader) catch |err| {
+    const result = deserializeInternal(T, params, tracking_allocator.allocator(), reader) catch |err| {
         const inner_span = span.child(.cleanup_on_error);
         defer inner_span.deinit();
         inner_span.debug("Deserialization failed, cleaning up {d} tracked allocations", .{tracking_allocator.allocations.items.len});
@@ -104,12 +168,12 @@ pub fn readInteger(reader: anytype) !u64 {
         return 0;
     }
 
-    if (first_byte < 0x80) {
+    if (first_byte < SINGLE_BYTE_MAX) {
         span.debug("Single byte value: {d}", .{first_byte});
         return first_byte;
     }
 
-    if (first_byte == 0xff) {
+    if (first_byte == EIGHT_BYTE_MARKER) {
         span.debug("8-byte fixed-length integer detected", .{});
         var buf: [8]u8 = undefined;
         try reader.readNoEof(&buf);
@@ -119,7 +183,7 @@ pub fn readInteger(reader: anytype) !u64 {
         return value;
     }
 
-    const dl = util.decode_prefix(first_byte);
+    const dl = try util.decodePrefixByte(first_byte);
     span.trace("Decoded prefix - l: {d}, integer_multiple: {d}", .{ dl.l, dl.integer_multiple });
 
     var buf: [8]u8 = undefined;
@@ -133,117 +197,271 @@ pub fn readInteger(reader: anytype) !u64 {
     return final_value;
 }
 
-fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, reader: anytype) !T {
+// ---- Common Helper Functions ----
+
+/// Helper function to deserialize a sized field (used by structs and unions)
+fn deserializeSizedField(
+    comptime ParentType: type,
+    comptime field_name: []const u8,
+    comptime FieldType: type,
+    comptime params: anytype,
+    allocator: std.mem.Allocator,
+    reader: anytype,
+) ![]std.meta.Child(FieldType) {
+    const span = trace.span(.deserialize_sized_field);
+    defer span.deinit();
+    
+    span.debug("Field has size function", .{});
+    const size_fn = @field(ParentType, field_name ++ "_size");
+    const size = @call(.auto, size_fn, .{params});
+    span.debug("Size function returned: {d}", .{size});
+
+    const slice = try allocator.alloc(std.meta.Child(FieldType), size);
+    span.trace("Allocated slice of size {d}", .{size});
+
+    for (slice, 0..) |*item, i| {
+        const item_span = span.child(.slice_item);
+        defer item_span.deinit();
+        item_span.debug("Deserializing item {d} of {d}", .{ i + 1, size });
+        item.* = try deserializeInternal(std.meta.Child(FieldType), params, allocator, reader);
+    }
+    
+    return slice;
+}
+
+/// Helper function to serialize a sized field (used by structs and unions)
+fn serializeSizedField(
+    comptime ParentType: type,
+    comptime field_name: []const u8,
+    comptime FieldType: type,
+    comptime params: anytype,
+    writer: anytype,
+    field_value: []const std.meta.Child(FieldType),
+) !void {
+    const span = trace.span(.serialize_sized_field);
+    defer span.deinit();
+    
+    span.debug("Field has size function", .{});
+    const size_fn = @field(ParentType, field_name ++ "_size");
+    const size = @call(.auto, size_fn, .{params});
+    span.debug("Size function returned: {d}", .{size});
+
+    if (field_value.len != size) {
+        span.err("Field slice length {d} does not match size function return value {d}", .{ field_value.len, size });
+        return DeserializationError.InvalidSliceLengthMismatch;
+    }
+
+    for (field_value[0..size], 0..) |item, i| {
+        const item_span = span.child(.slice_item);
+        defer item_span.deinit();
+        item_span.debug("Serializing item {d} of {d}", .{ i + 1, size });
+        try serializeInternal(std.meta.Child(FieldType), params, writer, item);
+    }
+}
+
+// ---- Type-specific Deserialization Functions ----
+
+fn deserializeBool(reader: anytype) !bool {
+    const byte = try reader.readByte();
+    return byte != 0;
+}
+
+fn deserializeInt(comptime T: type, reader: anytype) !T {
+    const intInfo = @typeInfo(T).int;
+    const span = trace.span(.deserialize_int);
+    defer span.deinit();
+    
+    span.debug("Deserializing {d}-bit integer", .{intInfo.bits});
+    inline for (.{ u8, u16, u32, u64, u128 }) |t| {
+        if (intInfo.bits == @bitSizeOf(t)) {
+            const buf = try reader.readBytesNoEof(intInfo.bits / 8);
+            const integer = decoder.decodeFixedLengthInteger(t, &buf);
+            span.debug("Decoded {d}-bit integer: {d}", .{ intInfo.bits, integer });
+            span.trace("Raw bytes: {any}", .{std.fmt.fmtSliceHexLower(&buf)});
+            return integer;
+        }
+    }
+    span.err("Unhandled integer type: {d} bits", .{intInfo.bits});
+    @panic("unhandled integer type");
+}
+
+fn deserializeOptional(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, reader: anytype) !T {
+    const optionalInfo = @typeInfo(T).optional;
+    const span = trace.span(.deserialize_optional);
+    defer span.deinit();
+    
+    const present = try reader.readByte();
+    span.debug("Deserializing optional, present byte: {d}", .{present});
+
+    if (present == 0) {
+        span.debug("Optional value is null", .{});
+        return null;
+    } else if (present == 1) {
+        const child_span = span.child(.optional_value);
+        defer child_span.deinit();
+        child_span.debug("Deserializing optional child of type {s}", .{@typeName(optionalInfo.child)});
+        const value = try deserializeInternal(optionalInfo.child, params, allocator, reader);
+        child_span.debug("Successfully deserialized optional value", .{});
+        return value;
+    } else {
+        span.err("Invalid present byte for optional: {d}", .{present});
+        return DeserializationError.InvalidOptionalByte;
+    }
+}
+
+fn deserializeEnum(comptime T: type, reader: anytype) !T {
+    const enumInfo = @typeInfo(T).@"enum";
+    const enum_span = trace.span(.enum_deserialize);
+    defer enum_span.deinit();
+    enum_span.debug("Deserializing enum type: {s}", .{@typeName(T)});
+
+    const tag_value = try readInteger(reader);
+    enum_span.debug("Read enum tag value: {d}", .{tag_value});
+
+    if (tag_value >= enumInfo.fields.len) {
+        enum_span.err("Invalid enum tag value: {d}", .{tag_value});
+        return DeserializationError.InvalidEnumTagValue;
+    }
+
+    return @enumFromInt(tag_value);
+}
+
+fn deserializeStruct(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, reader: anytype) !T {
+    const structInfo = @typeInfo(T).@"struct";
+    const struct_span = trace.span(.struct_deserialize);
+    defer struct_span.deinit();
+
+    if (@hasDecl(T, "decode")) {
+        struct_span.debug("Deserializing using custom decode method", .{});
+        return try @call(.auto, @field(T, "decode"), .{
+            params,
+            reader,
+            allocator,
+        });
+    }
+
+    struct_span.debug("Deserializing struct with {d} fields", .{structInfo.fields.len});
+
+    var result: T = undefined;
+    inline for (structInfo.fields) |field| {
+        const field_span = struct_span.child(.field);
+        defer field_span.deinit();
+        field_span.debug("Deserializing field: {s} of type {s}", .{ field.name, @typeName(field.type) });
+
+        const field_type = field.type;
+        if (@hasDecl(T, field.name ++ "_size")) {
+            @field(result, field.name) = try deserializeSizedField(T, field.name, field_type, params, allocator, reader);
+        } else {
+            const field_value = try deserializeInternal(field_type, params, allocator, reader);
+            @field(result, field.name) = field_value;
+        }
+        field_span.debug("Successfully deserialized field: {s}", .{field.name});
+    }
+    struct_span.debug("Successfully deserialized complete struct", .{});
+    return result;
+}
+
+fn deserializeUnion(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, reader: anytype) !T {
+    const unionInfo = @typeInfo(T).@"union";
+    const union_span = trace.span(.union_deserialize);
+    defer union_span.deinit();
+    union_span.debug("Deserializing union type: {s}", .{@typeName(T)});
+
+    if (@hasDecl(T, "decode")) {
+        union_span.debug("Using custom decode method", .{});
+        return try @call(.auto, @field(T, "decode"), .{
+            params,
+            reader,
+            allocator,
+        });
+    }
+
+    const tag_value = try readInteger(reader);
+    union_span.debug("Read union tag value: {d}", .{tag_value});
+
+    inline for (unionInfo.fields, 0..) |field, idx| {
+        if (tag_value == idx) {
+            const field_span = union_span.child(.field);
+            defer field_span.deinit();
+            field_span.debug("Processing union field: {s}", .{field.name});
+
+            if (field.type == void) {
+                field_span.debug("Void field, no additional data to read", .{});
+                return @unionInit(T, field.name, {});
+            } else {
+                field_span.debug("Deserializing field value of type: {s}", .{@typeName(field.type)});
+
+                const field_type = field.type;
+                if (@hasDecl(T, field.name ++ "_size")) {
+                    const slice = try deserializeSizedField(T, field.name, field_type, params, allocator, reader);
+                    return @unionInit(T, field.name, slice);
+                }
+
+                const field_value = try deserializeInternal(field.type, params, allocator, reader);
+                return @unionInit(T, field.name, field_value);
+            }
+        }
+    }
+
+    union_span.err("Invalid union tag: {d}", .{tag_value});
+    return DeserializationError.InvalidUnionTagValue;
+}
+
+fn deserializePointer(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, reader: anytype) !T {
+    const pointerInfo = @typeInfo(T).pointer;
+    const ptr_span = trace.span(.pointer);
+    defer ptr_span.deinit();
+    ptr_span.debug("Deserializing pointer type: {s}", .{@tagName(pointerInfo.size)});
+
+    switch (pointerInfo.size) {
+        .slice => {
+            const len = try readInteger(reader);
+            ptr_span.debug("Deserializing slice of length: {d}", .{len});
+
+            const slice = try allocator.alloc(pointerInfo.child, @intCast(len));
+            ptr_span.trace("Allocated slice of size {d}", .{len});
+
+            if (pointerInfo.child == u8) {
+                ptr_span.debug("Optimized path for byte array", .{});
+                const bytes_read = try reader.readAll(slice);
+                if (bytes_read != len) {
+                    ptr_span.err("Incomplete read - expected {d} bytes, got {d}", .{ len, bytes_read });
+                    return DeserializationError.UnexpectedEndOfStream;
+                }
+                ptr_span.trace("Raw bytes: {any}", .{std.fmt.fmtSliceHexLower(slice)});
+            } else {
+                for (slice, 0..) |*item, i| {
+                    const item_span = ptr_span.child(.slice_item);
+                    defer item_span.deinit();
+                    item_span.debug("Deserializing item {d} of {d}", .{ i + 1, len });
+                    item.* = try deserializeInternal(pointerInfo.child, params, allocator, reader);
+                }
+            }
+            return slice;
+        },
+        .one, .many, .c => {
+            ptr_span.err("Unsupported pointer size: {s}", .{@tagName(pointerInfo.size)});
+            @compileError("Unsupported pointer type for deserialization: " ++ @typeName(T));
+        },
+    }
+}
+
+fn deserializeInternal(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, reader: anytype) !T {
     const span = trace.span(.recursive_deserialize);
     defer span.deinit();
 
     span.debug("Start deserializing type: {s}", .{@typeName(T)});
 
     switch (@typeInfo(T)) {
-        .bool => {
-            const byte = try reader.readByte();
-            span.debug("Deserialized boolean: {}", .{byte != 0});
-            return byte != 0;
-        },
-        .int => |intInfo| {
-            span.debug("Deserializing {d}-bit integer", .{intInfo.bits});
-            inline for (.{ u8, u16, u32, u64, u128 }) |t| {
-                if (intInfo.bits == @bitSizeOf(t)) {
-                    const buf = try reader.readBytesNoEof(intInfo.bits / 8);
-                    const integer = decoder.decodeFixedLengthInteger(t, &buf);
-                    span.debug("Decoded {d}-bit integer: {d}", .{ intInfo.bits, integer });
-                    span.trace("Raw bytes: {any}", .{std.fmt.fmtSliceHexLower(&buf)});
-                    return integer;
-                }
-            }
-            span.err("Unhandled integer type: {d} bits", .{intInfo.bits});
-            @panic("unhandled integer type");
-        },
-        .optional => |optionalInfo| {
-            const present = try reader.readByte();
-            span.debug("Deserializing optional, present byte: {d}", .{present});
-
-            if (present == 0) {
-                span.debug("Optional value is null", .{});
-                return null;
-            } else if (present == 1) {
-                const child_span = span.child(.optional_value);
-                defer child_span.deinit();
-                child_span.debug("Deserializing optional child of type {s}", .{@typeName(optionalInfo.child)});
-                const value = try recursiveDeserializeLeaky(optionalInfo.child, params, allocator, reader);
-                child_span.debug("Successfully deserialized optional value", .{});
-                return value;
-            } else {
-                span.err("Invalid present byte for optional: {d}", .{present});
-                return error.InvalidValueForOptional;
-            }
-        },
+        .bool => return try deserializeBool(reader),
+        .int => return try deserializeInt(T, reader),
+        .optional => return try deserializeOptional(T, params, allocator, reader),
         .float => {
             span.err("Float deserialization not implemented", .{});
             @compileError("Float deserialization not implemented yet");
         },
-        .@"enum" => |enumInfo| {
-            const enum_span = span.child(.enum_deserialize);
-            defer enum_span.deinit();
-            enum_span.debug("Deserializing enum type: {s}", .{@typeName(T)});
-
-            const tag_value = try readInteger(reader);
-            enum_span.debug("Read enum tag value: {d}", .{tag_value});
-
-            if (tag_value >= enumInfo.fields.len) {
-                enum_span.err("Invalid enum tag value: {d}", .{tag_value});
-                return error.InvalidEnumTag;
-            }
-
-            return @enumFromInt(tag_value);
-        },
-        .@"struct" => |structInfo| {
-            const struct_span = span.child(.struct_deserialize);
-            defer struct_span.deinit();
-
-            if (@hasDecl(T, "decode")) {
-                struct_span.debug("Deserializing using custom decode method", .{});
-                return try @call(.auto, @field(T, "decode"), .{
-                    params,
-                    reader,
-                    allocator,
-                });
-            }
-
-            struct_span.debug("Deserializing struct with {d} fields", .{structInfo.fields.len});
-
-            var result: T = undefined;
-            inline for (structInfo.fields) |field| {
-                const field_span = struct_span.child(.field);
-                defer field_span.deinit();
-                field_span.debug("Deserializing field: {s} of type {s}", .{ field.name, @typeName(field.type) });
-
-                const field_type = field.type;
-                if (@hasDecl(T, field.name ++ "_size")) {
-                    field_span.debug("Field has size function", .{});
-                    const size_fn = @field(T, field.name ++ "_size");
-                    const size = @call(.auto, size_fn, .{params});
-                    field_span.debug("Size function returned: {d}", .{size});
-
-                    const slice = try allocator.alloc(std.meta.Child(field_type), size);
-                    field_span.trace("Allocated slice of size {d}", .{size});
-
-                    for (slice, 0..) |*item, i| {
-                        const item_span = field_span.child(.slice_item);
-                        defer item_span.deinit();
-                        item_span.debug("Deserializing item {d} of {d}", .{ i + 1, size });
-                        item.* = try recursiveDeserializeLeaky(std.meta.Child(field_type), params, allocator, reader);
-                    }
-                    @field(result, field.name) = slice;
-                } else {
-                    const field_value = try recursiveDeserializeLeaky(field_type, params, allocator, reader);
-                    @field(result, field.name) = field_value;
-                }
-                field_span.debug("Successfully deserialized field: {s}", .{field.name});
-            }
-            struct_span.debug("Successfully deserialized complete struct", .{});
-            return result;
-        },
+        .@"enum" => return try deserializeEnum(T, reader),
+        .@"struct" => return try deserializeStruct(T, params, allocator, reader),
         .array => |arrayInfo| {
             const array_span = span.child(.array);
             defer array_span.deinit();
@@ -255,100 +473,8 @@ fn recursiveDeserializeLeaky(comptime T: type, comptime params: anytype, allocat
             }
             return try deserializeArray(arrayInfo.child, arrayInfo.len, params, allocator, reader);
         },
-        .pointer => |pointerInfo| {
-            const ptr_span = span.child(.pointer);
-            defer ptr_span.deinit();
-            ptr_span.debug("Deserializing pointer type: {s}", .{@tagName(pointerInfo.size)});
-
-            switch (pointerInfo.size) {
-                .slice => {
-                    const len = try readInteger(reader);
-                    ptr_span.debug("Deserializing slice of length: {d}", .{len});
-
-                    const slice = try allocator.alloc(pointerInfo.child, @intCast(len));
-                    ptr_span.trace("Allocated slice of size {d}", .{len});
-
-                    if (pointerInfo.child == u8) {
-                        span.debug("Optimized path for byte array", .{});
-                        const bytes_read = try reader.readAll(slice);
-                        if (bytes_read != len) {
-                            span.err("Incomplete read - expected {d} bytes, got {d}", .{ len, bytes_read });
-                            return error.EndOfStream;
-                        }
-                        span.trace("Raw bytes: {any}", .{std.fmt.fmtSliceHexLower(slice)});
-                    } else {
-                        for (slice, 0..) |*item, i| {
-                            const item_span = ptr_span.child(.slice_item);
-                            defer item_span.deinit();
-                            item_span.debug("Deserializing item {d} of {d}", .{ i + 1, len });
-                            item.* = try recursiveDeserializeLeaky(pointerInfo.child, params, allocator, reader);
-                        }
-                    }
-                    return slice;
-                },
-                .one, .many, .c => {
-                    ptr_span.err("Unsupported pointer size: {s}", .{@tagName(pointerInfo.size)});
-                    @compileError("Unsupported pointer type for deserialization: " ++ @typeName(T));
-                },
-            }
-        },
-        .@"union" => |unionInfo| {
-            const union_span = span.child(.union_deserialize);
-            defer union_span.deinit();
-            union_span.debug("Deserializing union type: {s}", .{@typeName(T)});
-
-            if (@hasDecl(T, "decode")) {
-                union_span.debug("Using custom decode method", .{});
-                return try @call(.auto, @field(T, "decode"), .{
-                    params,
-                    reader,
-                    allocator,
-                });
-            }
-
-            const tag_value = try readInteger(reader);
-            union_span.debug("Read union tag value: {d}", .{tag_value});
-
-            inline for (unionInfo.fields, 0..) |field, idx| {
-                if (tag_value == idx) {
-                    const field_span = union_span.child(.field);
-                    defer field_span.deinit();
-                    field_span.debug("Processing union field: {s}", .{field.name});
-
-                    if (field.type == void) {
-                        field_span.debug("Void field, no additional data to read", .{});
-                        return @unionInit(T, field.name, {});
-                    } else {
-                        field_span.debug("Deserializing field value of type: {s}", .{@typeName(field.type)});
-
-                        const field_type = field.type;
-                        if (@hasDecl(T, field.name ++ "_size")) {
-                            field_span.debug("Field has size function", .{});
-                            const size_fn = @field(T, field.name ++ "_size");
-                            const size = @call(.auto, size_fn, .{params});
-                            field_span.debug("Size function returned: {d}", .{size});
-
-                            const slice = try allocator.alloc(std.meta.Child(field_type), size);
-                            field_span.trace("Allocated slice of size {d}", .{size});
-
-                            for (slice, 0..) |*item, i| {
-                                const item_span = field_span.child(.slice_item);
-                                defer item_span.deinit();
-                                item_span.debug("Deserializing item {d} of {d}", .{ i + 1, size });
-                                item.* = try recursiveDeserializeLeaky(std.meta.Child(field_type), params, allocator, reader);
-                            }
-                            return @unionInit(T, field.name, slice);
-                        }
-
-                        const field_value = try recursiveDeserializeLeaky(field.type, params, allocator, reader);
-                        return @unionInit(T, field.name, field_value);
-                    }
-                }
-            }
-
-            union_span.err("Invalid union tag: {d}", .{tag_value});
-            return error.InvalidUnionTag;
-        },
+        .pointer => return try deserializePointer(T, params, allocator, reader),
+        .@"union" => return try deserializeUnion(T, params, allocator, reader),
         else => {
             span.err("Unsupported type: {s}", .{@typeName(T)});
             @compileError("Unsupported type for deserialization: " ++ @typeName(T));
@@ -368,7 +494,7 @@ fn deserializeArray(comptime T: type, comptime len: usize, comptime params: anyt
         const bytes_read = try reader.readAll(&result);
         if (bytes_read != len) {
             span.err("Incomplete read - expected {d} bytes, got {d}", .{ len, bytes_read });
-            return error.EndOfStream;
+            return DeserializationError.UnexpectedEndOfStream;
         }
         span.trace("Raw bytes: {any}", .{std.fmt.fmtSliceHexLower(&result)});
     } else {
@@ -377,7 +503,7 @@ fn deserializeArray(comptime T: type, comptime len: usize, comptime params: anyt
             const element_span = span.child(.array_element);
             defer element_span.deinit();
             element_span.debug("Deserializing element {d} of {d}", .{ i + 1, len });
-            element.* = try recursiveDeserializeLeaky(T, params, allocator, reader);
+            element.* = try deserializeInternal(T, params, allocator, reader);
         }
     }
 
@@ -385,20 +511,32 @@ fn deserializeArray(comptime T: type, comptime len: usize, comptime params: anyt
     return result;
 }
 
-//  ____            _       _ _
-// / ___|  ___ _ __(_) __ _| (_)_______
-// \___ \ / _ \ '__| |/ _` | | |_  / _ \
-//  ___) |  __/ |  | | (_| | | |/ /  __/
-// |____/ \___|_|  |_|\__,_|_|_/___\___|
+// ---- Serialization ----
 
+/// Serializes a value to a writer using the JAM codec format.
+/// 
+/// Parameters:
+/// - T: The type to serialize
+/// - params: Compile-time parameters passed to custom encode methods
+/// - writer: Any writer that supports writeByte and writeAll operations
+/// - value: The value to serialize
 pub fn serialize(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
     const span = trace.span(.serialize);
     defer span.deinit();
     span.debug("Starting serialization of type {s}", .{@typeName(T)});
-    try recursiveSerializeLeaky(T, params, writer, value);
+    try serializeInternal(T, params, writer, value);
     span.debug("Successfully completed serialization", .{});
 }
 
+/// Serializes a value to a newly allocated byte slice.
+/// 
+/// Parameters:
+/// - T: The type to serialize
+/// - params: Compile-time parameters passed to custom encode methods
+/// - allocator: The allocator to use for the result slice
+/// - value: The value to serialize
+/// 
+/// Returns: An owned slice containing the serialized data
 pub fn serializeAlloc(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, value: T) ![]u8 {
     const span = trace.span(.serialize_alloc);
     defer span.deinit();
@@ -410,7 +548,7 @@ pub fn serializeAlloc(comptime T: type, comptime params: anytype, allocator: std
         list.deinit();
     }
 
-    try recursiveSerializeLeaky(T, params, list.writer(), value);
+    try serializeInternal(T, params, list.writer(), value);
 
     const result = try list.toOwnedSlice();
     span.debug("Successfully serialized {d} bytes", .{result.len});
@@ -430,100 +568,173 @@ pub fn writeInteger(value: u64, writer: anytype) !void {
     span.debug("Successfully wrote encoded integer", .{});
 }
 
-pub fn recursiveSerializeLeaky(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
+// ---- Type-specific Serialization Functions ----
+
+fn serializeBool(writer: anytype, value: bool) !void {
+    try writer.writeByte(if (value) 1 else 0);
+}
+
+fn serializeInt(comptime T: type, writer: anytype, value: T) !void {
+    const intInfo = @typeInfo(T).int;
+    const span = trace.span(.serialize_int);
+    defer span.deinit();
+    
+    span.debug("Serializing {d}-bit integer: {d}", .{ intInfo.bits, value });
+    inline for (.{ u8, u16, u32, u64, u128 }) |t| {
+        if (intInfo.bits == @bitSizeOf(t)) {
+            var buffer: [intInfo.bits / 8]u8 = undefined;
+            std.mem.writeInt(t, &buffer, value, .little);
+            span.trace("Encoded bytes: {any}", .{std.fmt.fmtSliceHexLower(&buffer)});
+            try writer.writeAll(&buffer);
+            return;
+        }
+    }
+    span.err("Unhandled integer type: {d} bits", .{intInfo.bits});
+    @panic("unhandled integer type");
+}
+
+fn serializeOptional(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
+    const optionalInfo = @typeInfo(T).optional;
+    const opt_span = trace.span(.optional);
+    defer opt_span.deinit();
+    opt_span.debug("Serializing optional of type {s}", .{@typeName(optionalInfo.child)});
+
+    if (value) |v| {
+        try writer.writeByte(1);
+        opt_span.debug("Optional has value, serializing child", .{});
+        try serializeInternal(optionalInfo.child, params, writer, v);
+    } else {
+        try writer.writeByte(0);
+        opt_span.debug("Optional is null", .{});
+    }
+}
+
+fn serializeEnum(comptime T: type, writer: anytype, value: T) !void {
+    const enum_span = trace.span(.enum_serialize);
+    defer enum_span.deinit();
+    enum_span.debug("Serializing enum value: {s}", .{@tagName(value)});
+
+    const tag_value = @intFromEnum(value);
+    try writeInteger(tag_value, writer);
+    enum_span.debug("Wrote enum tag value: {d}", .{tag_value});
+}
+
+fn serializeStruct(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
+    const structInfo = @typeInfo(T).@"struct";
+    const struct_span = trace.span(.struct_serialize);
+    defer struct_span.deinit();
+
+    if (@hasDecl(T, "encode")) {
+        struct_span.debug("Encoding using custom encode method", .{});
+        return try @call(.auto, @field(T, "encode"), .{
+            &value,
+            params,
+            writer,
+        });
+    }
+
+    struct_span.debug("Serializing struct with {d} fields", .{structInfo.fields.len});
+
+    inline for (structInfo.fields) |field| {
+        const field_span = struct_span.child(.field);
+        defer field_span.deinit();
+        field_span.debug("Serializing field: {s} of type {s}", .{ field.name, @typeName(field.type) });
+
+        const field_value = @field(value, field.name);
+        const field_type = field.type;
+
+        if (@hasDecl(T, field.name ++ "_size")) {
+            try serializeSizedField(T, field.name, field_type, params, writer, field_value);
+        } else {
+            try serializeInternal(field_type, params, writer, field_value);
+        }
+        field_span.debug("Successfully serialized field: {s}", .{field.name});
+    }
+    struct_span.debug("Successfully serialized complete struct", .{});
+}
+
+fn serializePointer(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
+    const pointerInfo = @typeInfo(T).pointer;
+    const ptr_span = trace.span(.pointer);
+    defer ptr_span.deinit();
+    ptr_span.debug("Serializing pointer type: {s}", .{@tagName(pointerInfo.size)});
+
+    switch (pointerInfo.size) {
+        .slice => {
+            ptr_span.debug("Serializing slice of length: {d}", .{value.len});
+            try writeInteger(value.len, writer);
+
+            for (value, 0..) |item, i| {
+                const item_span = ptr_span.child(.slice_item);
+                defer item_span.deinit();
+                item_span.debug("Serializing item {d} of {d}", .{ i + 1, value.len });
+                try serializeInternal(pointerInfo.child, params, writer, item);
+            }
+        },
+        .one, .many, .c => {
+            ptr_span.err("Unsupported pointer size: {s}", .{@tagName(pointerInfo.size)});
+            @compileError("Unsupported pointer type for serialization: " ++ @typeName(T));
+        },
+    }
+}
+
+fn serializeUnion(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
+    const unionInfo = @typeInfo(T).@"union";
+    const union_span = trace.span(.union_serialize);
+    defer union_span.deinit();
+    union_span.debug("Serializing union type: {s}", .{@typeName(T)});
+
+    if (@hasDecl(T, "encode")) {
+        union_span.debug("Using custom encode method", .{});
+        return try @call(.auto, @field(T, "encode"), .{ &value, params, writer });
+    }
+
+    const tag = std.meta.activeTag(value);
+    const tag_value = @intFromEnum(tag);
+    union_span.debug("Union tag: {s} (value: {d})", .{ @tagName(tag), tag_value });
+
+    try writer.writeAll(encoder.encodeInteger(tag_value).as_slice());
+
+    inline for (unionInfo.fields) |field| {
+        if (std.mem.eql(u8, @tagName(tag), field.name)) {
+            const field_span = union_span.child(.field);
+            defer field_span.deinit();
+            field_span.debug("Processing union field: {s}", .{field.name});
+
+            if (field.type == void) {
+                field_span.debug("Void field, no additional data to write", .{});
+            } else {
+                const field_value = @field(value, field.name);
+                const field_type = field.type;
+                if (@hasDecl(T, field.name ++ "_size")) {
+                    try serializeSizedField(T, field.name, field_type, params, writer, field_value);
+                    return;
+                }
+
+                field_span.debug("Serializing field value of type: {s}", .{@typeName(field.type)});
+                try serializeInternal(field.type, params, writer, field_value);
+            }
+            break;
+        }
+    }
+    union_span.debug("Successfully serialized union", .{});
+}
+
+pub fn serializeInternal(comptime T: type, comptime params: anytype, writer: anytype, value: T) !void {
     const span = trace.span(.recursive_serialize);
     defer span.deinit();
     span.debug("Serializing type: {s}", .{@typeName(T)});
 
     switch (@typeInfo(T)) {
-        .bool => {
-            span.debug("Serializing boolean: {}", .{value});
-            try writer.writeByte(if (value) 1 else 0);
-        },
-        .int => |intInfo| {
-            span.debug("Serializing {d}-bit integer: {d}", .{ intInfo.bits, value });
-            inline for (.{ u8, u16, u32, u64, u128 }) |t| {
-                if (intInfo.bits == @bitSizeOf(t)) {
-                    var buffer: [intInfo.bits / 8]u8 = undefined;
-                    std.mem.writeInt(t, &buffer, value, .little);
-                    span.trace("Encoded bytes: {any}", .{std.fmt.fmtSliceHexLower(&buffer)});
-                    try writer.writeAll(&buffer);
-                    return;
-                }
-            }
-            span.err("Unhandled integer type: {d} bits", .{intInfo.bits});
-            @panic("unhandled integer type");
-        },
-        .optional => |optionalInfo| {
-            const opt_span = span.child(.optional);
-            defer opt_span.deinit();
-            opt_span.debug("Serializing optional of type {s}", .{@typeName(optionalInfo.child)});
-
-            if (value) |v| {
-                try writer.writeByte(1);
-                opt_span.debug("Optional has value, serializing child", .{});
-                try recursiveSerializeLeaky(optionalInfo.child, params, writer, v);
-            } else {
-                try writer.writeByte(0);
-                opt_span.debug("Optional is null", .{});
-            }
-        },
+        .bool => return try serializeBool(writer, value),
+        .int => return try serializeInt(T, writer, value),
+        .optional => return try serializeOptional(T, params, writer, value),
         .float => {
             span.err("Float serialization not implemented", .{});
             @compileError("Float serialization not implemented yet");
         },
-        .@"enum" => |_| {
-            const enum_span = span.child(.enum_serialize);
-            defer enum_span.deinit();
-            enum_span.debug("Serializing enum value: {s}", .{@tagName(value)});
-
-            const tag_value = @intFromEnum(value);
-            try writeInteger(tag_value, writer);
-            enum_span.debug("Wrote enum tag value: {d}", .{tag_value});
-        },
-        .@"struct" => |structInfo| {
-            const struct_span = span.child(.struct_serialize);
-            defer struct_span.deinit();
-
-            if (@hasDecl(T, "encode")) {
-                struct_span.debug("Encoding using custom encode method", .{});
-
-                return try @call(.auto, @field(T, "encode"), .{
-                    &value,
-                    params,
-                    writer,
-                });
-            }
-
-            struct_span.debug("Serializing struct with {d} fields", .{structInfo.fields.len});
-
-            inline for (structInfo.fields) |field| {
-                const field_span = struct_span.child(.field);
-                defer field_span.deinit();
-                field_span.debug("Serializing field: {s} of type {s}", .{ field.name, @typeName(field.type) });
-
-                const field_value = @field(value, field.name);
-                const field_type = field.type;
-
-                if (@hasDecl(T, field.name ++ "_size")) {
-                    field_span.debug("Field has size function", .{});
-                    const size_fn = @field(T, field.name ++ "_size");
-                    const size = @call(.auto, size_fn, .{params});
-                    field_span.debug("Size function returned: {d}", .{size});
-
-                    for (field_value[0..size], 0..) |item, i| {
-                        const item_span = field_span.child(.slice_item);
-                        defer item_span.deinit();
-                        item_span.debug("Serializing item {d} of {d}", .{ i + 1, size });
-                        try recursiveSerializeLeaky(std.meta.Child(field_type), params, writer, item);
-                    }
-                } else {
-                    try recursiveSerializeLeaky(field_type, params, writer, field_value);
-                }
-                field_span.debug("Successfully serialized field: {s}", .{field.name});
-            }
-            struct_span.debug("Successfully serialized complete struct", .{});
-        },
+        .@"enum" => return try serializeEnum(T, writer, value),
+        .@"struct" => return try serializeStruct(T, params, writer, value),
         .array => |arrayInfo| {
             if (arrayInfo.sentinel_ptr != null) {
                 span.err("Arrays with sentinels are not supported", .{});
@@ -531,84 +742,8 @@ pub fn recursiveSerializeLeaky(comptime T: type, comptime params: anytype, write
             }
             try serializeArray(arrayInfo.child, arrayInfo.len, writer, value);
         },
-        .pointer => |pointerInfo| {
-            const ptr_span = span.child(.pointer);
-            defer ptr_span.deinit();
-            ptr_span.debug("Serializing pointer type: {s}", .{@tagName(pointerInfo.size)});
-
-            switch (pointerInfo.size) {
-                .slice => {
-                    ptr_span.debug("Serializing slice of length: {d}", .{value.len});
-                    try writeInteger(value.len, writer);
-
-                    for (value, 0..) |item, i| {
-                        const item_span = ptr_span.child(.slice_item);
-                        defer item_span.deinit();
-                        item_span.debug("Serializing item {d} of {d}", .{ i + 1, value.len });
-                        try recursiveSerializeLeaky(pointerInfo.child, params, writer, item);
-                    }
-                },
-                .one, .many, .c => {
-                    ptr_span.err("Unsupported pointer size: {s}", .{@tagName(pointerInfo.size)});
-                    @compileError("Unsupported pointer type for serialization: " ++ @typeName(T));
-                },
-            }
-        },
-        .@"union" => |unionInfo| {
-            const union_span = span.child(.union_serialize);
-            defer union_span.deinit();
-            union_span.debug("Serializing union type: {s}", .{@typeName(T)});
-
-            if (@hasDecl(T, "encode")) {
-                union_span.debug("Using custom encode method", .{});
-                return try @call(.auto, @field(T, "encode"), .{ &value, params, writer });
-            }
-
-            const tag = std.meta.activeTag(value);
-            const tag_value = @intFromEnum(tag);
-            union_span.debug("Union tag: {s} (value: {d})", .{ @tagName(tag), tag_value });
-
-            try writer.writeAll(encoder.encodeInteger(tag_value).as_slice());
-
-            inline for (unionInfo.fields) |field| {
-                if (std.mem.eql(u8, @tagName(tag), field.name)) {
-                    const field_span = union_span.child(.field);
-                    defer field_span.deinit();
-                    field_span.debug("Processing union field: {s}", .{field.name});
-
-                    if (field.type == void) {
-                        field_span.debug("Void field, no additional data to write", .{});
-                    } else {
-                        const field_value = @field(value, field.name);
-                        const field_type = field.type;
-                        if (@hasDecl(T, field.name ++ "_size")) {
-                            field_span.debug("Field has size function", .{});
-                            const size_fn = @field(T, field.name ++ "_size");
-                            const size = @call(.auto, size_fn, .{params});
-                            field_span.debug("Size function returned: {d}", .{size});
-
-                            if (field_value.len != size) {
-                                field_span.err("Field slice length {d} does not match size function return value {d}", .{ field_value.len, size });
-                                return error.InvalidSliceLength;
-                            }
-
-                            for (field_value[0..size], 0..) |item, i| {
-                                const item_span = field_span.child(.slice_item);
-                                defer item_span.deinit();
-                                item_span.debug("Serializing item {d} of {d}", .{ i + 1, size });
-                                try recursiveSerializeLeaky(std.meta.Child(field_type), params, writer, item);
-                            }
-                            return;
-                        }
-
-                        field_span.debug("Serializing field value of type: {s}", .{@typeName(field.type)});
-                        try recursiveSerializeLeaky(field.type, params, writer, field_value);
-                    }
-                    break;
-                }
-            }
-            union_span.debug("Successfully serialized union", .{});
-        },
+        .pointer => return try serializePointer(T, params, writer, value),
+        .@"union" => return try serializeUnion(T, params, writer, value),
         else => {
             span.err("Unsupported type: {s}", .{@typeName(T)});
             @compileError("Unsupported type for serialization: " ++ @typeName(T));
@@ -643,15 +778,8 @@ pub fn serializeSliceAsArray(comptime T: type, writer: anytype, value: []const T
         const item_span = span.child(.slice_item);
         defer item_span.deinit();
         item_span.debug("Serializing item {d} of {d}", .{ i + 1, value.len });
-        try recursiveSerializeLeaky(T, .{}, writer, item);
+        try serializeInternal(T, .{}, writer, item);
     }
     span.debug("Successfully serialized all items", .{});
 }
 
-// Tests
-comptime {
-    _ = @import("codec/tests.zig");
-    _ = @import("codec/encoder/tests.zig");
-    _ = @import("codec/decoder/tests.zig");
-    _ = @import("codec/encoder.zig");
-}

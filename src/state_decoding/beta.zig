@@ -10,8 +10,7 @@ const RecentHistory = recent_blocks.RecentHistory;
 
 const decoder = @import("../codec/decoder.zig");
 const mmr = @import("../merkle_mountain_ranges.zig");
-
-const readInteger = @import("utils.zig").readInteger;
+const codec = @import("../codec.zig");
 
 const trace = @import("../tracing.zig").scoped(.decode_beta);
 
@@ -21,7 +20,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !RecentHistory {
     span.debug("Starting history decoding", .{});
 
     // Read number of blocks
-    const blocks_len = try readInteger(reader);
+    const blocks_len = try codec.readInteger(reader);
     span.debug("History contains {d} blocks", .{blocks_len});
 
     var history = try RecentHistory.init(allocator, 8); // Using constant 8 from original
@@ -44,7 +43,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !RecentHistory {
         const mmr_span = block_span.child(.mmr);
         defer mmr_span.deinit();
 
-        const mmr_len = try readInteger(reader);
+        const mmr_len = try codec.readInteger(reader);
         mmr_span.debug("Reading MMR peaks, length: {d}", .{mmr_len});
 
         var mmr_peaks = try allocator.alloc(?Hash, mmr_len);
@@ -76,7 +75,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !RecentHistory {
         const reports_span = block_span.child(.work_reports);
         defer reports_span.deinit();
 
-        const reports_len = try readInteger(reader);
+        const reports_len = try codec.readInteger(reader);
         reports_span.debug("Reading {d} work reports", .{reports_len});
 
         const work_reports = try allocator.alloc(ReportedWorkPackage, reports_len);

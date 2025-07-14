@@ -3,7 +3,6 @@ const types = @import("../../../types.zig");
 const codec = @import("../../../codec.zig");
 const state_dictionary = @import("../../../state_dictionary.zig");
 const merkle = @import("../../../merkle.zig");
-const utils = @import("../utils.zig");
 const export_types = @import("../../export.zig");
 
 const tracing = @import("../../../tracing.zig");

@@ -101,7 +101,7 @@ fn runRoundTripTestWithMutation(
     // 4. Generate reconstructed state root hash
     const reconstructed_state_root = try state_merklization.merklizeState(params, allocator, &reconstructed_state);
 
-    // 5. PRIMARY VERIFICATION: 
+    // 5. PRIMARY VERIFICATION:
     if (mutation_probability == 0.0) {
         // Without mutations, state roots must be identical
         try std.testing.expectEqualSlices(u8, &original_state_root, &reconstructed_state_root);
@@ -306,7 +306,7 @@ fn generateRandomSeed() u64 {
     return @intCast(std.time.nanoTimestamp() & 0xFFFFFFFFFFFFFFFF);
 }
 
-/// Test mutation robustness for a single iteration  
+/// Test mutation robustness for a single iteration
 fn testMutationRobustness(
     allocator: std.mem.Allocator,
     comptime params: Params,
@@ -380,26 +380,26 @@ fn applyRandomMutations(
                 mutable_value[byte_index] ^= (@as(u8, 1) << @as(u3, @intCast(bit_index)));
             }
         }
-        
+
         // Apply value shortening mutation (test parser robustness against truncated data)
         if (enable_shortening and rng.float(f32) < mutation_probability * 0.1) {
             if (entry.value_ptr.value.len > 1) {
-                // Randomly reduce value length by 10-90% 
+                // Randomly reduce value length by 10-90%
                 const reduction_percent = rng.intRangeAtMost(u8, 10, 90);
                 const bytes_to_remove = (entry.value_ptr.value.len * reduction_percent) / 100;
                 const new_length = entry.value_ptr.value.len - @min(bytes_to_remove, entry.value_ptr.value.len - 1);
-                
+
                 // Create a new shortened copy to replace the original value
                 // This avoids corrupting the slice metadata and memory management
                 const shortened_value = try allocator.alloc(u8, new_length);
                 @memcpy(shortened_value, entry.value_ptr.value[0..new_length]);
-                
+
                 // Free the old value and replace with shortened copy
                 allocator.free(entry.value_ptr.value);
                 entry.value_ptr.value = shortened_value;
             }
         }
-        
+
         // Less frequently, mutate the key itself
         if (rng.float(f32) < mutation_probability * 0.1) {
             const bit_index = rng.uintLessThan(u8, 31 * 8); // 31 bytes * 8 bits
@@ -435,11 +435,7 @@ test "mutation_robustness_with_shortening" {
     _ = testMutationRobustnessWithShortening(allocator, TINY, .moderate, 456, 0.15, true) catch |err| {
         // Various reconstruction errors are expected when data is truncated or corrupted
         switch (err) {
-            error.EndOfStream, 
-            error.InvalidData, 
-            error.OutOfMemory,
-            error.PreimageLookupEntryCannotBeReconstructedAccountMissing,
-            error.UnknownStateComponent => {
+            error.EndOfStream, error.InvalidData, error.OutOfMemory, error.PreimageLookupEntryCannotBeReconstructedAccountMissing, error.UnknownStateComponent => {
                 // These are expected failure modes for truncated/corrupted data - test passed
                 return;
             },
@@ -449,7 +445,7 @@ test "mutation_robustness_with_shortening" {
             },
         }
     };
-    
+
     // If we reach here, reconstruction succeeded despite shortening
     // This is also valid - it means the mutation didn't affect critical parsing paths
 }
@@ -464,16 +460,18 @@ test "shortening_stress_test_moderate" {
         _ = testMutationRobustnessWithShortening(allocator, TINY, .moderate, seed, 0.20, true) catch |err| {
             // Various reconstruction errors are expected when data is truncated or corrupted
             switch (err) {
-                error.EndOfStream, 
-                error.InvalidData, 
+                error.EndOfStream,
+                error.UnexpectedEndOfStream,
+                error.InvalidData,
                 error.OutOfMemory,
                 error.PreimageLookupEntryCannotBeReconstructedAccountMissing,
-                error.UnknownStateComponent => {
+                error.UnknownStateComponent,
+                => {
                     // Expected failure modes for truncated/corrupted data - continue with next iteration
                     continue;
                 },
                 else => {
-                    // Unexpected error - propagate it  
+                    // Unexpected error - propagate it
                     return err;
                 },
             }
@@ -522,7 +520,7 @@ pub fn runMutationStressTest(
 ) !void {
     var failures = std.ArrayList(StressTestFailure).init(allocator);
     defer failures.deinit();
-    
+
     var panics: usize = 0;
     var mutations_detected: usize = 0;
     var mutations_undetected: usize = 0;
@@ -530,7 +528,7 @@ pub fn runMutationStressTest(
     // Only test moderate and maximal complexity for mutation testing
     const distributions = [_]struct { complexity: StateComplexity, count: usize }{
         .{ .complexity = .moderate, .count = total_iterations * 2 / 3 }, // 67% moderate
-        .{ .complexity = .maximal, .count = total_iterations / 3 },      // 33% maximal
+        .{ .complexity = .maximal, .count = total_iterations / 3 }, // 33% maximal
     };
 
     var iteration: usize = 0;
@@ -563,7 +561,7 @@ pub fn runMutationStressTest(
                     panics += 1;
                     std.debug.print("💥 Iteration {d} PANIC ({s}, seed={d}): {}\n", .{ iteration, @tagName(dist.complexity), seed, err });
                 }
-                
+
                 continue;
             };
 
@@ -619,7 +617,7 @@ pub fn runShorteningStressTest(
 ) !void {
     var failures = std.ArrayList(StressTestFailure).init(allocator);
     defer failures.deinit();
-    
+
     var panics: usize = 0;
     var mutations_detected: usize = 0;
     var mutations_undetected: usize = 0;
@@ -628,7 +626,7 @@ pub fn runShorteningStressTest(
     // Focus on moderate and maximal complexity for shortening tests
     const distributions = [_]struct { complexity: StateComplexity, count: usize }{
         .{ .complexity = .moderate, .count = total_iterations * 3 / 4 }, // 75% moderate
-        .{ .complexity = .maximal, .count = total_iterations / 4 },      // 25% maximal
+        .{ .complexity = .maximal, .count = total_iterations / 4 }, // 25% maximal
     };
 
     var iteration: usize = 0;
@@ -661,7 +659,7 @@ pub fn runShorteningStressTest(
                     panics += 1;
                     std.debug.print("💥 Iteration {d} PANIC ({s}, seed={d}): {}\n", .{ iteration, @tagName(dist.complexity), seed, err });
                 }
-                
+
                 continue;
             };
 

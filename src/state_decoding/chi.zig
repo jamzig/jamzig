@@ -3,8 +3,7 @@ const testing = std.testing;
 const services_privileged = @import("../services_priviledged.zig");
 const Chi = services_privileged.Chi;
 const decoder = @import("../codec/decoder.zig");
-
-const readInteger = @import("utils.zig").readInteger;
+const codec = @import("../codec.zig");
 
 pub fn decode(allocator: std.mem.Allocator, reader: anytype) !Chi {
     var chi = Chi.init(allocator);
@@ -21,7 +20,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !Chi {
     chi.designate = if (designate_idx == 0) null else designate_idx;
 
     // Read always_accumulate map length
-    const map_len = try readInteger(reader);
+    const map_len = try codec.readInteger(reader);
 
     // Read always_accumulate entries (ordered by key)
     var i: usize = 0;
