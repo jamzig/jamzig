@@ -78,7 +78,7 @@ pub fn Deserialized(T: anytype) type {
 
 /// Deserializes a value of type T from a reader, returning a Deserialized wrapper
 /// that manages memory cleanup. The wrapper must be deinitialized after use.
-/// 
+///
 /// Parameters:
 /// - T: The type to deserialize
 /// - params: Compile-time parameters passed to custom decode methods
@@ -118,9 +118,9 @@ pub fn deserialize(
 /// Deserializes a value of type T from a reader, using the provided allocator directly.
 /// Unlike deserialize(), this returns the value directly without a wrapper.
 /// Memory is tracked and will be freed on error, but must be managed by caller on success.
-/// 
+///
 /// Parameters:
-/// - T: The type to deserialize  
+/// - T: The type to deserialize
 /// - params: Compile-time parameters passed to custom decode methods
 /// - allocator: The allocator to use for any allocations
 /// - reader: Any reader that supports readByte, readAll, readNoEof operations
@@ -210,7 +210,7 @@ fn deserializeSizedField(
 ) ![]std.meta.Child(FieldType) {
     const span = trace.span(.deserialize_sized_field);
     defer span.deinit();
-    
+
     span.debug("Field has size function", .{});
     const size_fn = @field(ParentType, field_name ++ "_size");
     const size = @call(.auto, size_fn, .{params});
@@ -225,7 +225,7 @@ fn deserializeSizedField(
         item_span.debug("Deserializing item {d} of {d}", .{ i + 1, size });
         item.* = try deserializeInternal(std.meta.Child(FieldType), params, allocator, reader);
     }
-    
+
     return slice;
 }
 
@@ -240,7 +240,7 @@ fn serializeSizedField(
 ) !void {
     const span = trace.span(.serialize_sized_field);
     defer span.deinit();
-    
+
     span.debug("Field has size function", .{});
     const size_fn = @field(ParentType, field_name ++ "_size");
     const size = @call(.auto, size_fn, .{params});
@@ -270,7 +270,7 @@ fn deserializeInt(comptime T: type, reader: anytype) !T {
     const intInfo = @typeInfo(T).int;
     const span = trace.span(.deserialize_int);
     defer span.deinit();
-    
+
     span.debug("Deserializing {d}-bit integer", .{intInfo.bits});
     inline for (.{ u8, u16, u32, u64, u128 }) |t| {
         if (intInfo.bits == @bitSizeOf(t)) {
@@ -289,7 +289,7 @@ fn deserializeOptional(comptime T: type, comptime params: anytype, allocator: st
     const optionalInfo = @typeInfo(T).optional;
     const span = trace.span(.deserialize_optional);
     defer span.deinit();
-    
+
     const present = try reader.readByte();
     span.debug("Deserializing optional, present byte: {d}", .{present});
 
@@ -514,7 +514,7 @@ fn deserializeArray(comptime T: type, comptime len: usize, comptime params: anyt
 // ---- Serialization ----
 
 /// Serializes a value to a writer using the JAM codec format.
-/// 
+///
 /// Parameters:
 /// - T: The type to serialize
 /// - params: Compile-time parameters passed to custom encode methods
@@ -529,13 +529,13 @@ pub fn serialize(comptime T: type, comptime params: anytype, writer: anytype, va
 }
 
 /// Serializes a value to a newly allocated byte slice.
-/// 
+///
 /// Parameters:
 /// - T: The type to serialize
 /// - params: Compile-time parameters passed to custom encode methods
 /// - allocator: The allocator to use for the result slice
 /// - value: The value to serialize
-/// 
+///
 /// Returns: An owned slice containing the serialized data
 pub fn serializeAlloc(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, value: T) ![]u8 {
     const span = trace.span(.serialize_alloc);
@@ -578,7 +578,7 @@ fn serializeInt(comptime T: type, writer: anytype, value: T) !void {
     const intInfo = @typeInfo(T).int;
     const span = trace.span(.serialize_int);
     defer span.deinit();
-    
+
     span.debug("Serializing {d}-bit integer: {d}", .{ intInfo.bits, value });
     inline for (.{ u8, u16, u32, u64, u128 }) |t| {
         if (intInfo.bits == @bitSizeOf(t)) {
@@ -782,4 +782,3 @@ pub fn serializeSliceAsArray(comptime T: type, writer: anytype, value: []const T
     }
     span.debug("Successfully serialized all items", .{});
 }
-

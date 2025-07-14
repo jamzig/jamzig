@@ -1,5 +1,4 @@
 /// Shared constants for the codec subsystem
-
 /// Maximum value that can be encoded in a single byte (eq. 272)
 pub const SINGLE_BYTE_MAX = 0x80;
 

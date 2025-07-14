@@ -3,7 +3,7 @@ const constants = @import("constants.zig");
 const errors = @import("errors.zig");
 
 /// Encodes an integer into a specified number of octets in little-endian format (eq. 271)
-/// 
+///
 /// Parameters:
 /// - l: Number of octets to encode (must be > 0)
 /// - x: The integer value to encode
@@ -33,7 +33,7 @@ pub const EncodingResult = struct {
     len: u8,
 
     /// Constructs an EncodingResult with optional prefix and data
-    /// 
+    ///
     /// Parameters:
     /// - prefix: Optional prefix byte (null if no prefix needed)
     /// - init_data: The encoded data bytes

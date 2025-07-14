@@ -1,5 +1,4 @@
 /// Unified error set for the codec subsystem
-
 /// Errors that can occur during encoding operations
 pub const EncodingError = error{
     /// Buffer is too small for the encoded data
