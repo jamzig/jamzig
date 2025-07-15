@@ -3,6 +3,7 @@ const std = @import("std");
 const pvm_accumulate = @import("../pvm_invocations/accumulate.zig");
 const types = @import("../types.zig");
 const state = @import("../state.zig");
+const state_delta = @import("../state_delta.zig");
 const jam_params = @import("../jam_params.zig");
 const meta = @import("../meta.zig");
 
@@ -401,5 +402,49 @@ pub fn singleServiceAccumulation(
         service_id,
         gas_limit,
         if (service_operands) |so| so.accumulationOperandSlice() else &[_]AccumulationOperand{},
+    );
+}
+
+/// Main execution entry point for accumulation
+/// This coordinates the execution of work reports through the PVM
+pub fn executeAccumulation(
+    comptime params: jam_params.Params,
+    allocator: std.mem.Allocator,
+    stx: *state_delta.StateTransition(params),
+    accumulatable: []const types.WorkReport,
+    gas_limit: u64,
+    chi: *state.Chi,
+) !OuterAccumulationResult {
+    const span = trace.span(.execute_accumulation);
+    defer span.deinit();
+
+    // Build accumulation context
+    var accumulation_context = pvm_accumulate.AccumulationContext(params).build(
+        allocator,
+        .{
+            .service_accounts = try stx.ensure(.delta_prime),
+            .validator_keys = try stx.ensure(.iota_prime),
+            .authorizer_queue = try stx.ensure(.phi_prime),
+            .privileges = try stx.ensure(.chi_prime),
+            .time = &stx.time,
+            .entropy = (try stx.ensure(.eta_prime))[0],
+        },
+    );
+    defer accumulation_context.deinit();
+
+    span.debug("Executing outer accumulation with {d} reports and gas limit {d}", .{ 
+        accumulatable.len, gas_limit 
+    });
+
+    // Execute work reports scheduled for accumulation
+    return try outerAccumulation(
+        params,
+        allocator,
+        gas_limit,
+        accumulatable,
+        &accumulation_context,
+        &chi.always_accumulate,
+        stx.time.current_slot,
+        (try stx.ensure(.eta_prime))[0],
     );
 }
