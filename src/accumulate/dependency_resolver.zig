@@ -1,5 +1,5 @@
 //! Dependency resolution for work reports according to JAM §12.5-12.8
-//! 
+//!
 //! This module handles the complex dependency chains between work reports,
 //! ensuring they are processed in the correct order to maintain state consistency.
 //! Uses topological sorting and iterative resolution to handle complex
@@ -43,9 +43,9 @@ pub fn DependencyResolver(comptime params: Params) type {
         /// Main entry point: Prepares reports for accumulation by resolving dependencies
         pub fn prepareReportsForAccumulation(
             self: Self,
-            reports: []types.WorkReport,
             xi: *state.Xi(params.epoch_length),
             theta: *state.Theta(params.epoch_length),
+            reports: []types.WorkReport,
             current_slot_in_epoch: u32,
         ) !PreparedReports {
             const span = trace.span(.prepare_reports_for_accumulation);
@@ -360,3 +360,4 @@ fn mapWorkPackageHash(buffer: anytype, items: anytype) ![]types.WorkReportHash {
     }
     return buffer.items;
 }
+

@@ -85,12 +85,12 @@ pub const ProcessAccumulationResult = struct {
 pub fn outerAccumulation(
     comptime params: @import("../jam_params.zig").Params,
     allocator: std.mem.Allocator,
-    gas_limit: types.Gas,
-    work_reports: []const types.WorkReport,
     context: *const AccumulationContext(params),
     privileged_services: *const std.AutoHashMap(types.ServiceId, types.Gas),
     tau: types.TimeSlot,
     entropy: types.Entropy,
+    work_reports: []const types.WorkReport,
+    gas_limit: types.Gas,
 ) !OuterAccumulationResult {
     const span = trace.span(.outer_accumulation);
     defer span.deinit();
@@ -165,10 +165,10 @@ pub fn outerAccumulation(
             params,
             allocator,
             context,
-            current_reports[0..reports_to_process],
             current_privileged_services,
             tau,
             entropy,
+            current_reports[0..reports_to_process],
         );
         defer parallelized_result.deinit(allocator);
         // Gather all transfers
@@ -261,10 +261,10 @@ pub fn parallelizedAccumulation(
     comptime params: jam_params.Params,
     allocator: std.mem.Allocator,
     context: *const AccumulationContext(params),
-    work_reports: []const types.WorkReport,
     privileged_services: *const std.AutoHashMap(types.ServiceId, types.Gas),
     tau: types.TimeSlot,
     entropy: types.Entropy,
+    work_reports: []const types.WorkReport,
 ) !ParallelizedAccumulationResult {
     const span = trace.span(.parallelized_accumulation);
     defer span.deinit();
@@ -411,9 +411,9 @@ pub fn executeAccumulation(
     comptime params: jam_params.Params,
     allocator: std.mem.Allocator,
     stx: *state_delta.StateTransition(params),
+    chi: *state.Chi,
     accumulatable: []const types.WorkReport,
     gas_limit: u64,
-    chi: *state.Chi,
 ) !OuterAccumulationResult {
     const span = trace.span(.execute_accumulation);
     defer span.deinit();
@@ -440,11 +440,11 @@ pub fn executeAccumulation(
     return try outerAccumulation(
         params,
         allocator,
-        gas_limit,
-        accumulatable,
         &accumulation_context,
         &chi.always_accumulate,
         stx.time.current_slot,
         (try stx.ensure(.eta_prime))[0],
+        accumulatable,
+        gas_limit,
     );
 }

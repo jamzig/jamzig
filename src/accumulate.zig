@@ -49,9 +49,9 @@ pub fn processAccumulateReports(
     // Step 1: Resolve dependencies and prepare reports
     const resolver = DependencyResolver(params).init(allocator);
     var prepared = try resolver.prepareReportsForAccumulation(
-        reports,
         xi,
         theta,
+        reports,
         stx.time.current_slot_in_epoch,
     );
     defer {
@@ -70,9 +70,9 @@ pub fn processAccumulateReports(
         params,
         allocator,
         stx,
+        chi,
         accumulatable,
         gas_limit,
-        chi,
     );
     defer execution_result.deinit(allocator);
 

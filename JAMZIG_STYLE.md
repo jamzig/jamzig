@@ -15,10 +15,11 @@ This style guide combines JamZig's specific implementation principles with Zig's
 The fundamental principle is **caller-controlled memory ownership**. This means:
 
 1. **No Hidden Allocations**: Functions that add data to collections or aggregates NEVER perform `dupe` or `memcpy` internally
-2. **Explicit Ownership Transfer**: The caller decides whether to:
+2. **References Never Transfer Ownership**: Functions returning `[]T`, `*T`, or `?[]T` never transfer ownership to the caller
+3. **Explicit Ownership Transfer**: The caller decides whether to:
    - Move ownership (pass data directly)
    - Keep ownership (explicitly `dupe` at call site)
-3. **Transparent Memory Operations**: All allocations are visible at the call site
+4. **Transparent Memory Operations**: All allocations are visible at the call site
 
 Example:
 ```zig
@@ -302,6 +303,65 @@ pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
     };
 }
 ```
+
+## Function Parameter Ordering
+
+To maintain consistency and predictability across the codebase, follow this parameter ordering:
+
+### Parameter Order (from first to last):
+
+1. **Self parameter** (`self`, `*self`, `*const self`)
+2. **Compile-time parameters** (`comptime` params)
+3. **Allocator** (if needed)
+4. **State components** (in canonical order):
+   - Alpha (α) - Authorizations
+   - Beta (β) - Recent blocks
+   - Gamma (γ) - Safrole state
+   - Delta (δ) - Service accounts
+   - Eta (η) - Entropy
+   - Theta (θ) - Work reports ready
+   - Iota (ι) - Validator keys
+   - Kappa (κ) - Judgments
+   - Lambda (λ) - Assurances
+   - Xi (ξ) - Accumulated reports
+   - Phi (φ) - Authorizer queue
+   - Chi (χ) - Service privileges
+   - Psi (ψ) - Preimage storage
+   - Rho (ρ) - Pending reports
+   - Tau (τ) - Time/timestamp
+5. **Context/configuration objects** (e.g., `StateTransition`, `AccumulationContext`)
+6. **Primary data to be processed** (e.g., `reports`, `transfers`, `blocks`)
+7. **Secondary/derived parameters** (e.g., `gas_limit`, `slot_in_epoch`)
+8. **Output parameters** (if any)
+
+### Examples:
+
+```zig
+// GOOD: State components come before data
+pub fn processReports(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    xi: *state.Xi,              // State component
+    theta: *state.Theta,         // State component
+    reports: []WorkReport,       // Data to process
+    gas_limit: u64,             // Secondary parameter
+) !Result { ... }
+
+// BAD: Data comes before state components
+pub fn processReports(
+    self: *Self,
+    reports: []WorkReport,       // Should come after state
+    xi: *state.Xi,
+    theta: *state.Theta,
+    gas_limit: u64,
+) !Result { ... }
+```
+
+### Rationale:
+- **Predictability**: Developers know where to find parameters
+- **State-first**: Emphasizes state management in blockchain context
+- **Data flow**: Parameters flow from context (state) to data to modifiers
+- **Consistency**: Same ordering across all functions reduces cognitive load
 
 ## Formatting Rules
 
