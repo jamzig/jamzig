@@ -29,7 +29,7 @@ const trace = @import("tracing.zig").scoped(.accumulate);
 
 /// Main entry point for processing work reports according to JAM §12.1
 /// Coordinates the full accumulation pipeline through specialized modules
-pub fn processAccumulateReports(
+pub fn processAccumulationReports(
     comptime params: Params,
     stx: *state_delta.StateTransition(params),
     reports: []types.WorkReport,

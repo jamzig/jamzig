@@ -41,6 +41,15 @@ pub fn DependencyResolver(comptime params: Params) type {
         }
 
         /// Main entry point: Prepares reports for accumulation by resolving dependencies
+        /// 
+        /// This function takes a slice of work reports and prepares them for accumulation by:
+        /// 1. Partitioning into immediately accumulatable vs queued reports
+        /// 2. Filtering out already accumulated reports
+        /// 3. Resolving dependencies between reports
+        /// 
+        /// Ownership: This function clones the input reports as needed. The caller retains
+        /// ownership of the original reports slice. The returned PreparedReports contains
+        /// newly allocated data that the caller must eventually clean up.
         pub fn prepareReportsForAccumulation(
             self: Self,
             xi: *state.Xi(params.epoch_length),
