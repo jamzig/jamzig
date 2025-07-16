@@ -26,9 +26,9 @@ pub fn validateAndProcessAssuranceExtrinsic(
     const available_assignments = try assurances.processAssuranceExtrinsic(
         params,
         allocator,
+        rho,
         valid_extrinsic,
         test_case.input.slot,
-        rho,
     );
     return available_assignments;
 }

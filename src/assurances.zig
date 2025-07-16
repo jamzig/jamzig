@@ -10,7 +10,7 @@ const trace = tracing.scoped(.assurances);
 pub const ValidatedAssuranceExtrinsic = struct {
     inner: types.AssurancesExtrinsic,
 
-    const Error = error{
+    const ValidationError = error{
         InvalidBitfieldSize,
         DuplicateValidatorIndex,
         NotSortedOrUniqueValidatorIndex,
@@ -24,7 +24,7 @@ pub const ValidatedAssuranceExtrinsic = struct {
         return self.inner.data;
     }
 
-    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         self.inner.deinit(allocator);
         self.* = undefined;
     }
@@ -35,7 +35,13 @@ pub const ValidatedAssuranceExtrinsic = struct {
         extrinsic: types.AssurancesExtrinsic,
         parent_hash: types.HeaderHash,
         kappa: types.ValidatorSet,
-    ) Error!@This() {
+    ) ValidationError!@This() {
+        // Compile-time assertions for parameters
+        comptime {
+            std.debug.assert(params.core_count > 0);
+            std.debug.assert(params.validators_count > 0);
+            std.debug.assert(params.avail_bitfield_bytes == (params.core_count + 7) / 8);
+        }
         const span = trace.span(.validate);
         defer span.deinit();
         span.debug("Starting validation of AssuranceExtrinsic with {d} assurances", .{extrinsic.data.len});
@@ -54,17 +60,17 @@ pub const ValidatedAssuranceExtrinsic = struct {
             // Validate bitfield size
             if (assurance.bitfield.len != params.avail_bitfield_bytes) {
                 assurance_span.err("Invalid bitfield size {d}, expected {d}", .{ assurance.bitfield.len, params.avail_bitfield_bytes });
-                return Error.InvalidBitfieldSize;
+                return ValidationError.InvalidBitfieldSize;
             }
 
             // Ensure strictly increasing validator indices
             assurance_span.trace("Checking validator index ordering - current: {d}, previous: {d}", .{ assurance.validator_index, prev_validator_idx });
             if (assurance.validator_index == prev_validator_idx) {
                 assurance_span.err("Duplicate validator index {d}", .{assurance.validator_index});
-                return Error.NotSortedOrUniqueValidatorIndex;
+                return ValidationError.NotSortedOrUniqueValidatorIndex;
             } else if (assurance.validator_index < prev_validator_idx) {
                 assurance_span.err("Validator indices not sorted - current: {d}, previous: {d}", .{ assurance.validator_index, prev_validator_idx });
-                return Error.NotSortedOrUniqueValidatorIndex;
+                return ValidationError.NotSortedOrUniqueValidatorIndex;
             }
             prev_validator_idx = assurance.validator_index;
 
@@ -72,7 +78,7 @@ pub const ValidatedAssuranceExtrinsic = struct {
             assurance_span.trace("Validating anchor hash", .{});
             if (!std.mem.eql(u8, &assurance.anchor, &parent_hash)) {
                 assurance_span.err("Invalid anchor hash - doesn't match parent", .{});
-                return Error.InvalidAnchorHash;
+                return ValidationError.InvalidAnchorHash;
             }
 
             // Validate signature
@@ -81,36 +87,51 @@ pub const ValidatedAssuranceExtrinsic = struct {
             signature_span.debug("Validating signature for validator {d}", .{assurance.validator_index});
 
             // The message is: "jam_available" ++ H(E(anchor, bitfield))
-            const prefix: []const u8 = "jam_available";
-            var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-            hasher.update(&assurance.anchor);
-            hasher.update(assurance.bitfield);
-            var hash: [32]u8 = undefined;
-            hasher.final(&hash);
-
-            if (assurance.validator_index >= kappa.validators.len) {
-                signature_span.err("Invalid validator index {d}, max allowed {d}", .{ assurance.validator_index, kappa.validators.len - 1 });
-                return Error.InvalidValidatorIndex;
-            }
-
-            signature_span.trace("Retrieving public key for validator {d}", .{assurance.validator_index});
-            const public_key = kappa.validators[assurance.validator_index].ed25519;
-            const validator_pub_key = crypto.sign.Ed25519.PublicKey.fromBytes(public_key) catch {
-                signature_span.err("Invalid public key format for validator {d}", .{assurance.validator_index});
-                return Error.InvalidPublicKey;
-            };
-
-            const signature = crypto.sign.Ed25519.Signature.fromBytes(assurance.signature);
-
-            signature_span.trace("Verifying signature", .{});
-            signature.verify(prefix ++ &hash, validator_pub_key) catch {
-                signature_span.err("Signature verification failed for validator {d}", .{assurance.validator_index});
-                return Error.InvalidSignature;
-            };
-            signature_span.debug("Signature verified successfully", .{});
+            try validateSignature(
+                &signature_span,
+                assurance,
+                kappa,
+            );
         }
 
         return ValidatedAssuranceExtrinsic{ .inner = extrinsic };
+    }
+
+    fn validateSignature(
+        span: anytype,
+        assurance: types.AvailAssurance,
+        kappa: types.ValidatorSet,
+    ) ValidationError!void {
+        // Validate validator index bounds
+        if (assurance.validator_index >= kappa.validators.len) {
+            span.err("Invalid validator index {d}, max allowed {d}", .{ assurance.validator_index, kappa.validators.len - 1 });
+            return ValidationError.InvalidValidatorIndex;
+        }
+
+        // Compute message hash: "jam_available" ++ H(E(anchor, bitfield))
+        const prefix: []const u8 = "jam_available";
+        var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
+        hasher.update(&assurance.anchor);
+        hasher.update(assurance.bitfield);
+        var hash: [32]u8 = undefined;
+        hasher.final(&hash);
+
+        // Get validator public key
+        span.trace("Retrieving public key for validator {d}", .{assurance.validator_index});
+        const public_key = kappa.validators[assurance.validator_index].ed25519;
+        const validator_pub_key = crypto.sign.Ed25519.PublicKey.fromBytes(public_key) catch {
+            span.err("Invalid public key format for validator {d}", .{assurance.validator_index});
+            return ValidationError.InvalidPublicKey;
+        };
+
+        // Verify signature
+        const signature = crypto.sign.Ed25519.Signature.fromBytes(assurance.signature);
+        span.trace("Verifying signature", .{});
+        signature.verify(prefix ++ &hash, validator_pub_key) catch {
+            span.err("Signature verification failed for validator {d}", .{assurance.validator_index});
+            return ValidationError.InvalidSignature;
+        };
+        span.debug("Signature verified successfully", .{});
     }
 };
 
@@ -132,7 +153,7 @@ pub const AvailableAssignments = struct {
 
         return reports;
     }
-    /// Returns allocated slice of deepCloned WorkReports
+    /// Returns allocated slice of deepCloned WorkReports. Caller owns the slice.
     pub fn getWorkReports(self: @This(), allocator: std.mem.Allocator) ![]types.WorkReport {
         var reports = try allocator.alloc(types.WorkReport, self.inner.len);
         errdefer allocator.free(reports);
@@ -160,13 +181,18 @@ pub const AvailableAssignments = struct {
 pub fn processAssuranceExtrinsic(
     comptime params: @import("jam_params.zig").Params,
     allocator: std.mem.Allocator,
+    pending_reports: *state.Rho(params.core_count),
     assurances_extrinsic: ValidatedAssuranceExtrinsic,
     current_slot: types.TimeSlot,
-    pending_reports: *state.Rho(params.core_count),
 ) !AvailableAssignments {
     const span = trace.span(.process_assurance_extrinsic);
     defer span.deinit();
     span.debug("Processing assurance extrinsic with {d} assurances", .{assurances_extrinsic.items().len});
+
+    // Assert preconditions
+    std.debug.assert(params.core_count > 0);
+    std.debug.assert(params.validators_super_majority > 0);
+    std.debug.assert(params.validators_super_majority <= params.validators_count);
 
     // Just track counts per core instead of individual validator bits
     var core_assurance_counts = [_]usize{0} ** params.core_count;
@@ -182,36 +208,12 @@ pub fn processAssuranceExtrinsic(
             defer bitfield_span.deinit();
             bitfield_span.debug("Processing assurance {d}: bitfield={}", .{ assurance_idx, std.fmt.fmtSliceHexLower(assurance.bitfield) });
 
-            const bytes_per_field = (params.core_count + 7) / 8;
-            var byte_idx: usize = 0;
-            while (byte_idx < bytes_per_field) : (byte_idx += 1) {
-                const byte = assurance.bitfield[byte_idx];
-                if (byte == 0) {
-                    bitfield_span.trace("Byte {d}: 0x00 (skipping empty byte)", .{byte_idx});
-                    continue;
-                }
-
-                const byte_span = bitfield_span.child(.process_byte);
-                defer byte_span.deinit();
-                byte_span.trace("Processing byte {d}: 0x{x:0>2}", .{ byte_idx, byte });
-
-                var bit_pos: u4 = 0;
-                while (bit_pos < 8) : (bit_pos += 1) {
-                    const core_idx = byte_idx * 8 + bit_pos;
-                    if (core_idx >= params.core_count) {
-                        byte_span.trace("Stopping at bit {d}: core_idx {d} >= core_count {d}", .{ bit_pos, core_idx, params.core_count });
-                        break;
-                    }
-
-                    const bit_value = (byte & (@as(u8, 1) << @intCast(bit_pos))) != 0;
-                    if (bit_value) {
-                        core_assurance_counts[core_idx] += 1;
-                        byte_span.trace("core[{d}] bit {d}: set   (count now {d})", .{ core_idx, bit_pos, core_assurance_counts[core_idx] });
-                    } else {
-                        byte_span.trace("core[{d}] bit {d}: unset (count now {d})", .{ core_idx, bit_pos, core_assurance_counts[core_idx] });
-                    }
-                }
-            }
+            processBitfield(
+                params.core_count,
+                assurance.bitfield,
+                &core_assurance_counts,
+                &bitfield_span,
+            );
             bitfield_span.debug("Finished processing bitfield, current counts: {any}", .{core_assurance_counts});
         }
         process_span.debug("Finished processing all bitfields", .{});
@@ -254,23 +256,80 @@ pub fn processAssuranceExtrinsic(
     }
 
     // Now remove any remaining timed out reports
-    {
-        const timeout_span = span.child(.cleanup_timeouts);
-        defer timeout_span.deinit();
-        timeout_span.debug("Checking for timed out reports at slot {d}", .{current_slot});
-        for (&pending_reports.reports, 0..) |*report, core_idx| {
-            if (report.*) |*pending_report| {
-                const report_timeout = pending_report.assignment.timeout + params.work_replacement_period;
-                if (current_slot >= report_timeout) {
-                    timeout_span.debug("core {d}: report.timeout {d} < {d} => remove", .{ core_idx, report_timeout, current_slot });
-                    // Report has timed out, remove it
-                    pending_report.deinit(allocator);
-                    report.* = null;
-                }
-            }
-        }
-    }
+    cleanupTimedOutReports(
+        params.work_replacement_period,
+        allocator,
+        pending_reports,
+        current_slot,
+        &span,
+    );
 
     span.debug("Completed processing with {d} assured reports", .{assured_reports.items.len});
     return .{ .inner = try assured_reports.toOwnedSlice() };
+}
+
+fn processBitfield(
+    core_count: u16,
+    bitfield: []const u8,
+    core_assurance_counts: []usize,
+    span: anytype,
+) void {
+    std.debug.assert(core_count > 0);
+    std.debug.assert(bitfield.len == (core_count + 7) / 8);
+    std.debug.assert(core_assurance_counts.len == core_count);
+
+    const bytes_per_field = (core_count + 7) / 8;
+    var byte_idx: usize = 0;
+    while (byte_idx < bytes_per_field) : (byte_idx += 1) {
+        const byte = bitfield[byte_idx];
+        if (byte == 0) {
+            span.trace("Byte {d}: 0x00 (skipping empty byte)", .{byte_idx});
+            continue;
+        }
+
+        const byte_span = span.child(.process_byte);
+        defer byte_span.deinit();
+        byte_span.trace("Processing byte {d}: 0x{x:0>2}", .{ byte_idx, byte });
+
+        var bit_pos: u4 = 0;
+        while (bit_pos < 8) : (bit_pos += 1) {
+            const core_idx = byte_idx * 8 + bit_pos;
+            if (core_idx >= core_count) {
+                byte_span.trace("Stopping at bit {d}: core_idx {d} >= core_count {d}", .{ bit_pos, core_idx, core_count });
+                break;
+            }
+
+            const bit_value = (byte & (@as(u8, 1) << @intCast(bit_pos))) != 0;
+            if (bit_value) {
+                core_assurance_counts[core_idx] += 1;
+                byte_span.trace("core[{d}] bit {d}: set   (count now {d})", .{ core_idx, bit_pos, core_assurance_counts[core_idx] });
+            } else {
+                byte_span.trace("core[{d}] bit {d}: unset (count now {d})", .{ core_idx, bit_pos, core_assurance_counts[core_idx] });
+            }
+        }
+    }
+}
+
+fn cleanupTimedOutReports(
+    work_replacement_period: u8,
+    allocator: std.mem.Allocator,
+    pending_reports: anytype,
+    current_slot: types.TimeSlot,
+    span: anytype,
+) void {
+    const timeout_span = span.child(.cleanup_timeouts);
+    defer timeout_span.deinit();
+    timeout_span.debug("Checking for timed out reports at slot {d}", .{current_slot});
+
+    for (&pending_reports.reports, 0..) |*report, core_idx| {
+        if (report.*) |*pending_report| {
+            const report_timeout = pending_report.assignment.timeout + work_replacement_period;
+            if (current_slot >= report_timeout) {
+                timeout_span.debug("core {d}: report.timeout {d} < {d} => remove", .{ core_idx, report_timeout, current_slot });
+                // Report has timed out, remove it
+                pending_report.deinit(allocator);
+                report.* = null;
+            }
+        }
+    }
 }

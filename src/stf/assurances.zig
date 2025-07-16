@@ -43,8 +43,8 @@ pub fn transition(
     return try assurances.processAssuranceExtrinsic(
         params,
         allocator,
+        pending_reports,
         validated,
         stx.time.current_slot,
-        pending_reports,
     );
 }
