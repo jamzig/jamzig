@@ -79,10 +79,6 @@ pub const Psi = struct {
         self.* = undefined;
     }
 
-    // JSON stringify implementation
-    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-        try @import("state_json/disputes.zig").jsonStringify(self, jw);
-    }
 
     // Format implementation
     pub fn format(
@@ -91,7 +87,12 @@ pub const Psi = struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        try @import("state_format/psi.zig").format(self, fmt, options, writer);
+        const tfmt = @import("types/fmt.zig");
+        const formatter = tfmt.Format(@TypeOf(self.*)){
+            .value = self.*,
+            .options = .{},
+        };
+        try formatter.format(fmt, options, writer);
     }
 };
 

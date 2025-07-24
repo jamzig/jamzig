@@ -79,9 +79,6 @@ pub const RecentHistory = struct {
         };
     }
 
-    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-        try @import("state_json/recent_blocks.zig").jsonStringify(self, jw);
-    }
 
     pub fn format(
         self: *const @This(),
@@ -89,7 +86,12 @@ pub const RecentHistory = struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        try @import("state_format/recent_blocks.zig").format(self, fmt, options, writer);
+        const tfmt = @import("types/fmt.zig");
+        const formatter = tfmt.Format(@TypeOf(self.*)){
+            .value = self.*,
+            .options = .{},
+        };
+        try formatter.format(fmt, options, writer);
     }
 
     /// Frees all resources associated with the RecentHistory

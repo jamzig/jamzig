@@ -153,9 +153,6 @@ pub fn Theta(comptime epoch_size: usize) type {
             self.* = undefined;
         }
 
-        pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-            try @import("state_json/reports_ready.zig").jsonStringify(epoch_size, self, jw);
-        }
 
         pub fn format(
             self: *const @This(),
@@ -163,7 +160,12 @@ pub fn Theta(comptime epoch_size: usize) type {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try @import("state_format/reports_ready.zig").format(epoch_size, self, fmt, options, writer);
+            const tfmt = @import("types/fmt.zig");
+            const formatter = tfmt.Format(@TypeOf(self.*)){
+                .value = self.*,
+                .options = .{},
+            };
+            try formatter.format(fmt, options, writer);
         }
     };
 }

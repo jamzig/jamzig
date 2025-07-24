@@ -268,7 +268,12 @@ pub fn JamState(comptime params: Params) type {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try @import("state_format/jam_state.zig").format(params, self, fmt, options, writer);
+            const tfmt = @import("types/fmt.zig");
+            const formatter = tfmt.Format(@TypeOf(self.*)){
+                .value = self.*,
+                .options = .{},
+            };
+            try formatter.format(fmt, options, writer);
         }
     };
 }

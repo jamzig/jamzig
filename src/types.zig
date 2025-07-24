@@ -119,9 +119,6 @@ pub const ValidatorData = struct {
     bls: BlsPublic,
     metadata: ValidatorMetadata,
 
-    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-        try @import("state_json/types.zig").jsonStringify(self, jw);
-    }
 };
 
 pub const WorkItem = struct {

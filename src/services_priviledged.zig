@@ -46,9 +46,6 @@ pub const Chi = struct {
         self.* = undefined;
     }
 
-    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-        try @import("state_json/services_priviledged.zig").jsonStringify(self, jw);
-    }
 
     pub fn format(
         self: *const @This(),
@@ -56,7 +53,12 @@ pub const Chi = struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        try @import("state_format/chi.zig").format(self, fmt, options, writer);
+        const tfmt = @import("types/fmt.zig");
+        const formatter = tfmt.Format(@TypeOf(self.*)){
+            .value = self.*,
+            .options = .{},
+        };
+        try formatter.format(fmt, options, writer);
     }
 
     pub fn setManager(self: *Chi, index: ?ServiceIndex) void {

@@ -107,12 +107,14 @@ pub fn Rho(comptime core_count: u16) type {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try @import("state_format/rho.zig").format(core_count, self, fmt, options, writer);
+            const tfmt = @import("types/fmt.zig");
+            const formatter = tfmt.Format(@TypeOf(self.*)){
+                .value = self.*,
+                .options = .{},
+            };
+            try formatter.format(fmt, options, writer);
         }
 
-        pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-            try @import("state_json/reports_pending.zig").jsonStringify(core_count, self, jw);
-        }
 
         pub fn init(allocator: std.mem.Allocator) @This() {
             const span = trace.span(.init);

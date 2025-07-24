@@ -74,9 +74,6 @@ pub fn Phi(
             self.* = undefined;
         }
 
-        pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-            try @import("state_json/authorization_queue.zig").jsonStringify(self, jw);
-        }
 
         pub fn format(
             self: *const @This(),
@@ -84,14 +81,12 @@ pub fn Phi(
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try @import("state_format/phi.zig").format(
-                core_count,
-                authorization_queue_length,
-                self,
-                fmt,
-                options,
-                writer,
-            );
+            const tfmt = @import("types/fmt.zig");
+            const formatter = tfmt.Format(@TypeOf(self.*)){
+                .value = self.*,
+                .options = .{},
+            };
+            try formatter.format(fmt, options, writer);
         }
 
         // Get the entire queue for a specific core

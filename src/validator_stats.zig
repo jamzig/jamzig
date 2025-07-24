@@ -44,9 +44,6 @@ pub const ValidatorStats = struct {
         self.availability_assurances += count;
     }
 
-    pub fn jsonStringify(stats: *const @This(), jw: anytype) !void {
-        try @import("state_json/validator_stats.zig").jsonStringifyValidatorStats(stats, jw);
-    }
 };
 
 pub const CoreActivityRecord = struct {
@@ -339,9 +336,6 @@ pub const Pi = struct {
         self.* = undefined;
     }
 
-    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-        try @import("state_json/validator_stats.zig").jsonStringifyPi(self, jw);
-    }
 
     pub fn format(
         self: *const @This(),
@@ -349,6 +343,11 @@ pub const Pi = struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        try @import("state_format/pi.zig").formatPi(self, fmt, options, writer);
+        const tfmt = @import("types/fmt.zig");
+        const formatter = tfmt.Format(@TypeOf(self.*)){
+            .value = self.*,
+            .options = .{},
+        };
+        try formatter.format(fmt, options, writer);
     }
 };
