@@ -550,10 +550,7 @@ pub fn buildStateMerklizationDictionaryWithConfig(
         const rho_key = state_keys.constructStateComponentKey(10);
         var rho_managed = try getOrInitManaged(allocator, &state.rho, .{allocator});
         defer rho_managed.deinit(allocator);
-
-        var rho_buffer = std.ArrayList(u8).init(allocator); // TODO: reuse buffers
-        try state_encoder.encodeRho(params, rho_managed.ptr, rho_buffer.writer());
-        const rho_value = try rho_buffer.toOwnedSlice();
+        const rho_value = try encodeAndOwnSlice(allocator, state_encoder.encodeRho, .{ params, rho_managed.ptr });
         try map.put(rho_key, .{
             .key = rho_key,
             .value = rho_value,
