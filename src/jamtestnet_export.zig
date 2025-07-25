@@ -47,7 +47,7 @@ pub fn main() !void {
 
         // Perform state transition
         var state_transition = try stf.stateTransition(PARAMS, allocator, &builder.state, &block);
-        defer state_transition.deinitHeap();
+        defer state_transition.destroy(allocator);
 
         try state_transition.mergePrimeOntoBase();
 
