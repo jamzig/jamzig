@@ -165,10 +165,11 @@ pub fn JamState(comptime params: Params) type {
             var state = try JamState(params).init(allocator);
 
             try state.initAlpha(allocator);
+            try state.initPhi(allocator);
+
             try state.initBeta(allocator);
             try state.initChi(allocator);
             try state.initDelta(allocator);
-            try state.initPhi(allocator);
             try state.initPsi(allocator);
             try state.initPi(allocator);
             try state.initXi(allocator);
@@ -267,7 +268,12 @@ pub fn JamState(comptime params: Params) type {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try @import("state_format/jam_state.zig").format(params, self, fmt, options, writer);
+            const tfmt = @import("types/fmt.zig");
+            const formatter = tfmt.Format(@TypeOf(self.*)){
+                .value = self.*,
+                .options = .{},
+            };
+            try formatter.format(fmt, options, writer);
         }
     };
 }

@@ -1,31 +1,46 @@
 const std = @import("std");
+const constants = @import("constants.zig");
+const errors = @import("errors.zig");
+const util = @import("util.zig");
 
-/// (271) Reverse function
-/// Decodes a fixed-length integer from a slice of bytes in little-endian format
+/// Decodes a fixed-length integer from bytes in little-endian format (eq. 271 reverse)
+///
+/// Parameters:
+/// - T: The integer type to decode into
+/// - buffer: Input buffer containing the encoded bytes
+///
+/// Returns: The decoded integer value
 pub fn decodeFixedLengthInteger(comptime T: type, buffer: []const u8) T {
     std.debug.assert(buffer.len > 0);
     std.debug.assert(buffer.len <= @sizeOf(T));
 
     var result: T = 0;
     for (buffer, 0..) |byte, i| {
-        result |= @as(T, byte) << @intCast(i * 8);
+        result |= @as(T, byte) << @intCast(i * constants.BYTE_SHIFT);
     }
     return result;
 }
 
-/// (272) Function to decode an integer (0 to 2^64) from a variable-length
-/// encoding as described in the gray paper.
-const util = @import("util.zig");
-
-/// DecodeResult type containing the decoded u64 value and the number of bytes read
+/// Decodes an integer (0 to 2^64) from variable-length encoding (eq. 272)
+/// as described in the graypaper.
+/// Result of variable-length integer decoding
 pub const DecodeResult = struct {
+    /// The decoded integer value
     value: u64,
+    /// Number of bytes consumed from the input buffer
     bytes_read: usize,
 };
 
+/// Decodes a variable-length integer from a buffer
+///
+/// Parameters:
+/// - buffer: Input buffer containing the encoded integer
+///
+/// Returns: DecodeResult with the value and bytes consumed
+/// Errors: EmptyBuffer, InsufficientData
 pub fn decodeInteger(buffer: []const u8) !DecodeResult {
     if (buffer.len == 0) {
-        return error.EmptyBuffer;
+        return errors.DecodingError.EmptyBuffer;
     }
 
     const first_byte = buffer[0];
@@ -34,14 +49,14 @@ pub fn decodeInteger(buffer: []const u8) !DecodeResult {
         return DecodeResult{ .value = 0, .bytes_read = 1 };
     }
 
-    if (first_byte < 0x80) {
+    if (first_byte < constants.SINGLE_BYTE_MAX) {
         return DecodeResult{ .value = first_byte, .bytes_read = 1 };
     }
 
-    if (first_byte == 0xff) {
+    if (first_byte == constants.EIGHT_BYTE_MARKER) {
         // Special case: 8-byte fixed-length integer
         if (buffer.len < 9) {
-            return error.InsufficientData;
+            return errors.DecodingError.InsufficientData;
         }
         return DecodeResult{
             .value = decodeFixedLengthInteger(u64, buffer[1..9]),
@@ -49,13 +64,13 @@ pub fn decodeInteger(buffer: []const u8) !DecodeResult {
         };
     }
 
-    const dl = util.decode_prefix(first_byte);
+    const dl = try util.decodePrefixByte(first_byte);
 
     if (buffer.len < dl.l + 1) {
-        return error.InsufficientData;
+        return errors.DecodingError.InsufficientData;
     }
 
-    // now get the value out of it
+    // Extract the remainder value from the buffer
     const remainder = decodeFixedLengthInteger(u64, buffer[1 .. dl.l + 1]);
 
     return DecodeResult{

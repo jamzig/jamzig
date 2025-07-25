@@ -9,57 +9,7 @@ pub const reconstruct = @import("state_dictionary/reconstruct.zig");
 
 const Params = @import("jam_params.zig").Params;
 
-//  _  __             ____                _                   _   _
-// | |/ /___ _   _   / ___|___  _ __  ___| |_ _ __ _   _  ___| |_(_) ___  _ __
-// | ' // _ \ | | | | |   / _ \| '_ \/ __| __| '__| | | |/ __| __| |/ _ \| '_ \
-// | . \  __/ |_| | | |__| (_) | | | \__ \ |_| |  | |_| | (__| |_| | (_) | | | |
-// |_|\_\___|\__, |  \____\___/|_| |_|___/\__|_|   \__,_|\___|\__|_|\___/|_| |_|
-//           |___/
-//
-// REFACTORED: All key construction functions moved to state_keys.zig
-// This module now imports and uses centralized key construction.
-
-//  _  __            __  __                   _ _
-// | |/ /___ _   _  |  \/  | __ _ _ __   __ _| (_)_ __   __ _
-// | ' // _ \ | | | | |\/| |/ _` | '_ \ / _` | | | '_ \ / _` |
-// | . \  __/ |_| | | |  | | (_| | | | | (_| | | | | | | (_| |
-// |_|\_\___|\__, | |_|  |_|\__,_|_| |_|\__, |_|_|_| |_|\__, |
-//           |___/                      |___/           |___/
-
-//// Represents the different types of keys in the state dictionary
-pub const DictKeyType = enum {
-    delta_storage, // Service storage entries
-    delta_preimage, // Service preimage entries
-    delta_preimage_lookup, // Service preimage lookup entries
-};
-
-// REFACTORED: LossyHash type removed - no longer needed with structured 31-byte keys
-
-// REFACTORED: All legacy key building functions removed
-// Key construction now centralized in state_keys.zig
-
 const services = @import("services.zig");
-
-// TEMPORARY: Compatibility functions for transitional phase
-// These will be removed when ServiceAccount is updated to use structured keys
-
-/// Temporary compatibility function for hash-based storage keys
-/// Will be removed when ServiceAccount uses structured 31-byte keys
-fn constructServiceIndexHashKey(s: u32, h: [32]u8) types.StateKey {
-    // Use the new preimage key construction as a temporary compatibility layer
-    return state_keys.constructServicePreimageKey(s, h);
-}
-
-/// Temporary compatibility function for preimage lookup keys
-/// Will be removed when ServiceAccount uses structured 31-byte keys
-// buildPreimageLookupKey function removed - we now use StateKey directly
-
-//  _   _ _   _ _
-// | | | | |_(_) |___
-// | | | | __| | / __|
-// | |_| | |_| | \__ \
-//  \___/ \__|_|_|___/
-//
 
 /// Encodes data using the provided writer function and returns an owned slice.
 fn encodeAndOwnSlice(
@@ -82,25 +32,6 @@ fn sliceToFixedArray(comptime size: usize, slice: []const u8) [size]u8 {
     return result;
 }
 
-//  ____  _  __  __
-// |  _ \(_)/ _|/ _|
-// | | | | | |_| |_
-// | |_| | |  _|  _|
-// |____/|_|_| |_|
-//
-
-/// Maps a state component to its encoding using the appropriate state key.
-///
-/// This function constructs a dictionary (hash map) where each key is a 32-byte array
-/// representing a unique identifier for a state component, and each value is a byte slice
-/// representing the encoded state component. The function uses different key construction
-/// strategies depending on the type of state component being encoded.
-///
-/// @param allocator - The memory allocator to use for dynamic memory allocations
-/// @param state - A pointer to the JamState structure containing the state components
-/// @return A hash map where keys are 32-byte arrays and values are byte slices representing
-///         the encoded state components. The function may return an error if memory allocation
-///         fails or if encoding any state component fails.
 pub const DiffType = enum {
     added,
     removed,
@@ -224,13 +155,6 @@ pub const MerklizationDictionaryDiff = struct {
         }
     }
 };
-
-//  __  __           _    _      ____  _      _
-// |  \/  | ___ _ __| | _| | ___|  _ \(_) ___| |_
-// | |\/| |/ _ \ '__| |/ / |/ _ \ | | | |/ __| __|
-// | |  | |  __/ |  |   <| |  __/ |_| | | (__| |_
-// |_|  |_|\___|_|  |_|\_\_|\___|____/|_|\___|\__|
-//
 
 // Enhanced dictionary entry with metadata
 pub const DictEntry = struct {
@@ -550,10 +474,7 @@ pub fn buildStateMerklizationDictionaryWithConfig(
         const rho_key = state_keys.constructStateComponentKey(10);
         var rho_managed = try getOrInitManaged(allocator, &state.rho, .{allocator});
         defer rho_managed.deinit(allocator);
-
-        var rho_buffer = std.ArrayList(u8).init(allocator); // TODO: reuse buffers
-        try state_encoder.encodeRho(params, rho_managed.ptr, rho_buffer.writer());
-        const rho_value = try rho_buffer.toOwnedSlice();
+        const rho_value = try encodeAndOwnSlice(allocator, state_encoder.encodeRho, .{ params, rho_managed.ptr });
         try map.put(rho_key, .{
             .key = rho_key,
             .value = rho_value,
@@ -684,11 +605,7 @@ pub fn buildStateMerklizationDictionary(
     return try buildStateMerklizationDictionaryWithConfig(params, allocator, state, .{});
 }
 
-//  _   _       _ _  _____         _
-// | | | |_ __ (_) ||_   _|__  ___| |_
-// | | | | '_ \| | __|| |/ _ \/ __| __|
-// | |_| | | | | | |_ | |  __/\__ \ |_
-//  \___/|_| |_|_|\__||_|\___||___/\__|
+// -- Unit tests --
 
 const testing = std.testing;
 
@@ -702,6 +619,3 @@ test "buildStateMerklizationDictionary" {
     var map = try buildStateMerklizationDictionary(TINY, allocator, &state);
     defer map.deinit();
 }
-
-// REFACTORED: Key construction tests moved to state_keys.zig
-// All key construction logic is now centralized in that module.

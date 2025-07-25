@@ -492,7 +492,12 @@ pub const Delta = struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        try @import("state_format/delta.zig").format(self, fmt, options, writer);
+        const tfmt = @import("types/fmt.zig");
+        const formatter = tfmt.Format(@TypeOf(self.*)){
+            .value = self.*,
+            .options = .{},
+        };
+        try formatter.format(fmt, options, writer);
     }
 
     pub fn init(allocator: Allocator) Delta {
@@ -502,9 +507,6 @@ pub const Delta = struct {
         };
     }
 
-    pub fn jsonStringify(self: *const @This(), jw: anytype) !void {
-        try @import("state_json/services.zig").jsonStringify(self, jw);
-    }
 
     pub fn deepClone(self: *const Delta) !Delta {
         var clone = Delta.init(self.allocator);

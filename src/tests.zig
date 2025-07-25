@@ -17,7 +17,6 @@ comptime {
 
     _ = @import("codec.zig");
     _ = @import("codec_test.zig");
-    _ = @import("codec/blob_dict.zig");
 
     _ = @import("fisher_yates.zig");
     _ = @import("fisher_yates_test.zig");
@@ -45,8 +44,8 @@ comptime {
     _ = @import("merkle.zig");
     _ = @import("merkle_test.zig");
 
-    _ = @import("merkle_binary.zig");
-    _ = @import("merkle_mountain_ranges.zig");
+    _ = @import("merkle/binary.zig");
+    _ = @import("merkle/mmr.zig");
 
     _ = @import("state.zig");
     _ = @import("state_dictionary.zig");
@@ -61,20 +60,6 @@ comptime {
 
     _ = @import("state_encoding.zig");
     _ = @import("state_decoding.zig");
-
-    _ = @import("state_format/reports_accumulated.zig"); // TODO: rename to xi
-    _ = @import("state_format/authorization.zig"); // TODO: rename to alpha
-    _ = @import("state_format/reports_ready.zig"); // TODO: rename to theta
-    _ = @import("state_format/chi.zig");
-    _ = @import("state_format/delta.zig");
-    _ = @import("state_format/jam_params.zig");
-    _ = @import("state_format/jam_state.zig");
-    _ = @import("state_format/phi.zig");
-    _ = @import("state_format/pi.zig");
-    _ = @import("state_format/psi.zig"); // TODO: rename to psi
-    _ = @import("state_format/recent_blocks.zig"); // TODO: rename to beta
-    _ = @import("state_format/rho.zig"); // TODO: rename to beta
-    _ = @import("state_format/safrole_state.zig"); // TODO: rename to gamma
 
     _ = @import("services.zig");
     _ = @import("services_snapshot.zig");
