@@ -142,9 +142,12 @@ pub const Input = struct {
     guarantees: types.GuaranteesExtrinsic,
     /// [H_t] Block's timeslot
     slot: types.TimeSlot,
+    /// Known packages - derived from recent blocks, accumulated reports, availability, and ready queue
+    known_packages: []types.WorkPackageHash,
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         self.guarantees.deinit(allocator);
+        allocator.free(self.known_packages);
         self.* = undefined;
     }
 };
