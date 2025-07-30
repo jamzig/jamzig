@@ -68,8 +68,9 @@ pub const StateTransition = struct {
         return @as(*StateTransition, @alignCast(@ptrCast(ctx))).state_transition.value.preStateRoot();
     }
 
-    fn block(ctx: *anyopaque) types.Block {
-        return @as(*StateTransition, @alignCast(@ptrCast(ctx))).state_transition.value.block;
+    fn block(ctx: *anyopaque) *const types.Block {
+        const self = @as(*StateTransition, @alignCast(@ptrCast(ctx)));
+        return &self.state_transition.value.block;
     }
 
     fn postStateAsMerklizationDict(

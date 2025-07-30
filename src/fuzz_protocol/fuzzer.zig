@@ -227,7 +227,7 @@ pub const Fuzzer = struct {
     }
 
     /// Send block to target for processing
-    pub fn sendBlock(self: *Fuzzer, block: types.Block) !messages.StateRootHash {
+    pub fn sendBlock(self: *Fuzzer, block: *const types.Block) !messages.StateRootHash {
         const span = trace.span(.fuzzer_send_block);
         defer span.deinit();
         span.debug("Sending block to target", .{});
@@ -238,7 +238,7 @@ pub const Fuzzer = struct {
         }
 
         // Send ImportBlock message, do not free message we do not own the block
-        try self.sendMessage(.{ .import_block = block });
+        try self.sendMessage(.{ .import_block = block.* });
 
         // Receive StateRoot response
         var response = try self.readMessage();
@@ -372,7 +372,7 @@ pub const Fuzzer = struct {
             errdefer block.deinit(self.allocator);
 
             // Send to target
-            const reported_target_root = self.sendBlock(block) catch |err| {
+            const reported_target_root = self.sendBlock(&block) catch |err| {
                 block_span.err("Error sending block to target: {s}", .{@errorName(err)});
 
                 // Return partial result with the error
@@ -535,8 +535,7 @@ pub const Fuzzer = struct {
             defer state_transition.deinit(self.allocator);
 
             // Get the block header
-            var block = state_transition.block();
-            defer block.deinit(self.allocator);
+            const block = state_transition.block();
 
             // Convert pre-state dictionary directly to fuzz format
             var pre_state_dict = try state_transition.preStateAsMerklizationDict(self.allocator);
@@ -546,7 +545,7 @@ pub const Fuzzer = struct {
             defer fuzz_state.deinit(self.allocator);
 
             // Send state to target
-            const target_state_root = try self.setState(block.header, fuzz_state);
+            const target_state_root = try self.setState(block.*.header, fuzz_state);
 
             // Verify pre-state root matches
             const pre_state_root = state_transition.preStateRoot();

@@ -69,8 +69,9 @@ pub const StateTransition = struct {
         return @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).preStateRoot();
     }
 
-    fn block(ctx: *anyopaque) types.Block {
-        return @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx))).block;
+    fn block(ctx: *anyopaque) *const types.Block {
+        const self = @as(*JamZigStateTransition, @alignCast(@ptrCast(ctx)));
+        return &self.block;
     }
 
     fn postStateAsMerklizationDict(

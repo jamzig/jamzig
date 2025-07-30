@@ -61,7 +61,7 @@ pub const StateTransition = struct {
             allocator: std.mem.Allocator,
         ) anyerror!void,
 
-        block: *const fn (ctx: *anyopaque) types.Block,
+        block: *const fn (ctx: *anyopaque) *const types.Block,
 
         deinit: *const fn (
             ctx: *anyopaque,
@@ -100,9 +100,11 @@ pub const StateTransition = struct {
     pub fn preStateRoot(self: Context) types.StateRoot {
         return self.vtable.preStateRoot(self.ptr);
     }
-    pub fn block(self: Context) types.Block {
+
+    pub fn block(self: Context) *const types.Block {
         return self.vtable.block(self.ptr);
     }
+
     pub fn postStateRoot(self: Context) types.StateRoot {
         return self.vtable.postStateRoot(self.ptr);
     }

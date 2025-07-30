@@ -274,7 +274,7 @@ pub fn runBlockImportTests(
 
         var import_result = importer.importBlock(
             &current_state.?,
-            &state_transition.block(),
+            state_transition.block(),
         ) catch |err| {
             // Enhanced error reporting with BlockImporter context
             std.debug.print("\x1b[31m=== Block Import Failed ===\x1b[0m\n", .{});
@@ -296,7 +296,7 @@ pub fn runBlockImportTests(
                 // Retry the import with tracing
                 var result = importer.importBlock(
                     &current_state.?,
-                    &state_transition.block(),
+                    state_transition.block(),
                 ) catch |retry_err| {
                     std.debug.print("\n=== Detailed trace above shows failure context ===\n", .{});
                     std.debug.print("Error persists: {s}\n\n", .{@errorName(retry_err)});
@@ -318,7 +318,7 @@ pub fn runBlockImportTests(
         // Log block information for debugging
         @import("sequoia.zig").logging.printBlockEntropyDebug(
             params,
-            &state_transition.block(),
+            state_transition.block(),
             &current_state.?,
         );
 

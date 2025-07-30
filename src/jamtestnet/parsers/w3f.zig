@@ -79,9 +79,9 @@ pub const StateTransition = struct {
         return try self.state_transition.validateRoots(allocator);
     }
 
-    fn block(ctx: *anyopaque) types.Block {
+    fn block(ctx: *anyopaque) *const types.Block {
         const self: *Context = @ptrCast(@alignCast(ctx));
-        return self.state_transition.block;
+        return &self.state_transition.block;
     }
 
     fn deinit(ctx: *anyopaque, allocator: std.mem.Allocator) void {
