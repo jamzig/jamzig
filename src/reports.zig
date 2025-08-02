@@ -15,6 +15,7 @@ const anchor = @import("reports/anchor/anchor.zig");
 const timing = @import("reports/timing/timing.zig");
 const gas = @import("reports/gas/gas.zig");
 const authorization = @import("reports/authorization/authorization.zig");
+const signature = @import("reports/signature/signature.zig");
 
 const StateTransition = @import("state_delta.zig").StateTransition;
 
@@ -216,15 +217,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                     else => |e| return e,
                 };
                 // Validate all validator indices are in range upfront
-                for (guarantee.signatures) |sig| {
-                    if (sig.validator_index >= params.validators_count) {
-                        sig_span.err("Invalid validator index {d} >= {d}", .{
-                            sig.validator_index,
-                            params.validators_count,
-                        });
-                        return Error.BadValidatorIndex;
-                    }
-                }
+                try signature.validateValidatorIndices(params, guarantee);
 
                 // Validate guarantor assignments against rotation periods
                 guarantor.validateGuarantorAssignments(
@@ -240,43 +233,18 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 };
 
                 // Validate signatures
-                const kappa: *const state.Kappa = try stx.ensure(.kappa);
-                const lambda: *const state.Kappa = try stx.ensure(.lambda);
-                for (guarantee.signatures) |sig| {
-                    const sig_detail_span = sig_span.child(.validate_signature);
-                    defer sig_detail_span.deinit();
-
-                    sig_detail_span.debug("Validating signature for validator index {d}", .{sig.validator_index});
-                    sig_detail_span.trace("Signature: {s}", .{std.fmt.fmtSliceHexLower(&sig.signature)});
-
-                    const validator = if (is_current_rotation)
-                        kappa.validators[sig.validator_index] //
-                    else
-                        lambda.validators[sig.validator_index]; //
-
-                    const public_key = validator.ed25519;
-                    sig_detail_span.trace("Validator public key: {s}", .{std.fmt.fmtSliceHexLower(&public_key)});
-
-                    // Create message to verify using Blake2b
-                    // The message is: "jam_guarantee" ++ H(E(anchor, bitfield))
-                    const prefix: []const u8 = "jam_guarantee";
-                    const w = try @import("./codec.zig").serializeAlloc(types.WorkReport, params, allocator, guarantee.report);
-                    defer allocator.free(w);
-                    var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-                    hasher.update(w);
-                    var hash: [32]u8 = undefined;
-                    hasher.final(&hash);
-
-                    const validator_pub_key = crypto.sign.Ed25519.PublicKey.fromBytes(public_key) catch {
-                        return Error.InvalidValidatorPublicKey;
-                    };
-
-                    const signature = crypto.sign.Ed25519.Signature.fromBytes(sig.signature);
-
-                    signature.verify(prefix ++ &hash, validator_pub_key) catch {
-                        return Error.BadSignature;
-                    };
-                }
+                signature.validateSignatures(
+                    params,
+                    allocator,
+                    stx,
+                    guarantee,
+                    is_current_rotation,
+                ) catch |err| switch (err) {
+                    signature.Error.BadValidatorIndex => return Error.BadValidatorIndex,
+                    signature.Error.BadSignature => return Error.BadSignature,
+                    signature.Error.InvalidValidatorPublicKey => return Error.InvalidValidatorPublicKey,
+                    else => |e| return e,
+                };
             }
 
             // Core must be free or its previous report must have timed out
