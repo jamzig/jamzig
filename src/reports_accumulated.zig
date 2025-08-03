@@ -25,6 +25,7 @@ pub fn Xi(comptime epoch_size: usize) type {
         // Array of sets, each containing work package hashes for a specific time slot
         entries: [epoch_size]HashSet(WorkPackageHash),
         // Global index tracking all work packages across all slots
+        // TODO: Optimize with Bloom filter - reduces memory by ~100x with small false positive rate
         global_index: HashSet(WorkPackageHash),
         allocator: std.mem.Allocator,
 
@@ -93,6 +94,7 @@ pub fn Xi(comptime epoch_size: usize) type {
         }
 
         pub fn shiftDown(self: *@This()) !void {
+            // TODO: Optimize with circular buffer pattern - O(1) instead of O(epoch_size)
             // Store the first slot temporarily since it will be dropped
             var dropped_slot = self.entries[0];
             // Shift all entries down by value
