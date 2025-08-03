@@ -246,7 +246,7 @@ pub fn processAssuranceExtrinsic(
                 if (pending_reports.hasReport(core_idx)) {
                     core_span.debug("Core {d}: super-majority reached and report present, taking ownership", .{core_idx});
                     // Deep clone the report - ownership transferred to assured_reports (cleaned up on error)
-                    try assured_reports.append(pending_reports.takeReportOwned(core_idx).?.assignment);
+                    try assured_reports.append(pending_reports.takeReport(core_idx).?.assignment);
                 } else {
                     core_span.err("Code {d}: we have assurances for a core which is not engaged", .{core_idx});
                     return error.CoreNotEngaged;
