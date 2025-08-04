@@ -646,6 +646,10 @@ fn deserializeInternal(comptime T: type, comptime params: anytype, allocator: st
     defer if (context) |ctx| ctx.pop();
 
     switch (@typeInfo(T)) {
+        .void => {
+            span.debug("Deserializing void type (no data to read)", .{});
+            return {};
+        },
         .bool => return try deserializeBool(reader, context),
         .int => return try deserializeInt(T, reader, context),
         .optional => return try deserializeOptional(T, params, allocator, reader, context),
@@ -933,6 +937,10 @@ pub fn serializeInternal(comptime T: type, comptime params: anytype, writer: any
     span.debug("Serializing type: {s}", .{@typeName(T)});
 
     switch (@typeInfo(T)) {
+        .void => {
+            span.debug("Serializing void type (no data to write)", .{});
+            // void serializes to nothing (0 bytes)
+        },
         .bool => return try serializeBool(writer, value),
         .int => return try serializeInt(T, writer, value),
         .optional => return try serializeOptional(T, params, writer, value),
