@@ -28,14 +28,21 @@ pub fn convertValidatorSet(
 
 pub fn convertBeta(
     allocator: std.mem.Allocator,
-    blocks: []types.BlockInfo,
+    recent_blocks: tvector.RecentBlocks,
     max_blocks: usize,
 ) !state.Beta {
     var beta = try state.Beta.init(allocator, max_blocks);
     errdefer beta.deinit();
 
-    for (blocks) |block| {
-        try beta.addBlockInfo(try block.deepClone(allocator));
+    // Convert each BlockInfoTestVector to types.BlockInfo
+    for (recent_blocks.history) |test_block| {
+        const block_info = types.BlockInfo{
+            .header_hash = test_block.header_hash,
+            .beefy_mmr = try allocator.dupe(?types.Hash, recent_blocks.mmr.peaks),
+            .state_root = test_block.state_root,
+            .work_reports = try allocator.dupe(types.ReportedWorkPackage, test_block.reported),
+        };
+        try beta.addBlockInfo(block_info);
     }
 
     return beta;
