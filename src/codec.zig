@@ -336,6 +336,7 @@ fn deserializeSizedField(
         if (context) |ctx| {
             try ctx.push(.{ .slice_item = i });
         }
+        errdefer if (context) |ctx| ctx.markError();
         defer if (context) |ctx| ctx.pop();
 
         const item_span = span.child(.slice_item);
@@ -496,6 +497,7 @@ fn deserializeStruct(comptime T: type, comptime params: anytype, allocator: std.
         if (context) |ctx| {
             try ctx.push(.{ .field = field.name });
         }
+        errdefer if (context) |ctx| ctx.markError();
         defer if (context) |ctx| ctx.pop();
 
         const field_span = struct_span.child(.field);
@@ -543,6 +545,7 @@ fn deserializeUnion(comptime T: type, comptime params: anytype, allocator: std.m
             if (context) |ctx| {
                 try ctx.push(.{ .union_variant = field.name });
             }
+            errdefer if (context) |ctx| ctx.markError();
             defer if (context) |ctx| ctx.pop();
 
             const field_span = union_span.child(.field);
@@ -617,7 +620,9 @@ fn deserializePointer(comptime T: type, comptime params: anytype, allocator: std
                     if (context) |ctx| {
                         try ctx.push(.{ .slice_item = i });
                     }
+                    errdefer if (context) |ctx| ctx.markError();
                     defer if (context) |ctx| ctx.pop();
+
                     const item_span = ptr_span.child(.slice_item);
                     defer item_span.deinit();
                     item_span.debug("Deserializing item {d} of {d}", .{ i + 1, len });
@@ -643,6 +648,7 @@ fn deserializeInternal(comptime T: type, comptime params: anytype, allocator: st
     if (context) |ctx| {
         try ctx.push(.{ .type_name = @typeName(T) });
     }
+    errdefer if (context) |ctx| ctx.markError();
     defer if (context) |ctx| ctx.pop();
 
     switch (@typeInfo(T)) {
@@ -710,6 +716,7 @@ fn deserializeArray(comptime T: type, comptime len: usize, comptime params: anyt
             if (context) |ctx| {
                 try ctx.push(.{ .array_index = i });
             }
+            errdefer if (context) |ctx| ctx.markError();
             defer if (context) |ctx| ctx.pop();
             const element_span = span.child(.array_element);
             defer element_span.deinit();
