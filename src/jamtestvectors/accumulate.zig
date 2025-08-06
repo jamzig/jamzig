@@ -72,6 +72,10 @@ pub const Privileges = struct {
     designate: types.ServiceId,
     always_acc: []AlwaysAccumulateMapItem,
 
+    pub fn assign_size(params: jam_params.Params) usize {
+        return params.core_count;
+    }
+
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         allocator.free(self.assign);
         allocator.free(self.always_acc);
@@ -133,7 +137,7 @@ pub const StorageMapEntry = struct {
     }
 };
 
-/// ServiceInfo type for test vectors with additional fields
+/// ServiceInfo type for test vectors with additional fields (v0.6.7)
 pub const ServiceInfoTestVector = struct {
     code_hash: types.OpaqueHash,
     balance: types.Balance,
@@ -216,12 +220,12 @@ pub const TestCase = struct {
     output: Output,
     post_state: State,
 
-    pub fn build_from(
+    pub fn buildFrom(
         comptime params: jam_params.Params,
         allocator: std.mem.Allocator,
         bin_file_path: []const u8,
     ) !@This() {
-        return try @import("./loader.zig").loadAndDeserializeTestVector(
+        return try @import("./loader.zig").loadAndDeserializeTestVectorWithContext(
             TestCase,
             params,
             allocator,
@@ -246,7 +250,7 @@ test "tiny_load_and_dump" {
     };
 
     for (test_jsons) |test_json| {
-        var test_vector = try TestCase.build_from(
+        var test_vector = try TestCase.buildFrom(
             jam_params.TINY_PARAMS,
             allocator,
             test_json,
@@ -255,6 +259,22 @@ test "tiny_load_and_dump" {
 
         std.debug.print("Test vector: {?}\n", .{test_vector.output});
     }
+}
+
+test "decode_enqueue_and_unlock_chain_4" {
+    const allocator = std.testing.allocator;
+
+    // Now focus on the problematic one
+    std.debug.print("\n\nDetailed analysis of enqueue_and_unlock_chain-4...\n", .{});
+    var test_vector = TestCase.buildFrom(
+        jam_params.TINY_PARAMS,
+        allocator,
+        BASE_PATH ++ "tiny/enqueue_and_unlock_chain-4.bin",
+    ) catch |err| {
+        std.debug.print("Error decoding test vector: {}\n", .{err});
+        return err;
+    };
+    defer test_vector.deinit(allocator);
 }
 
 test "tiny_all" {
