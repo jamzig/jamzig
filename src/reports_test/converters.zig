@@ -40,10 +40,7 @@ pub fn convertBeta(
         const RecentHistory = @import("../beta.zig").RecentHistory;
         const block_info = RecentHistory.BlockInfo{
             .header_hash = test_block.header_hash,
-            .beefy_root = if (recent_blocks.mmr.peaks.len > 0 and recent_blocks.mmr.peaks[0] != null) 
-                recent_blocks.mmr.peaks[0].? 
-            else 
-                [_]u8{0} ** 32, // Default to zero hash if no peaks
+            .beefy_root = test_block.beefy_root, // Use the beefy_root directly from test vector
             .state_root = test_block.state_root,
             .work_reports = try allocator.dupe(types.ReportedWorkPackage, test_block.reported),
         };
