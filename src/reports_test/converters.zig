@@ -125,11 +125,15 @@ pub fn convertOffenders(
     allocator: std.mem.Allocator,
     offenders: []types.Ed25519Public,
     validators_count: u32,
-) ![]types.Ed25519Public {
+) !state.Psi {
     if (offenders.len > validators_count) {
         return StateInitError.InvalidOffenderCount;
     }
-    return try allocator.dupe(types.Ed25519Public, offenders);
+    // Add offenders to the punish_set
+    var psi = state.Psi.init(allocator);
+    try psi.registerOffenders(offenders);
+
+    return psi;
 }
 
 pub fn convertState(
@@ -179,10 +183,8 @@ pub fn convertState(
     // Add service statistics to the Pi component
     try convertServiceStatistics(&jam_state.pi.?, test_state.services_statistics);
 
-    // Convert offenders list
-    // const converted_offenders = try convertOffenders(allocator, test_state.offenders, params.validators_count);
-    // // TODO: do something with these offenders
-    // defer allocator.free(converted_offenders);
+    // Convert offenders list and add to Psi (punish_set)
+    jam_state.psi = try convertOffenders(allocator, test_state.offenders, params.validators_count);
 
     return jam_state;
 }

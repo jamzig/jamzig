@@ -15,6 +15,7 @@ const gas = @import("reports/gas/gas.zig");
 const authorization = @import("reports/authorization/authorization.zig");
 const signature = @import("reports/signature/signature.zig");
 const output = @import("reports/output/output.zig");
+const banned = @import("reports/banned/banned.zig");
 
 const StateTransition = @import("state_delta.zig").StateTransition;
 
@@ -51,6 +52,7 @@ pub const Error = error{
     InvalidRotationPeriod,
     InvalidSlotRange,
     WorkReportTooBig,
+    BannedValidators,
 };
 
 pub const ValidatedGuaranteeExtrinsic = struct {
@@ -205,6 +207,12 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 };
                 // Validate all validator indices are in range upfront
                 try signature.validateValidatorIndices(params, guarantee);
+
+                // Check if any guarantor is banned
+                banned.checkBannedValidators(params, guarantee, stx, &assignments) catch |err| switch (err) {
+                    banned.Error.BannedValidators => return Error.BannedValidators,
+                    else => |e| return e,
+                };
 
                 // Validate guarantor assignments using pre-built assignments
                 guarantor.validateGuarantorAssignmentsWithPrebuilt(
