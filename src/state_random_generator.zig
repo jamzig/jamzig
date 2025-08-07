@@ -33,9 +33,9 @@ pub const RandomStateGenerator = struct {
                 // Initialize only the most basic required components
                 try self.generateMinimalState(params, &state);
 
-                // Initialize Theta and Rho with minimal complexity
-                try state.initTheta(self.allocator);
-                try self.generateRandomTheta(params, .minimal, &state.theta.?);
+                // Initialize VarTheta and Rho with minimal complexity
+                try state.initVartheta(self.allocator);
+                try self.generateRandomTheta(params, .minimal, &state.vartheta.?);
 
                 try state.initRho(self.allocator);
                 try self.generateRandomRho(params, .minimal, &state.rho.?);
@@ -45,9 +45,9 @@ pub const RandomStateGenerator = struct {
                 try self.generateMinimalState(params, &state);
                 try self.generateModerateState(params, &state);
 
-                // Initialize Theta and Rho with moderate complexity (not done in generateModerateState to avoid duplication)
-                try state.initTheta(self.allocator);
-                try self.generateRandomTheta(params, .moderate, &state.theta.?);
+                // Initialize VarTheta and Rho with moderate complexity (not done in generateModerateState to avoid duplication)
+                try state.initVartheta(self.allocator);
+                try self.generateRandomTheta(params, .moderate, &state.vartheta.?);
 
                 try state.initRho(self.allocator);
                 try self.generateRandomRho(params, .moderate, &state.rho.?);
@@ -58,9 +58,9 @@ pub const RandomStateGenerator = struct {
                 try self.generateModerateState(params, &state);
                 try self.generateMaximalState(params, &state);
 
-                // Initialize Theta and Rho with maximal complexity
-                try state.initTheta(self.allocator);
-                try self.generateRandomTheta(params, .maximal, &state.theta.?);
+                // Initialize VarTheta and Rho with maximal complexity
+                try state.initVartheta(self.allocator);
+                try self.generateRandomTheta(params, .maximal, &state.vartheta.?);
 
                 try state.initRho(self.allocator);
                 try self.generateRandomRho(params, .maximal, &state.rho.?);
@@ -166,17 +166,17 @@ pub const RandomStateGenerator = struct {
         beta: *jamstate.Beta,
     ) !void {
         // Generate a random number of blocks (0 to max_blocks)
-        const num_blocks = self.rng.uintAtMost(usize, beta.max_blocks);
+        const num_blocks = self.rng.uintAtMost(usize, beta.recent_history.max_blocks);
 
         for (0..num_blocks) |_| {
             // Generate random BlockInfo
             const block_info = try self.generateRandomBlockInfo(params);
-            try beta.addBlockInfo(block_info);
+            try beta.recent_history.addBlock(block_info);
         }
     }
 
     /// Helper function to generate a random BlockInfo
-    fn generateRandomBlockInfo(self: *RandomStateGenerator, comptime _: Params) !types.BlockInfo {
+    fn generateRandomBlockInfo(self: *RandomStateGenerator, comptime _: Params) !@import("beta.zig").RecentHistory.BlockInfo {
         // Generate random header hash
         var header_hash: types.Hash = undefined;
         self.rng.bytes(&header_hash);
@@ -206,10 +206,14 @@ pub const RandomStateGenerator = struct {
             self.rng.bytes(&report.exports_root);
         }
 
-        return types.BlockInfo{
+        // For v0.6.7, return Beta.RecentHistory.BlockInfo which has beefy_root instead of beefy_mmr
+        const beefy_root = if (beefy_mmr.len > 0 and beefy_mmr[0] != null) beefy_mmr[0].? else [_]u8{0} ** 32;
+        self.allocator.free(beefy_mmr); // Free the MMR array as we only need the root
+        
+        return @import("beta.zig").RecentHistory.BlockInfo{
             .header_hash = header_hash,
+            .beefy_root = beefy_root,
             .state_root = state_root,
-            .beefy_mmr = beefy_mmr,
             .work_reports = work_reports,
         };
     }

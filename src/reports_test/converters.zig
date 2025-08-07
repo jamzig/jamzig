@@ -34,15 +34,20 @@ pub fn convertBeta(
     var beta = try state.Beta.init(allocator, max_blocks);
     errdefer beta.deinit();
 
-    // Convert each BlockInfoTestVector to types.BlockInfo
+    // Convert each BlockInfoTestVector to Beta's BlockInfo
     for (recent_blocks.history) |test_block| {
-        const block_info = types.BlockInfo{
+        // For v0.6.7, we need to create a RecentHistory.BlockInfo
+        const RecentHistory = @import("../beta.zig").RecentHistory;
+        const block_info = RecentHistory.BlockInfo{
             .header_hash = test_block.header_hash,
-            .beefy_mmr = try allocator.dupe(?types.Hash, recent_blocks.mmr.peaks),
+            .beefy_root = if (recent_blocks.mmr.peaks.len > 0 and recent_blocks.mmr.peaks[0] != null) 
+                recent_blocks.mmr.peaks[0].? 
+            else 
+                [_]u8{0} ** 32, // Default to zero hash if no peaks
             .state_root = test_block.state_root,
             .work_reports = try allocator.dupe(types.ReportedWorkPackage, test_block.reported),
         };
-        try beta.addBlockInfo(block_info);
+        try beta.recent_history.addBlock(block_info);
     }
 
     return beta;

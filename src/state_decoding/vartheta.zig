@@ -104,7 +104,7 @@ test "encode/decode" {
     defer context.deinit();
 
     // Create test data
-    var original = available_reports.Theta(params.epoch_length).init(allocator);
+    var original = available_reports.VarTheta(params.epoch_length).init(allocator);
     defer original.deinit();
 
     var entry1 = available_reports.WorkReportAndDeps{
@@ -125,7 +125,7 @@ test "encode/decode" {
     // Encode
     var buffer: [2048]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
-    try @import("../state_encoding/theta.zig").encode(&original, fbs.writer());
+    try @import("../state_encoding/vartheta.zig").encode(&original, fbs.writer());
 
     // Decode
     var stream = std.io.fixedBufferStream(fbs.getWritten());

@@ -42,7 +42,7 @@ pub fn convertTestStateIntoJamState(
         test_state.privileges,
     );
 
-    jam_state.theta = try convertReadyQueue(
+    jam_state.vartheta = try convertReadyQueue(
         params.epoch_length,
         allocator,
         test_state.ready_queue,
