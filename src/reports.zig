@@ -128,10 +128,6 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             };
 
             // Check rotation period according to graypaper 11.27
-            const current_rotation = @divFloor(stx.time.current_slot, params.validator_rotation_period);
-            const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
-            const is_current_rotation = (current_rotation == report_rotation);
-
             timing.validateRotationPeriod(params, stx, guarantee) catch |err| switch (err) {
                 timing.Error.ReportEpochBeforeLast => return Error.ReportEpochBeforeLast,
                 else => |e| return e,
@@ -185,6 +181,15 @@ pub const ValidatedGuaranteeExtrinsic = struct {
 
             // 11.27 ---
 
+            // BUILD ASSIGNMENTS ONCE FOR THIS GUARANTEE
+            var assignments = try @import("guarantor_assignments.zig").determineGuarantorAssignments(
+                params,
+                allocator,
+                stx,
+                guarantee.slot,
+            );
+            defer assignments.deinit(allocator);
+
             // Validate signatures
             {
                 const sig_span = span.child(.validate_signatures);
@@ -201,26 +206,22 @@ pub const ValidatedGuaranteeExtrinsic = struct {
                 // Validate all validator indices are in range upfront
                 try signature.validateValidatorIndices(params, guarantee);
 
-                // Validate guarantor assignments against rotation periods
-                guarantor.validateGuarantorAssignments(
+                // Validate guarantor assignments using pre-built assignments
+                guarantor.validateGuarantorAssignmentsWithPrebuilt(
                     params,
-                    allocator,
-                    stx,
                     guarantee,
+                    &assignments,
                 ) catch |err| switch (err) {
                     guarantor.Error.InvalidGuarantorAssignment => return Error.WrongAssignment,
-                    guarantor.Error.InvalidRotationPeriod => return Error.InvalidRotationPeriod,
-                    guarantor.Error.InvalidSlotRange => return Error.InvalidSlotRange,
                     else => |e| return e,
                 };
 
-                // Validate signatures
-                signature.validateSignatures(
+                // Validate signatures using pre-built assignments
+                signature.validateSignaturesWithAssignments(
                     params,
                     allocator,
-                    stx,
                     guarantee,
-                    is_current_rotation,
+                    &assignments,
                 ) catch |err| switch (err) {
                     signature.Error.BadValidatorIndex => return Error.BadValidatorIndex,
                     signature.Error.BadSignature => return Error.BadSignature,
@@ -312,43 +313,33 @@ pub fn processGuaranteeExtrinsic(
             assignment,
         );
 
-        // TODO: disabled this to fix the report test vectors, this needs to be handled by
-        // authorizer subsystem
-
-        // remove the authorizer from the pool
-        // process_span.debug(
-        //     "Removing authorizer from pool {d}",
-        //     .{std.fmt.fmtSliceHexLower(&guarantee.report.authorizer_hash)},
-        // );
-        // jam_state.alpha.?.removeAuthorizer(core_index, guarantee.report.authorizer_hash);
-
         // Track reported packages
         try reported.append(.{
             .hash = assignment.report.package_spec.hash,
             .exports_root = guarantee.report.package_spec.exports_root,
         });
 
-        const current_rotation = @divFloor(stx.time.current_slot, params.validator_rotation_period);
-        const report_rotation = @divFloor(guarantee.slot, params.validator_rotation_period);
+        // BUILD ASSIGNMENTS ONCE FOR REPORTER EXTRACTION
+        var assignments = try @import("guarantor_assignments.zig").determineGuarantorAssignments(
+            params,
+            allocator,
+            stx,
+            guarantee.slot,
+        );
+        defer assignments.deinit(allocator);
 
-        const is_current_rotation = (current_rotation == report_rotation);
+        // Track reporters using the correct validator set from assignments
+        add_reporters: for (guarantee.signatures) |sig| {
+            const validator = assignments.validators.validators[sig.validator_index];
 
-        // Track reporters and update Pi stats
-
-        const kappa: *const types.ValidatorSet = try stx.ensure(.kappa);
-        const lambda: *const types.ValidatorSet = try stx.ensure(.lambda);
-        for (guarantee.signatures) |sig| {
-            const validator = if (is_current_rotation)
-                kappa.validators[sig.validator_index]
-            else
-                lambda.validators[sig.validator_index];
+            for (reporters.items) |reporter| {
+                if (std.mem.eql(u8, &reporter, &validator.ed25519)) {
+                    // Already added this reporter
+                    continue :add_reporters;
+                }
+            }
 
             try reporters.append(validator.ed25519);
-
-            // NOTE: removed this to make test pass,
-            // // Update guarantee stats in Pi
-            // (try pi.getValidatorStats(sig.validator_index))
-            //     .updateReportsGuaranteed(1);
         }
     }
 
