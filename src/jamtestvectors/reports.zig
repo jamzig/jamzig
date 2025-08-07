@@ -33,7 +33,7 @@ pub const ServiceInfoTestVector = struct {
     creation_slot: types.U32,
     last_accumulation_slot: types.U32,
     parent_service: types.U32,
-    
+
     pub fn toCore(self: @This()) types.ServiceInfo {
         return .{
             .code_hash = self.code_hash,
@@ -52,7 +52,7 @@ pub const BlockInfoTestVector = struct {
     beefy_root: types.OpaqueHash,
     state_root: types.StateRoot,
     reported: []types.ReportedWorkPackage,
-    
+
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         allocator.free(self.reported);
         self.* = undefined;
@@ -72,7 +72,7 @@ pub const AccountsMapEntry = struct {
 pub const RecentBlocks = struct {
     history: []BlockInfoTestVector,
     mmr: types.Mmr,
-    
+
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         for (self.history) |*block| {
             block.deinit(allocator);
@@ -238,6 +238,7 @@ pub const ErrorCode = enum(u8) {
     segment_root_lookup_invalid = 20,
     bad_signature = 21,
     work_report_too_big = 22,
+    banned_validators = 23,
 };
 
 pub const Output = union(enum) {
