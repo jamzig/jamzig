@@ -223,6 +223,12 @@ pub const ServiceAccount = struct {
         return old_value;
     }
 
+    pub fn writeStorageNoFootprint(self: *ServiceAccount, service_id: u32, key: []const u8, value: []const u8) !void {
+        // This function does not update footprint metrics
+        const storage_key = state_keys.constructStorageKey(service_id, key);
+        try self.data.put(storage_key, value);
+    }
+
     pub fn writeStorageFreeOldValue(self: *ServiceAccount, service_id: u32, key: []const u8, value: []const u8) !void {
         const maybe_old_value = try self.writeStorage(service_id, key, value);
         if (maybe_old_value) |old_value| self.data.allocator.free(old_value);

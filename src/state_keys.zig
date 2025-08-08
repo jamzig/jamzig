@@ -90,6 +90,7 @@ pub fn constructStateComponentKey(component_id: u8) types.StateKey {
 /// @return A 31-byte key for storage operations
 pub fn constructStorageKey(service_id: u32, storage_key: []const u8) types.StateKey {
     // Prepare the data: ℰ₄(2³² - 1) ⌢ storage_key
+    // REFACTOR: take an allocator or handle this differently
     var data = std.ArrayList(u8).init(std.heap.page_allocator);
     defer data.deinit();
 
