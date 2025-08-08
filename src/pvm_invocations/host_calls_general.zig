@@ -250,26 +250,12 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             // Determine actual service ID first
             span.info("Service ID for storage key: {d}", .{resolved_service_id});
 
-            // Hash the key_data first before constructing storage key
-            // According to graypaper, we might need to hash ℰ₄(s) ⌢ k
-            span.debug("Hashing key data", .{});
-            span.info("Raw key data to hash (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
-
-            // Prepare data to hash: service_id (4 bytes little-endian) + key_data
-            var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-            var service_id_bytes: [4]u8 = undefined;
-            std.mem.writeInt(u32, &service_id_bytes, resolved_service_id, .little);
-            hasher.update(&service_id_bytes);
-            hasher.update(key_data.buffer);
-
-            var key_hash: [32]u8 = undefined;
-            hasher.final(&key_hash);
-            span.info("Resulting hash: {s}", .{std.fmt.fmtSliceHexLower(&key_hash)});
-
-            // Construct storage key using the hash
+            // Construct storage key directly from key_data
+            // constructStorageKey already handles hashing internally via C_variant3
             span.debug("Constructing PVM storage key", .{});
+            span.info("Raw key data (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
 
-            const storage_key = state_keys.constructStorageKey(resolved_service_id, &key_hash);
+            const storage_key = state_keys.constructStorageKey(resolved_service_id, key_data.buffer);
             span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
             span.info("Final storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
@@ -357,28 +343,13 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             defer key_data.deinit();
             span.trace("Key data: {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
-            // Hash the key_data first before constructing storage key
-            // According to graypaper, we might need to hash ℰ₄(s) ⌢ k
-            span.debug("Hashing key data", .{});
-            span.info("Raw key data to hash (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
-
-            // Prepare data to hash: service_id (4 bytes little-endian) + key_data
-            var service_id_bytes: [4]u8 = undefined;
-            std.mem.writeInt(u32, &service_id_bytes, host_ctx.service_id, .little);
-
-            var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-            hasher.update(&service_id_bytes);
-            hasher.update(key_data.buffer);
-            var key_hash: [32]u8 = undefined;
-            hasher.final(&key_hash);
-
-            span.info("Resulting hash: {s}", .{std.fmt.fmtSliceHexLower(&key_hash)});
-
-            // Construct storage key using the hash
+            // Construct storage key directly from key_data
+            // constructStorageKey already handles hashing internally via C_variant3
             span.debug("Constructing PVM storage key", .{});
             span.info("Service ID for storage key: {d}", .{host_ctx.service_id});
+            span.info("Raw key data (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
 
-            const storage_key = state_keys.constructStorageKey(host_ctx.service_id, &key_hash);
+            const storage_key = state_keys.constructStorageKey(host_ctx.service_id, key_data.buffer);
             span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
             span.info("Final storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
