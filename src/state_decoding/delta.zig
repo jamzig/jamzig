@@ -40,16 +40,10 @@ pub fn decodeServiceAccountBase(
     account.last_accumulation_slot = last_accumulation_slot;
     account.parent_service = parent_service;
 
-    // Initialize tracking fields based on deserialized footprint values
-    // These will be properly recalculated as data is loaded, but we set initial
-    // estimates based on the serialized footprint
-    // Note: a_i includes both storage items and 2*preimage_lookups
-    // We can't distinguish exactly, but will be corrected as data loads
-    account.storage_items = items; // This is the total a_i, will be refined
-    account.storage_bytes = bytes; // This is the total a_o
-    account.preimage_count = 0; // Will be updated as preimages are loaded
-    account.preimage_bytes = 0; // Will be updated as preimages are loaded
-    account.preimage_lookup_count = 0; // Will be updated as lookups are loaded
+    // Initialize footprint fields with the deserialized values
+    // items is a_i, bytes is a_o from the encoded state
+    account.footprint_items = items; // a_i = 2·|preimage_lookups| + |storage_items|
+    account.footprint_bytes = bytes; // a_o = Σ(81 + length) for lookups + Σ(65 + |value|) for storage
 }
 
 /// Decodes a preimage lookup from the encoded format: E(↕[E_4(x) | x <− t])

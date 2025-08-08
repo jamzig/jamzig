@@ -114,13 +114,10 @@ pub const ServiceAccount = struct {
     // Index of the parent service that created this service (p in spec)
     parent_service: types.ServiceId, // or u32
 
-    // Storage footprint tracking fields - NEW in v0.6.7
-    // These track the actual storage usage for efficient footprint calculation
-    storage_items: u32, // Number of storage items (part of a_i calculation)
-    storage_bytes: u64, // Total bytes in storage entries (contributes to a_o)
-    preimage_count: u32, // Number of preimages stored
-    preimage_bytes: u64, // Total bytes in preimage entries
-    preimage_lookup_count: u32, // Number of preimage lookups (each counts as 2 items in a_i)
+    // Storage footprint tracking - NEW in v0.6.7
+    // We directly track a_i and a_o as defined in the graypaper
+    footprint_items: u32, // a_i = 2·|preimage_lookups| + |storage_items|
+    footprint_bytes: u64, // a_o = Σ(81 + length) for lookups + Σ(65 + |value|) for storage
 
     pub fn init(allocator: Allocator) ServiceAccount {
         return .{
@@ -133,11 +130,8 @@ pub const ServiceAccount = struct {
             .creation_slot = 0,
             .last_accumulation_slot = 0,
             .parent_service = 0,
-            .storage_items = 0,
-            .storage_bytes = 0,
-            .preimage_count = 0,
-            .preimage_bytes = 0,
-            .preimage_lookup_count = 0,
+            .footprint_items = 0,
+            .footprint_bytes = 0,
         };
     }
 
@@ -152,7 +146,7 @@ pub const ServiceAccount = struct {
             try clone.data.put(entry.key_ptr.*, cloned_value);
         }
 
-        // Copy simple fields
+        // Copy all fields including tracking fields - they represent the exact same data
         clone.code_hash = self.code_hash;
         clone.balance = self.balance;
         clone.min_gas_accumulate = self.min_gas_accumulate;
@@ -161,11 +155,8 @@ pub const ServiceAccount = struct {
         clone.creation_slot = self.creation_slot;
         clone.last_accumulation_slot = self.last_accumulation_slot;
         clone.parent_service = self.parent_service;
-        clone.storage_items = self.storage_items;
-        clone.storage_bytes = self.storage_bytes;
-        clone.preimage_count = self.preimage_count;
-        clone.preimage_bytes = self.preimage_bytes;
-        clone.preimage_lookup_count = self.preimage_lookup_count;
+        clone.footprint_items = self.footprint_items;
+        clone.footprint_bytes = self.footprint_bytes;
 
         return clone;
     }
@@ -186,8 +177,8 @@ pub const ServiceAccount = struct {
 
     pub fn resetStorage(self: *ServiceAccount, key: types.StateKey) void {
         if (self.data.getPtr(key)) |old_value_ptr| {
-            // Update tracking - reduce bytes by old value length
-            self.storage_bytes = self.storage_bytes - old_value_ptr.len;
+            // Update a_o - reduce bytes by old value length (key overhead stays)
+            self.footprint_bytes = self.footprint_bytes - old_value_ptr.len;
 
             self.data.allocator.free(old_value_ptr.*);
             self.data.put(key, &[_]u8{}) catch unreachable;
@@ -197,9 +188,9 @@ pub const ServiceAccount = struct {
 
     pub fn removeStorage(self: *ServiceAccount, key: types.StateKey) void {
         if (self.data.getPtr(key)) |old_value_ptr| {
-            // Update tracking - remove item and its bytes
-            self.storage_items -= 1;
-            self.storage_bytes -= 32 + old_value_ptr.len; // 32 bytes for key + value length
+            // Update a_i and a_o for storage removal
+            self.footprint_items -= 1; // One storage item removed
+            self.footprint_bytes -= 65 + old_value_ptr.len; // 34 + 31 (key size) + value length
 
             self.data.allocator.free(old_value_ptr.*);
             _ = self.data.remove(key);
@@ -210,14 +201,14 @@ pub const ServiceAccount = struct {
         // Clear the old, otherwise we are leaking
         const old_value = self.data.get(key);
 
-        // Update storage tracking
+        // Update a_i and a_o based on whether this is new or update
         if (old_value) |old| {
-            // Updating existing entry - adjust byte count
-            self.storage_bytes = self.storage_bytes - old.len + value.len;
+            // Updating existing entry - only a_o changes (value size difference)
+            self.footprint_bytes = self.footprint_bytes - old.len + value.len;
         } else {
-            // New entry - increment counters
-            self.storage_items += 1;
-            self.storage_bytes += 32 + value.len; // 32 bytes for key + value length
+            // New entry - increment both a_i and a_o
+            self.footprint_items += 1; // One new storage item
+            self.footprint_bytes += 65 + value.len; // 34 + 31 (key size) + value length
         }
 
         try self.data.put(key, value);
@@ -234,16 +225,8 @@ pub const ServiceAccount = struct {
     pub fn dupeAndAddPreimage(self: *ServiceAccount, key: types.StateKey, preimage: []const u8) !void {
         const new_preimage = try self.data.allocator.dupe(u8, preimage);
 
-        // Update tracking for preimage addition
-        if (!self.data.contains(key)) {
-            self.preimage_count += 1;
-            self.preimage_bytes += preimage.len;
-        } else {
-            // Updating existing preimage - adjust byte count
-            if (self.data.get(key)) |old| {
-                self.preimage_bytes = self.preimage_bytes - old.len + preimage.len;
-            }
-        }
+        // Preimages do NOT affect a_i or a_o according to the graypaper
+        // They are stored separately and don't contribute to storage footprint
 
         try self.data.put(key, new_preimage);
     }
@@ -363,8 +346,9 @@ pub const ServiceAccount = struct {
                 .status = .{ null, null, null },
             };
             const encoded = try encodePreimageLookup(self.data.allocator, new_lookup);
-            // Track new preimage lookup
-            self.preimage_lookup_count += 1;
+            // Track new preimage lookup in a_i and a_o
+            self.footprint_items += 2; // Each lookup adds 2 to a_i
+            self.footprint_bytes += 81 + length; // 81 base + length to a_o
             try self.data.put(key, encoded);
         }
     }
@@ -386,7 +370,8 @@ pub const ServiceAccount = struct {
             if (pi.len == 0) {
                 self.data.allocator.free(existing_data);
                 _ = self.data.remove(lookup_key);
-                self.preimage_lookup_count -= 1; // Track removal
+                self.footprint_items -= 2; // Each lookup removal subtracts 2 from a_i
+                self.footprint_bytes -= 81 + length; // Subtract from a_o
                 self.removePreimageByHash(service_id, hash);
             } else if (pi.len == 1) {
                 preimage_lookup.status[1] = current_slot; // [x, t]
@@ -397,7 +382,8 @@ pub const ServiceAccount = struct {
             } else if (pi.len == 2 and pi[1].? < current_slot -| preimage_expungement_period) {
                 self.data.allocator.free(existing_data);
                 _ = self.data.remove(lookup_key);
-                self.preimage_lookup_count -= 1; // Track removal
+                self.footprint_items -= 2; // Each lookup removal subtracts 2 from a_i
+                self.footprint_bytes -= 81 + length; // Subtract from a_o
                 self.removePreimageByHash(service_id, hash);
             } else if (pi.len == 3 and pi[1].? < current_slot -| preimage_expungement_period) {
                 // [x,y,w]
@@ -423,9 +409,7 @@ pub const ServiceAccount = struct {
         const preimage_key = state_keys.constructServicePreimageKey(service_id, target_hash);
 
         if (self.data.fetchRemove(preimage_key)) |removed| {
-            // Update tracking when removing preimage
-            self.preimage_count -= 1;
-            self.preimage_bytes -= removed.value.len;
+            // Preimages do NOT affect a_i or a_o
             self.data.allocator.free(removed.value);
         }
     }
@@ -482,7 +466,8 @@ pub const ServiceAccount = struct {
             };
             const encoded = try encodePreimageLookup(self.data.allocator, new_lookup);
             try self.data.put(key, encoded);
-            self.preimage_lookup_count += 1; // Track new lookup
+            self.footprint_items += 2; // Each lookup adds 2 to a_i
+            self.footprint_bytes += 81 + length; // 81 base + length to a_o
             return;
         };
 
@@ -556,25 +541,18 @@ pub const ServiceAccount = struct {
     /// Calculate storage footprint from tracked values
     /// Returns the footprint metrics including the threshold balance
     pub fn getStorageFootprint(self: *const ServiceAccount) StorageFootprint {
-        // Calculate a_i: 2 * preimage_lookups + storage items
-        const a_i: u32 = (2 * self.preimage_lookup_count) + self.storage_items;
+        // We directly track a_i and a_o
+        const a_i = self.footprint_items;
+        const a_o = self.footprint_bytes;
 
-        // Calculate a_o: total bytes across all data types
-        // Storage: 32 bytes per key + value bytes
-        // Preimage lookups: 81 bytes + length per lookup
-        // Preimages: just the preimage bytes (keys are separate)
-        const storage_total = self.storage_bytes;
-        const preimage_lookup_total = self.preimage_lookup_count * 81; // Base overhead, actual lengths tracked separately
-        const a_o: u64 = storage_total + preimage_lookup_total + self.preimage_bytes;
-
-        // Calculate storage cost with gratis (free) storage allowance
-        // If storage_offset is set, the first storage_offset bytes are free
+        // Calculate threshold balance a_t
+        // Per graypaper: a_t = max(0, B_S + B_I·a_i + B_L·a_o - a_f)
+        // Where a_f is the storage_offset (free storage allowance)
         const billable_bytes = if (self.storage_offset > 0)
             a_o -| self.storage_offset
         else
             a_o;
 
-        // a_t = B_S + B_I * a_i + B_L * billable_bytes
         const a_t: Balance = B_S + B_I * a_i + B_L * billable_bytes;
 
         return .{ .a_i = a_i, .a_o = a_o, .a_t = a_t };

@@ -544,48 +544,11 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 .total_items = fprint.a_i,
                 // NEW fields for v0.6.7
                 .free_storage_offset = service_account.?.storage_offset,
-                .preimage_count = blk: {
-                    var count: u32 = 0;
-                    var it = service_account.?.data.iterator();
-                    while (it.next()) |entry| {
-                        const key = entry.key_ptr.*;
-                        // Check if this is a preimage key (marker is 0xFFFFFFFE)
-                        if (key[3] == 255 and key[5] == 255 and key[7] == 255 and key[1] == 254) {
-                            count += 1;
-                        }
-                    }
-                    break :blk count;
-                },
-                .total_preimage_size = blk: {
-                    var total: u32 = 0;
-                    var it = service_account.?.data.iterator();
-                    while (it.next()) |entry| {
-                        const key = entry.key_ptr.*;
-                        // Check if this is a preimage key (marker is 0xFFFFFFFE)
-                        if (key[3] == 255 and key[5] == 255 and key[7] == 255 and key[1] == 254) {
-                            total += @intCast(entry.value_ptr.len);
-                        }
-                    }
-                    break :blk total;
-                },
-                .preimage_lookup_count = blk: {
-                    var count: u32 = 0;
-                    var it = service_account.?.data.iterator();
-                    while (it.next()) |entry| {
-                        const key = entry.key_ptr.*;
-                        // Check if this is a preimage lookup key (not storage, not preimage)
-                        // Preimage lookups have length encoded, not 0xFFFFFFFF or 0xFFFFFFFE
-                        if (key[3] == 255 and key[5] == 255 and key[7] == 255) {
-                            if (key[1] != 255 and key[1] != 254) {
-                                count += 1;
-                            }
-                        } else {
-                            // If not all 255s in positions 3,5,7, it's likely a preimage lookup
-                            count += 1;
-                        }
-                    }
-                    break :blk count;
-                },
+                // We no longer track these separately - they're included in a_i and a_o
+                // We can't decompose a_i and a_o back into individual components
+                .preimage_count = 0, // Cannot determine from a_i/a_o
+                .total_preimage_size = 0, // Cannot determine from a_i/a_o
+                .preimage_lookup_count = 0, // Cannot determine from a_i/a_o (it's part of a_i)
             };
 
             // Since we are varint encoding will only be smaller
