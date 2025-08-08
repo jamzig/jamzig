@@ -20,6 +20,7 @@ pub fn decodeServiceAccountBase(
     const min_item_gas = try reader.readInt(types.Gas, .little);
     const min_memo_gas = try reader.readInt(types.Gas, .little);
     const bytes = try reader.readInt(types.U64, .little);
+
     const storage_offset = try reader.readInt(types.U64, .little); // NEW: a_f
 
     // se_4 encoded fields (4 bytes each)
@@ -38,11 +39,17 @@ pub fn decodeServiceAccountBase(
     account.creation_slot = creation_slot;
     account.last_accumulation_slot = last_accumulation_slot;
     account.parent_service = parent_service;
-
-    // These are the storage footprint values (a_o and a_i)
-    // They should be used to validate/update the account's storage metrics
-    account.storage_bytes = bytes; // a_o
-    account.storage_items = items; // a_i
+    
+    // Initialize tracking fields based on deserialized footprint values
+    // These will be properly recalculated as data is loaded, but we set initial
+    // estimates based on the serialized footprint
+    // Note: a_i includes both storage items and 2*preimage_lookups
+    // We can't distinguish exactly, but will be corrected as data loads
+    account.storage_items = items; // This is the total a_i, will be refined
+    account.storage_bytes = bytes; // This is the total a_o
+    account.preimage_count = 0; // Will be updated as preimages are loaded
+    account.preimage_bytes = 0; // Will be updated as preimages are loaded  
+    account.preimage_lookup_count = 0; // Will be updated as lookups are loaded
 }
 
 /// Decodes a preimage lookup from the encoded format: E(↕[E_4(x) | x <− t])

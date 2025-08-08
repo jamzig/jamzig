@@ -252,7 +252,7 @@ pub const RandomStateGenerator = struct {
             const storage_value = try self.allocator.alloc(u8, value_size);
             self.rng.bytes(storage_value);
 
-            try service_account.storage.put(storage_key, storage_value);
+            try service_account.data.put(storage_key, storage_value);
         }
 
         // Generate random preimage entries (0-3 entries)
@@ -266,7 +266,7 @@ pub const RandomStateGenerator = struct {
             const preimage_data = try self.allocator.alloc(u8, preimage_size);
             self.rng.bytes(preimage_data);
 
-            try service_account.preimages.put(preimage_key, preimage_data);
+            try service_account.data.put(preimage_key, preimage_data);
 
             // Create corresponding preimage lookup with random status
             var lookup = @import("services.zig").PreimageLookup{ .status = [_]?types.TimeSlot{null} ** 3 };
@@ -275,7 +275,9 @@ pub const RandomStateGenerator = struct {
                 lookup.status[i] = self.rng.int(types.TimeSlot);
             }
 
-            try service_account.preimage_lookups.put(preimage_key, lookup);
+            // Encode lookup and store in unified data container
+            const encoded_lookup = try @import("services.zig").ServiceAccount.encodePreimageLookup(self.allocator, lookup);
+            try service_account.data.put(preimage_key, encoded_lookup);
         }
 
         return service_account;
