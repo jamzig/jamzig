@@ -247,21 +247,13 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             defer key_data.deinit();
             span.trace("Key = {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
-            // Determine actual service ID first
+            // Log the service ID and key for debugging
             span.info("Service ID for storage key: {d}", .{resolved_service_id});
-
-            // Construct storage key directly from key_data
-            // constructStorageKey already handles hashing internally via C_variant3
-            span.debug("Constructing PVM storage key", .{});
             span.info("Raw key data (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
 
-            const storage_key = state_keys.constructStorageKey(resolved_service_id, key_data.buffer);
-            span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
-            span.info("Final storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
-
-            // Look up the value in storage
+            // Look up the value in storage using the new method
             span.debug("Looking up value in storage", .{});
-            const value = service_account.data.get(storage_key) orelse {
+            const value = service_account.readStorage(resolved_service_id, key_data.buffer) orelse {
                 // Key not found
                 span.debug("Key not found in storage, returning NONE", .{});
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.NONE);
@@ -343,25 +335,15 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             defer key_data.deinit();
             span.trace("Key data: {s}", .{std.fmt.fmtSliceHexLower(key_data.buffer)});
 
-            // Construct storage key directly from key_data
-            // constructStorageKey already handles hashing internally via C_variant3
-            span.debug("Constructing PVM storage key", .{});
-            span.info("Service ID for storage key: {d}", .{host_ctx.service_id});
+            span.debug("Service ID for storage operation: {d}", .{host_ctx.service_id});
             span.info("Raw key data (len={d}): {s}", .{ key_data.buffer.len, std.fmt.fmtSliceHexLower(key_data.buffer) });
-
-            const storage_key = state_keys.constructStorageKey(host_ctx.service_id, key_data.buffer);
-            span.trace("Generated PVM storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
-            span.info("Final storage key: {s}", .{std.fmt.fmtSliceHexLower(&storage_key)});
 
             // Check if this is a removal operation (v_z == 0)
             if (v_z == 0) {
                 span.debug("Removal operation detected (v_z = 0)", .{});
                 // Remove the key from storage
-                if (service_account.data.fetchRemove(storage_key)) |*entry| {
-                    // Return the previous length
-                    span.debug("Key found and removed, previous value: {s} length: {d}", .{ std.fmt.fmtSliceHexLower(entry.value), entry.value.len });
-                    exec_ctx.registers[7] = entry.value.len;
-                    host_ctx.allocator.free(entry.value);
+                if (service_account.removeStorage(host_ctx.service_id, key_data.buffer)) |value_length| {
+                    exec_ctx.registers[7] = value_length;
                     return .play;
                 }
                 span.debug("Key not found, returning NONE", .{});
@@ -377,10 +359,9 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             };
             defer value.deinit();
 
-            span.debug("Write Key={s} => Data len={d} (first 32 bytes max): {s}", .{
-                std.fmt.fmtSliceHexLower(&storage_key),
+            span.debug("Write operation - Key len={d}, Value len={d}", .{
+                key_data.buffer.len,
                 value.buffer.len,
-                std.fmt.fmtSliceHexLower(value.buffer[0..@min(32, value.buffer.len)]),
             });
             span.trace("Value data: {s}", .{std.fmt.fmtSliceHexLower(value.buffer)});
 
@@ -396,7 +377,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 const value_owned = host_ctx.allocator.dupe(u8, value.buffer) catch {
                     return .{ .terminal = .panic };
                 };
-                break :pv service_account.writeStorage(storage_key, value_owned) catch {
+                break :pv service_account.writeStorage(host_ctx.service_id, key_data.buffer, value_owned) catch {
                     host_ctx.allocator.free(value_owned);
                     span.err("Failed to write to storage", .{});
                     return .{ .terminal = .panic };
@@ -411,6 +392,8 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             }
 
             // Check if service has enough balance to store this data
+            // REFACTOR: this can be simplified to first check if we alrady have a prior value
+            // and actually determine the length and the delta
             const footprint = service_account.storageFootprint();
             span.debug("Checking storage footprint a_t {d} against balance {d}", .{ footprint.a_t, service_account.balance });
             if (footprint.a_t > service_account.balance) {
@@ -418,12 +401,12 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 // Restore old value, if we had a prior value, otherwise
                 // we remove the storage key, as we do not have enough balance
                 if (maybe_prior_value) |prior_value| {
-                    service_account.writeStorageFreeOldValue(storage_key, prior_value) catch {
+                    service_account.writeStorageFreeOldValue(host_ctx.service_id, key_data.buffer, prior_value) catch {
                         return .{ .terminal = .panic };
                     };
                     maybe_prior_value = null; // to avoid deferred deint
                 } else {
-                    service_account.removeStorage(storage_key);
+                    _ = service_account.removeStorage(host_ctx.service_id, key_data.buffer);
                 }
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.FULL);
                 return .play;

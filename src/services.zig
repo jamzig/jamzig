@@ -171,35 +171,42 @@ pub const ServiceAccount = struct {
     }
 
     // Functionality to read and write storage, reflecting access patterns in Section 4.9.2 on Service State.
-    pub fn readStorage(self: *ServiceAccount, key: types.StateKey) ?[]const u8 {
-        return self.data.get(key);
+    pub fn readStorage(self: *const ServiceAccount, service_id: u32, key: []const u8) ?[]const u8 {
+        const storage_key = state_keys.constructStorageKey(service_id, key);
+        return self.data.get(storage_key);
     }
 
-    pub fn resetStorage(self: *ServiceAccount, key: types.StateKey) void {
-        if (self.data.getPtr(key)) |old_value_ptr| {
+    pub fn resetStorage(self: *ServiceAccount, service_id: u32, key: []const u8) void {
+        const storage_key = state_keys.constructStorageKey(service_id, key);
+        if (self.data.getPtr(storage_key)) |old_value_ptr| {
             // Update a_o - reduce bytes by old value length (key overhead stays)
             self.footprint_bytes = self.footprint_bytes - old_value_ptr.len;
 
             self.data.allocator.free(old_value_ptr.*);
-            self.data.put(key, &[_]u8{}) catch unreachable;
+            self.data.put(storage_key, &[_]u8{}) catch unreachable;
             // Empty value doesn't add bytes
         }
     }
 
-    pub fn removeStorage(self: *ServiceAccount, key: types.StateKey) void {
-        if (self.data.getPtr(key)) |old_value_ptr| {
+    // Returns the length of the removed value
+    pub fn removeStorage(self: *ServiceAccount, service_id: u32, key: []const u8) ?usize {
+        const storage_key = state_keys.constructStorageKey(service_id, key);
+        if (self.data.fetchRemove(storage_key)) |entry| {
+            const value_length = entry.value.len;
             // Update a_i and a_o for storage removal
             self.footprint_items -= 1; // One storage item removed
-            self.footprint_bytes -= 65 + old_value_ptr.len; // 34 + 31 (key size) + value length
+            self.footprint_bytes -= 34 + key.len + value_length; // 34 + key length + value length
 
-            self.data.allocator.free(old_value_ptr.*);
-            _ = self.data.remove(key);
+            self.data.allocator.free(entry.value);
+            return value_length;
         }
+        return null; // Key not found
     }
 
-    pub fn writeStorage(self: *ServiceAccount, key: types.StateKey, value: []const u8) !?[]const u8 {
+    pub fn writeStorage(self: *ServiceAccount, service_id: u32, key: []const u8, value: []const u8) !?[]const u8 {
+        const storage_key = state_keys.constructStorageKey(service_id, key);
         // Clear the old, otherwise we are leaking
-        const old_value = self.data.get(key);
+        const old_value = self.data.get(storage_key);
 
         // Update a_i and a_o based on whether this is new or update
         if (old_value) |old| {
@@ -208,16 +215,16 @@ pub const ServiceAccount = struct {
         } else {
             // New entry - increment both a_i and a_o
             self.footprint_items += 1; // One new storage item
-            self.footprint_bytes += 65 + value.len; // 34 + 31 (key size) + value length
+            self.footprint_bytes += 34 + key.len + value.len; // 34 + key length + value length
         }
 
-        try self.data.put(key, value);
+        try self.data.put(storage_key, value);
 
         return old_value;
     }
 
-    pub fn writeStorageFreeOldValue(self: *ServiceAccount, key: types.StateKey, value: []const u8) !void {
-        const maybe_old_value = try self.writeStorage(key, value);
+    pub fn writeStorageFreeOldValue(self: *ServiceAccount, service_id: u32, key: []const u8, value: []const u8) !void {
+        const maybe_old_value = try self.writeStorage(service_id, key, value);
         if (maybe_old_value) |old_value| self.data.allocator.free(old_value);
     }
 
@@ -540,6 +547,7 @@ pub const ServiceAccount = struct {
 
     /// Calculate storage footprint from tracked values
     /// Returns the footprint metrics including the threshold balance
+    /// REFACTOR: we need B_S, B_I and B_L to be passed in as jam_params.Params
     pub fn getStorageFootprint(self: *const ServiceAccount) StorageFootprint {
         // We directly track a_i and a_o
         const a_i = self.footprint_items;
