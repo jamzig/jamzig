@@ -482,6 +482,7 @@ pub const ServiceAccount = struct {
             };
             const encoded = try encodePreimageLookup(self.data.allocator, new_lookup);
             try self.data.put(key, encoded);
+            self.preimage_lookup_count += 1; // Track new lookup
             return;
         };
 
