@@ -368,6 +368,10 @@ fn applyRandomMutations(
     enable_shortening: bool,
 ) !void {
     // Mutate dictionary entries
+
+    var to_be_removed = std.ArrayList(types.StateKey).init(allocator);
+    defer to_be_removed.deinit();
+
     var entries_iter = dict.entries.iterator();
     while (entries_iter.next()) |entry| {
         // Apply bit flip mutation to the value
@@ -405,8 +409,30 @@ fn applyRandomMutations(
             const bit_index = rng.uintLessThan(u8, 31 * 8); // 31 bytes * 8 bits
             const byte_index = bit_index / 8;
             const bit_in_byte = @as(u3, @intCast(bit_index % 8));
-            entry.key_ptr.*[byte_index] ^= (@as(u8, 1) << bit_in_byte);
+
+            // NOTE: we cannot just bitflip a key in the HahsMap this will cause
+            // undefined behaviour so we need to crate a new entry and remove the old
+            var mutated_key = entry.key_ptr.*;
+            mutated_key[byte_index] ^= (@as(u8, 1) << bit_in_byte);
+
+            dict.put(.{
+                .key = mutated_key,
+                .value = entry.value_ptr.value,
+            }) catch |err| {
+                // If mutation causes a key collision, we just skip it
+                if (err == error.KeyCollision) {
+                    continue;
+                } else {
+                    return err; // Propagate other errors
+                }
+            };
+            try to_be_removed.append(entry.key_ptr.*);
         }
+    }
+
+    for (to_be_removed.items) |key| {
+        // Remove mutated keys from the dictionary
+        _ = dict.entries.remove(key);
     }
 }
 
