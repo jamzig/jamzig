@@ -116,7 +116,7 @@ pub fn convertServiceAccount(allocator: std.mem.Allocator, account: tv_types.Ser
         hasher.final(&key_hash);
 
         // Construct the storage key using service ID and hash
-        storage_key = state_keys.constructStorageKey(account.id, key_hash);
+        storage_key = state_keys.constructStorageKey(account.id, &key_hash);
 
         try service_account.writeStorageFreeOldValue(storage_key, try allocator.dupe(u8, storage_entry.value));
     }
@@ -130,9 +130,10 @@ pub fn convertPrivileges(allocator: std.mem.Allocator, privileges: tv_types.Priv
 
     // Map the privileged service identities
     chi.manager = privileges.bless;
-    // For now, use the first element of the assign array for backward compatibility
-    // TODO: Update state.Chi to support multiple assign services if needed
-    chi.assign = if (privileges.assign.len > 0) privileges.assign[0] else 0;
+    // Add all assign services to the list
+    for (privileges.assign) |assign_service| {
+        try chi.assign.append(chi.allocator, assign_service);
+    }
     chi.designate = privileges.designate;
 
     // Add all always-accumulate mappings

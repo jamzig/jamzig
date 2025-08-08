@@ -285,7 +285,7 @@ pub const ServiceAccount = struct {
     }
 
     // Helper function to encode PreimageLookup to bytes for storage
-    fn encodePreimageLookup(allocator: Allocator, lookup: PreimageLookup) ![]const u8 {
+    pub fn encodePreimageLookup(allocator: Allocator, lookup: PreimageLookup) ![]const u8 {
         var buffer = std.ArrayList(u8).init(allocator);
         errdefer buffer.deinit();
 

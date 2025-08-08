@@ -419,7 +419,7 @@ test "mutation_robustness_with_shortening" {
     _ = testMutationRobustnessWithShortening(allocator, TINY, .moderate, 456, 0.15, true) catch |err| {
         // Various reconstruction errors are expected when data is truncated or corrupted
         switch (err) {
-            error.EndOfStream, error.InvalidData, error.OutOfMemory, error.PreimageLookupEntryCannotBeReconstructedAccountMissing, error.UnknownStateComponent => {
+            error.EndOfStream, error.InvalidData, error.OutOfMemory, error.UnknownStateComponent => {
                 // These are expected failure modes for truncated/corrupted data - test passed
                 return;
             },
@@ -447,7 +447,6 @@ test "shortening_stress_test_moderate" {
                 error.EndOfStream,
                 error.InvalidData,
                 error.OutOfMemory,
-                error.PreimageLookupEntryCannotBeReconstructedAccountMissing,
                 error.UnknownStateComponent,
                 => {
                     // Expected failure modes for truncated/corrupted data - continue with next iteration

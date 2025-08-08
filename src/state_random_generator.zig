@@ -344,7 +344,14 @@ pub const RandomStateGenerator = struct {
     ) !void {
         // Generate optional privileged service indices (30% chance of being null)
         chi.manager = if (self.rng.int(u8) % 10 < 3) null else self.rng.intRangeAtMost(u32, 1, 1000);
-        chi.assign = if (self.rng.int(u8) % 10 < 3) null else self.rng.intRangeAtMost(u32, 1, 1000);
+        
+        // Generate assign list - must be exactly core_count entries
+        // TODO: This needs to be updated when we support different params configurations
+        const TINY_CORE_COUNT = 2; // From TINY_PARAMS
+        for (0..TINY_CORE_COUNT) |_| {
+            try chi.assign.append(chi.allocator, self.rng.intRangeAtMost(u32, 1, 1000));
+        }
+        
         chi.designate = if (self.rng.int(u8) % 10 < 3) null else self.rng.intRangeAtMost(u32, 1, 1000);
 
         // Generate always_accumulate services map (0-5 entries for performance)
