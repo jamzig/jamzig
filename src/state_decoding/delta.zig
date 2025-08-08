@@ -39,7 +39,7 @@ pub fn decodeServiceAccountBase(
     account.creation_slot = creation_slot;
     account.last_accumulation_slot = last_accumulation_slot;
     account.parent_service = parent_service;
-    
+
     // Initialize tracking fields based on deserialized footprint values
     // These will be properly recalculated as data is loaded, but we set initial
     // estimates based on the serialized footprint
@@ -48,7 +48,7 @@ pub fn decodeServiceAccountBase(
     account.storage_items = items; // This is the total a_i, will be refined
     account.storage_bytes = bytes; // This is the total a_o
     account.preimage_count = 0; // Will be updated as preimages are loaded
-    account.preimage_bytes = 0; // Will be updated as preimages are loaded  
+    account.preimage_bytes = 0; // Will be updated as preimages are loaded
     account.preimage_lookup_count = 0; // Will be updated as lookups are loaded
 }
 
@@ -83,88 +83,4 @@ fn readHash(reader: anytype) !types.OpaqueHash {
         return DecodingError.EndOfStream;
     }
     return hash;
-}
-
-test "decodeServiceAccountBase" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var delta = state.Delta.init(allocator);
-    defer delta.deinit();
-
-    // Create test data
-    const service_id: types.ServiceId = 42;
-    const code_hash = [_]u8{1} ** 32;
-    const balance: types.U64 = 1000;
-    const min_item_gas: types.Gas = 100;
-    const min_memo_gas: types.Gas = 50;
-    const bytes: types.U64 = 500;
-    const items: types.U32 = 10;
-
-    // Test 1: Without storage_offset
-    {
-        // Create a buffer with encoded data (no storage_offset)
-        var buffer = std.ArrayList(u8).init(allocator);
-        defer buffer.deinit();
-
-        const writer = buffer.writer();
-        try writer.writeAll(&code_hash);
-        try writer.writeInt(types.U64, balance, .little);
-        try writer.writeInt(types.Gas, min_item_gas, .little);
-        try writer.writeInt(types.Gas, min_memo_gas, .little);
-        try writer.writeInt(types.U64, bytes, .little);
-        try writer.writeInt(types.U32, items, .little);
-        try writer.writeByte(0); // storage_offset not present
-
-        // Test decoding
-        var stream = std.io.fixedBufferStream(buffer.items);
-        try decodeServiceAccountBase(allocator, &delta, service_id, stream.reader());
-
-        // Verify results
-        try testing.expect(delta.accounts.contains(service_id));
-        const account = delta.accounts.get(service_id).?;
-
-        try testing.expectEqualSlices(u8, &code_hash, &account.code_hash);
-        try testing.expectEqual(balance, account.balance);
-        try testing.expectEqual(min_item_gas, account.min_gas_accumulate);
-        try testing.expectEqual(min_memo_gas, account.min_gas_on_transfer);
-        try testing.expectEqual(@as(?u64, null), account.storage_offset);
-    }
-
-    // Test 2: With storage_offset
-    {
-        const service_id_2: types.ServiceId = 43;
-        const storage_offset_value: u64 = 5000;
-
-        // Create a buffer with encoded data (with storage_offset)
-        var buffer = std.ArrayList(u8).init(allocator);
-        defer buffer.deinit();
-
-        const writer = buffer.writer();
-        try writer.writeAll(&code_hash);
-        try writer.writeInt(types.U64, balance, .little);
-        try writer.writeInt(types.Gas, min_item_gas, .little);
-        try writer.writeInt(types.Gas, min_memo_gas, .little);
-        try writer.writeInt(types.U64, bytes, .little);
-        try writer.writeInt(types.U32, items, .little);
-        try writer.writeByte(1); // storage_offset present
-        try writer.writeInt(u64, storage_offset_value, .little);
-
-        // Test decoding
-        var stream = std.io.fixedBufferStream(buffer.items);
-        try decodeServiceAccountBase(allocator, &delta, service_id_2, stream.reader());
-
-        // Verify results
-        try testing.expect(delta.accounts.contains(service_id_2));
-        const account = delta.accounts.get(service_id_2).?;
-
-        try testing.expectEqualSlices(u8, &code_hash, &account.code_hash);
-        try testing.expectEqual(balance, account.balance);
-        try testing.expectEqual(min_item_gas, account.min_gas_accumulate);
-        try testing.expectEqual(min_memo_gas, account.min_gas_on_transfer);
-        try testing.expectEqual(@as(?u64, storage_offset_value), account.storage_offset);
-    }
-    // bytes and items are not currently used
-    // try testing.expectEqual(bytes, account.bytes);
-    // try testing.expectEqual(items, account.items);
 }

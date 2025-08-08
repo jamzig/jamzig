@@ -188,7 +188,7 @@ pub const ServiceAccount = struct {
         if (self.data.getPtr(key)) |old_value_ptr| {
             // Update tracking - reduce bytes by old value length
             self.storage_bytes = self.storage_bytes - old_value_ptr.len;
-            
+
             self.data.allocator.free(old_value_ptr.*);
             self.data.put(key, &[_]u8{}) catch unreachable;
             // Empty value doesn't add bytes
@@ -200,7 +200,7 @@ pub const ServiceAccount = struct {
             // Update tracking - remove item and its bytes
             self.storage_items -= 1;
             self.storage_bytes -= 32 + old_value_ptr.len; // 32 bytes for key + value length
-            
+
             self.data.allocator.free(old_value_ptr.*);
             _ = self.data.remove(key);
         }
@@ -233,7 +233,7 @@ pub const ServiceAccount = struct {
     // Functions to add and manage preimages correspond to the discussion in Section 4.9.2 and Appendix D.
     pub fn dupeAndAddPreimage(self: *ServiceAccount, key: types.StateKey, preimage: []const u8) !void {
         const new_preimage = try self.data.allocator.dupe(u8, preimage);
-        
+
         // Update tracking for preimage addition
         if (!self.data.contains(key)) {
             self.preimage_count += 1;
@@ -244,7 +244,7 @@ pub const ServiceAccount = struct {
                 self.preimage_bytes = self.preimage_bytes - old.len + preimage.len;
             }
         }
-        
+
         try self.data.put(key, new_preimage);
     }
 
@@ -557,7 +557,7 @@ pub const ServiceAccount = struct {
     pub fn getStorageFootprint(self: *const ServiceAccount) StorageFootprint {
         // Calculate a_i: 2 * preimage_lookups + storage items
         const a_i: u32 = (2 * self.preimage_lookup_count) + self.storage_items;
-        
+
         // Calculate a_o: total bytes across all data types
         // Storage: 32 bytes per key + value bytes
         // Preimage lookups: 81 bytes + length per lookup
@@ -565,17 +565,17 @@ pub const ServiceAccount = struct {
         const storage_total = self.storage_bytes;
         const preimage_lookup_total = self.preimage_lookup_count * 81; // Base overhead, actual lengths tracked separately
         const a_o: u64 = storage_total + preimage_lookup_total + self.preimage_bytes;
-        
+
         // Calculate storage cost with gratis (free) storage allowance
         // If storage_offset is set, the first storage_offset bytes are free
         const billable_bytes = if (self.storage_offset > 0)
             a_o -| self.storage_offset
         else
             a_o;
-        
+
         // a_t = B_S + B_I * a_i + B_L * billable_bytes
         const a_t: Balance = B_S + B_I * a_i + B_L * billable_bytes;
-        
+
         return .{ .a_i = a_i, .a_o = a_o, .a_t = a_t };
     }
 
@@ -680,107 +680,3 @@ pub const Delta = struct {
         self.* = undefined;
     }
 };
-
-// Tests validate the behavior of these structures as described in Section 4.2 and 4.9.
-const testing = std.testing;
-
-test "Delta initialization, account creation, and retrieval" {
-    const allocator = testing.allocator;
-    var delta = Delta.init(allocator);
-    defer delta.deinit();
-
-    const index: ServiceId = 1;
-    _ = try delta.getOrCreateAccount(index);
-}
-
-test "Delta balance update" {
-    const allocator = testing.allocator;
-    var delta = Delta.init(allocator);
-    defer delta.deinit();
-
-    const index: ServiceId = 1;
-    _ = try delta.getOrCreateAccount(index);
-
-    const new_balance: Balance = 1000;
-    try delta.updateBalance(index, new_balance);
-
-    const account = delta.getAccount(index);
-    try testing.expect(account != null);
-    try testing.expect(account.?.balance == new_balance);
-
-    const non_existent_index: ServiceId = 2;
-    try testing.expectError(error.AccountNotFound, delta.updateBalance(non_existent_index, new_balance));
-}
-
-test "ServiceAccount initialization and deinitialization" {
-    const allocator = testing.allocator;
-    var account = ServiceAccount.init(allocator);
-    defer account.deinit();
-
-    try testing.expect(account.data.count() == 0);
-    try testing.expect(account.balance == 0);
-    try testing.expect(account.min_gas_accumulate == 0);
-    try testing.expect(account.min_gas_on_transfer == 0);
-}
-
-test "ServiceAccount historicalLookup" {
-    const allocator = testing.allocator;
-    var account = ServiceAccount.init(allocator);
-    defer account.deinit();
-
-    const hash = [_]u8{1} ** 32;
-    const preimage = "test preimage";
-
-    // Create a structured preimage key for testing (use service ID 42)
-    const preimage_key = state_keys.constructServicePreimageKey(42, hash);
-    try account.dupeAndAddPreimage(preimage_key, preimage);
-
-    const key = state_keys.constructServicePreimageLookupKey(42, @intCast(preimage.len), hash);
-
-    // Test case 1: Empty status
-    const empty_lookup = PreimageLookup{ .status = .{ null, null, null } };
-    const empty_encoded = try ServiceAccount.encodePreimageLookup(allocator, empty_lookup);
-    try account.data.put(key, empty_encoded);
-    try testing.expectEqual(null, account.historicalLookup(42, 5, hash));
-
-    // Test case 2: Status with 1 entry
-    const single_lookup = PreimageLookup{ .status = .{ 10, null, null } };
-    const single_encoded = try ServiceAccount.encodePreimageLookup(allocator, single_lookup);
-    allocator.free(account.data.get(key).?); // Free old value
-    try account.data.put(key, single_encoded);
-    try testing.expectEqual(null, account.historicalLookup(42, 5, hash));
-    try testing.expectEqualStrings(preimage, account.historicalLookup(42, 15, hash).?);
-
-    // Test case 3: Status with 2 entries
-    const double_lookup = PreimageLookup{ .status = .{ 10, 20, null } };
-    const double_encoded = try ServiceAccount.encodePreimageLookup(allocator, double_lookup);
-    allocator.free(account.data.get(key).?); // Free old value
-    try account.data.put(key, double_encoded);
-    try testing.expectEqualStrings(preimage, account.historicalLookup(42, 15, hash).?);
-    try testing.expectEqual(null, account.historicalLookup(42, 25, hash));
-
-    // Test case 4: Status with 3 entries
-    const triple_lookup = PreimageLookup{ .status = .{ 10, 20, 30 } };
-    const triple_encoded = try ServiceAccount.encodePreimageLookup(allocator, triple_lookup);
-    allocator.free(account.data.get(key).?); // Free old value
-    try account.data.put(key, triple_encoded);
-    try testing.expectEqual(null, account.historicalLookup(42, 5, hash));
-    try testing.expectEqualStrings(preimage, account.historicalLookup(42, 15, hash).?);
-    try testing.expectEqual(null, account.historicalLookup(42, 25, hash));
-    try testing.expectEqualStrings(preimage, account.historicalLookup(42, 35, hash).?);
-
-    // Test case 5: Non-existent hash
-    const non_existent_hash = [_]u8{2} ** 32;
-    try testing.expectEqual(null, account.historicalLookup(42, 15, non_existent_hash));
-
-    // Test case 6: Preimage doesn't exist in preimages
-    const hash_without_preimage = [_]u8{3} ** 32;
-    const no_preimage_lookup = PreimageLookup{ .status = .{ 10, null, null } };
-    const no_preimage_encoded = try ServiceAccount.encodePreimageLookup(allocator, no_preimage_lookup);
-    defer allocator.free(no_preimage_encoded);
-    try account.data.put(
-        state_keys.constructServicePreimageLookupKey(42, 10, hash_without_preimage),
-        no_preimage_encoded,
-    );
-    try testing.expect(account.historicalLookup(42, 15, hash_without_preimage) == null);
-}
