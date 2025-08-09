@@ -403,56 +403,55 @@ pub fn GeneralHostCalls(comptime params: Params) type {
 
         /// Represents account information from a service
         pub const ServiceInfo = struct {
-            /// Code hash of the service (tc)
+            /// Code hash of the service (a_c)
             code_hash: [32]u8,
-            /// Current balance of the service (tb)
+            /// Current balance of the service (a_b)
             balance: types.Balance,
-            /// Threshold balance required for the service (tt)
+            /// Threshold balance required for the service (a_t)
             threshold_balance: types.Balance,
-            /// Gas limit for accumulator operations (tg)
+            /// Gas limit for accumulator operations (a_g)
             min_item_gas: types.Gas,
-            /// Gas limit for on_transfer operations (tm)
+            /// Gas limit for on_transfer operations (a_m)
             min_memo_gas: types.Gas,
-            /// Total storage size in bytes (to)
+            /// Total storage size in bytes (a_o - includes both storage and preimages)
             total_storage_size: u64,
-            /// Total number of items in storage (ti)
+            /// Total number of items in storage (a_i - includes both storage and preimage lookups)
             total_items: u32,
-            /// Free storage offset (tf) - NEW in v0.6.7
+            /// Free storage offset (a_f)
             free_storage_offset: u64,
-            /// Preimage count (tr) - NEW in v0.6.7
-            preimage_count: u32,
-            /// Total preimage size (ta) - NEW in v0.6.7
-            total_preimage_size: u32,
-            /// Preimage lookup count (tp) - NEW in v0.6.7
-            preimage_lookup_count: u32,
+            /// Time slot at creation (a_r)
+            creation_slot: u32,
+            /// Time slot at most recent accumulation (a_a)
+            last_accumulation_slot: u32,
+            /// Parent service ID (a_p)
+            parent_service: u32,
 
             pub fn encode(
                 self: ServiceInfo,
                 writer: anytype,
             ) !void {
-                // According to v0.6.7, info uses fixed-length encoding:
-                // se(tc, se_8(tb, tt, tg, tm, to), se_4(ti), se_8(tf), se_4(tr, ta, tp))
+                // se(a_c, se_8(a_b, a_t, a_g, a_m, a_o), se_4(a_i), se_8(a_f), se_4(a_r, a_a, a_p))
 
                 // Write code hash (32 bytes)
                 try writer.writeAll(&self.code_hash);
 
-                // Write first group of 8-byte values: tb, tt, tg, tm, to
+                // Write first group of 8-byte values: a_b, a_t, a_g, a_m, a_o
                 try writer.writeInt(u64, self.balance, .little);
                 try writer.writeInt(u64, self.threshold_balance, .little);
                 try writer.writeInt(u64, self.min_item_gas, .little);
                 try writer.writeInt(u64, self.min_memo_gas, .little);
                 try writer.writeInt(u64, self.total_storage_size, .little);
 
-                // Write ti as 4-byte value
+                // Write a_i as 4-byte value
                 try writer.writeInt(u32, self.total_items, .little);
 
-                // Write tf as 8-byte value
+                // Write a_f as 8-byte value
                 try writer.writeInt(u64, self.free_storage_offset, .little);
 
-                // Write last group of 4-byte values: tr, ta, tp
-                try writer.writeInt(u32, self.preimage_count, .little);
-                try writer.writeInt(u32, self.total_preimage_size, .little);
-                try writer.writeInt(u32, self.preimage_lookup_count, .little);
+                // Write last group of 4-byte values: a_r, a_a, a_p
+                try writer.writeInt(u32, self.creation_slot, .little);
+                try writer.writeInt(u32, self.last_accumulation_slot, .little);
+                try writer.writeInt(u32, self.parent_service, .little);
             }
         };
 
@@ -501,13 +500,11 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 .min_memo_gas = service_account.?.min_gas_on_transfer,
                 .total_storage_size = fprint.a_o,
                 .total_items = fprint.a_i,
-                // NEW fields for v0.6.7
                 .free_storage_offset = service_account.?.storage_offset,
-                // We no longer track these separately - they're included in a_i and a_o
-                // We can't decompose a_i and a_o back into individual components
-                .preimage_count = 0, // Cannot determine from a_i/a_o
-                .total_preimage_size = 0, // Cannot determine from a_i/a_o
-                .preimage_lookup_count = 0, // Cannot determine from a_i/a_o (it's part of a_i)
+                // Graypaper-compliant fields: a_r, a_a, a_p
+                .creation_slot = service_account.?.creation_slot,
+                .last_accumulation_slot = service_account.?.last_accumulation_slot,
+                .parent_service = service_account.?.parent_service,
             };
 
             // Since we are varint encoding will only be smaller
