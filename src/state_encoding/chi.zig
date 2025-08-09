@@ -18,15 +18,12 @@ pub fn encode(chi: *const state.Chi, writer: anytype) !void {
     const core_count = jam_params.TINY_PARAMS.core_count;
 
     // Encode the simple fields
-    const manager_value = chi.manager orelse 0;
-    const designate_value = chi.designate orelse 0;
-
     span.trace("Encoding manager: {d}, designate: {d}", .{
-        manager_value,
-        designate_value,
+        chi.manager,
+        chi.designate,
     });
 
-    try writer.writeInt(u32, manager_value, .little);
+    try writer.writeInt(u32, chi.manager, .little);
 
     // Encode the assigners as a fixed-size array (one per core)
     // The graypaper expects exactly C (core_count) assigners
@@ -38,7 +35,7 @@ pub fn encode(chi: *const state.Chi, writer: anytype) !void {
         try writer.writeInt(u32, assigner, .little);
     }
 
-    try writer.writeInt(u32, designate_value, .little);
+    try writer.writeInt(u32, chi.designate, .little);
 
     // Encode X_g with ordered keys
     // TODO: this could be a method in encoder, map encoder which orders

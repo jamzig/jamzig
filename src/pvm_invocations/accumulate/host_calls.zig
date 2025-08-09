@@ -181,9 +181,9 @@ pub fn HostCalls(comptime params: Params) type {
             };
 
             // Only the current manager service can call bless
-            if (current_privileges.manager == null or ctx_regular.service_id != current_privileges.manager.?) {
+            if (ctx_regular.service_id != current_privileges.manager) {
                 span.debug("Unauthorized bless call from service {d}, current manager is {d}", .{
-                    ctx_regular.service_id, current_privileges.manager orelse 0,
+                    ctx_regular.service_id, current_privileges.manager,
                 });
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.WHO); // Index unknown
                 return .play;
@@ -191,8 +191,8 @@ pub fn HostCalls(comptime params: Params) type {
 
             // Check manager and validator service IDs are valid
             // This isn't explicit in the graypaper, but it's good practice
-            if ((manager_service_id != 0 and !ctx_regular.context.service_accounts.contains(manager_service_id)) or
-                (validator_service_id != 0 and !ctx_regular.context.service_accounts.contains(validator_service_id)))
+            if ((!ctx_regular.context.service_accounts.contains(manager_service_id)) or
+                (!ctx_regular.context.service_accounts.contains(validator_service_id)))
             {
                 span.debug("Manager or validator service ID doesn't exist", .{});
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.WHO); // Index unknown

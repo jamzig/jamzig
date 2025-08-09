@@ -342,8 +342,8 @@ pub const RandomStateGenerator = struct {
         comptime _: Params,
         chi: *jamstate.Chi,
     ) !void {
-        // Generate optional privileged service indices (30% chance of being null)
-        chi.manager = if (self.rng.int(u8) % 10 < 3) null else self.rng.intRangeAtMost(u32, 1, 1000);
+        // Generate privileged service indices (30% chance of being 0/unassigned)
+        chi.manager = if (self.rng.int(u8) % 10 < 3) 0 else self.rng.intRangeAtMost(u32, 1, 1000);
         
         // Generate assign list - must be exactly core_count entries
         // TODO: This needs to be updated when we support different params configurations
@@ -352,7 +352,7 @@ pub const RandomStateGenerator = struct {
             try chi.assign.append(chi.allocator, self.rng.intRangeAtMost(u32, 1, 1000));
         }
         
-        chi.designate = if (self.rng.int(u8) % 10 < 3) null else self.rng.intRangeAtMost(u32, 1, 1000);
+        chi.designate = if (self.rng.int(u8) % 10 < 3) 0 else self.rng.intRangeAtMost(u32, 1, 1000);
 
         // Generate always_accumulate services map (0-5 entries for performance)
         const num_always_accumulate = self.rng.uintAtMost(u8, 5);
