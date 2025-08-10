@@ -491,30 +491,29 @@ pub fn HostCalls(comptime params: Params) type {
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
-            // Get registers per graypaper B.7
-            const core_index = exec_ctx.registers[7]; // Core index to assign
-            const output_ptr = exec_ctx.registers[8]; // Pointer to authorizer hashes array
+            // Get registers per graypaper B.7: [c, o, a] = ω[7..+3]
+            const core_index = exec_ctx.registers[7]; // c: Core index to assign
+            const output_ptr = exec_ctx.registers[8]; // o: Pointer to authorizer queue data
+            const new_assign_service = exec_ctx.registers[9]; // a: New assign service ID
 
-            span.debug("Host call: assign core {d}", .{core_index});
-            span.debug("Output pointer: 0x{x}", .{output_ptr});
-
-            // Check if core index is valid
+            // Check if core index is valid: c < C
             if (core_index >= params.core_count) {
                 span.debug("Invalid core index {d}, returning CORE error", .{core_index});
-                return HostCallError.CORE;
+                exec_ctx.registers[7] = @intFromEnum(ReturnCode.CORE);
+                return .play;
             }
 
-            // Make sure this is an assign service calling
-            const privileges: *const state.Chi = ctx_regular.context.privileges.getReadOnly();
-            const has_assign_privilege = blk: {
-                for (privileges.assign.items) |assign_id| {
-                    if (assign_id == ctx_regular.service_id) break :blk true;
-                }
-                break :blk false;
+            // Get mutable access to privileges (Chi) to check authorization and update
+            const privileges: *state.Chi = ctx_regular.context.privileges.getMutable() catch {
+                span.err("Problem getting mutable privileges", .{});
+                return .{ .terminal = .panic };
             };
 
-            if (!has_assign_privilege) {
-                span.debug("Service {d} does not have the assign privilege. Ignoring", .{ctx_regular.service_id});
+            // Authorization check: x_s must equal (x_u)_a[c]
+            // Only the current assign service for this core can update it
+            if (ctx_regular.service_id != privileges.assign.items[core_index]) {
+                span.debug("Service {d} is not the assign service for core {d} (current assign: {d}), returning HUH", .{ ctx_regular.service_id, core_index, privileges.assign.items[core_index] });
+                exec_ctx.registers[7] = @intFromEnum(ReturnCode.HUH);
                 return .play;
             }
 
@@ -545,13 +544,18 @@ pub fn HostCalls(comptime params: Params) type {
                 return .{ .terminal = .panic };
             };
 
-            // Clear all slots for this core and set new authorizations
+            // Update BOTH components as per graypaper:
+            // 1. (x'_u)_q[c] = q (new authorizer queue)
             for (0..params.max_authorizations_queue_items) |i| {
                 auth_queue.setAuthorization(core_index, i, authorizer_hashes[i]) catch {
                     span.err("Failed to set authorization at index {d} for core {d}", .{ i, core_index });
                     return .{ .terminal = .panic };
                 };
             }
+
+            // 2. (x'_u)_a[c] = a (new assign service)
+            privileges.assign.items[core_index] = @intCast(new_assign_service);
+            span.debug("Updated assign service for core {d} to service {d}", .{ core_index, new_assign_service });
 
             // Return success
             span.debug("Core assigned successfully", .{});
