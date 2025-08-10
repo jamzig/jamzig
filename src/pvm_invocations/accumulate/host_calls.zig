@@ -164,16 +164,15 @@ pub fn HostCalls(comptime params: Params) type {
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
-            // Get registers per graypaper B.7 (updated for list-based assign): [m, a_ptr, a_count, v, o, n]
-            const manager_service_id: u32 = @truncate(exec_ctx.registers[7]); // Manager service ID (m)
-            const assign_ptr: u32 = @truncate(exec_ctx.registers[8]); // Pointer to assign service IDs array (a_ptr)
-            const assign_count: u32 = @truncate(exec_ctx.registers[9]); // Number of assign service IDs (a_count)
-            const validator_service_id: u32 = @truncate(exec_ctx.registers[10]); // Validator service ID (v)
-            const always_accumulate_ptr: u32 = @truncate(exec_ctx.registers[11]); // Pointer to always-accumulate services array (o)
-            const always_accumulate_count: u32 = @truncate(exec_ctx.registers[12]); // Number of entries in always-accumulate array (n)
+            // Get registers per graypaper B.7: [m, a, v, o, n] = registers[7..+5]
+            const manager_service_id: u32 = @truncate(exec_ctx.registers[7]); // m: Manager service ID
+            const assign_ptr: u32 = @truncate(exec_ctx.registers[8]); // a: Pointer to assign service IDs array
+            const validator_service_id: u32 = @truncate(exec_ctx.registers[9]); // v: Validator service ID
+            const always_accumulate_ptr: u32 = @truncate(exec_ctx.registers[10]); // o: Pointer to always-accumulate services array
+            const always_accumulate_count: u32 = @truncate(exec_ctx.registers[11]); // n: Number of entries in always-accumulate array
 
-            span.debug("Host call: bless - m={d}, assign_count={d}, v={d}, always_accumulate_count={d}", .{
-                manager_service_id, assign_count, validator_service_id, always_accumulate_count,
+            span.debug("Host call: bless - m={d}, v={d}, always_accumulate_count={d}", .{
+                manager_service_id, validator_service_id, always_accumulate_count,
             });
 
             // Get current privileges
@@ -183,15 +182,16 @@ pub fn HostCalls(comptime params: Params) type {
             };
 
             // Only the current manager service can call bless
+            // Graypaper: returns HUH when x_s ≠ (x_u)_m
             if (ctx_regular.service_id != current_privileges.manager) {
                 span.debug("Unauthorized bless call from service {d}, current manager is {d}", .{
                     ctx_regular.service_id, current_privileges.manager,
                 });
-                return HostCallError.WHO;
+                exec_ctx.registers[7] = @intFromEnum(ReturnCode.HUH);
+                return .play;
             }
 
             // Check manager and validator service IDs are valid
-            // This isn't explicit in the graypaper, but it's good practice
             if ((!ctx_regular.context.service_accounts.contains(manager_service_id)) or
                 (!ctx_regular.context.service_accounts.contains(validator_service_id)))
             {
@@ -200,28 +200,24 @@ pub fn HostCalls(comptime params: Params) type {
             }
 
             // Read assign service IDs from memory
-            span.debug("Reading assign service IDs from memory at 0x{x}, count={d}", .{ assign_ptr, assign_count });
+            // Graypaper: 𝐚 = decode_4(memory[a..a+4C]) where C = core_count
+            const assign_memory_size = params.core_count * 4; // Each service ID is 4 bytes
+            span.debug("Reading assign service IDs from memory at 0x{x}, size={d} bytes ({d} cores)", .{ assign_ptr, assign_memory_size, params.core_count });
 
-            // Calculate required memory size: each service ID is 4 bytes
-            const assign_memory_size = assign_count * 4;
-
-            // Read memory for assign service IDs
-            var assign_data: PVM.Memory.MemorySlice = if (assign_count > 0)
-                exec_ctx.memory.readSlice(@truncate(assign_ptr), assign_memory_size) catch {
-                    span.err("Memory access failed while reading assign service IDs", .{});
-                    return .{ .terminal = .panic };
-                }
-            else
-                .{ .buffer = &[_]u8{} };
+            // Read memory for assign service IDs (exactly C service IDs)
+            var assign_data = exec_ctx.memory.readSlice(@truncate(assign_ptr), assign_memory_size) catch {
+                span.err("Memory access failed while reading assign service IDs", .{});
+                return .{ .terminal = .panic };
+            };
             defer assign_data.deinit();
 
             // Create a list of assign service IDs
             var assign_services = std.ArrayList(types.ServiceId).init(ctx_regular.allocator);
             defer assign_services.deinit();
 
-            // Parse the assign service IDs from memory
+            // Parse exactly C service IDs from memory
             var i: usize = 0;
-            while (i < assign_count) : (i += 1) {
+            while (i < params.core_count) : (i += 1) {
                 const offset = i * 4;
                 const service_id = std.mem.readInt(u32, assign_data.buffer[offset..][0..4], .little);
 
@@ -229,8 +225,9 @@ pub fn HostCalls(comptime params: Params) type {
 
                 // Verify this service exists
                 if (!ctx_regular.context.service_accounts.contains(service_id)) {
-                    span.debug("Assign service ID {d} doesn't exist", .{service_id});
-                    return HostCallError.WHO;
+                    span.warn("Assign service ID {d} doesn't exist", .{service_id});
+                    // FIXME: QUESTION not specified in the graypaper but makes sense
+                    // return HostCallError.WHO;
                 }
 
                 // Add to the list
@@ -274,8 +271,9 @@ pub fn HostCalls(comptime params: Params) type {
                 // Verify this service exists
                 // TODO: GP This seems not to be explicitly defined in the graypaper
                 if (!ctx_regular.context.service_accounts.contains(service_id)) {
-                    span.debug("Always-accumulate service ID {d} doesn't exist", .{service_id});
-                    return HostCallError.WHO;
+                    span.warn("Always-accumulate service ID {d} doesn't exist", .{service_id});
+                    // FIXME: QUESTION not specified in the graypaper but makes sense
+                    // return HostCallError.WHO;
                 }
 
                 // Add to the map
