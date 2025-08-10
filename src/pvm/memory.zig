@@ -848,6 +848,19 @@ pub const Memory = struct {
         buffer: []const u8,
         allocator: ?std.mem.Allocator = null,
 
+        // Take ownership of the buffer, this object is not responsible for freeing it anymore
+        // but it will point to the buffer, which could be internal memory. If it was pointing
+        // to internal memory, we will dupe so the caller can safely use it
+        pub fn takeBufferOwnership(self: *MemorySlice, allocator: std.mem.Allocator) ![]const u8 {
+            if (self.allocator) |_| {
+                self.allocator = null; // Clear allocator reference
+                return self.buffer;
+            } else {
+                const result = try allocator.dupe(u8, self.buffer);
+                return result;
+            }
+        }
+
         pub fn deinit(self: *@This()) void {
             // if we have an allocator we own the slice and should free it
             if (self.allocator) |alloc| {

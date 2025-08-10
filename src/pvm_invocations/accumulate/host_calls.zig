@@ -42,6 +42,13 @@ pub fn HostCalls(comptime params: Params) type {
             }
         };
 
+        /// Key for tracking provided preimages
+        pub const ProvidedKey = struct {
+            service_id: types.ServiceId,
+            hash: types.Hash,
+            size: u32, // Need size for lookup key
+        };
+
         /// Context maintained during host call execution
         pub const Dimension = struct {
             allocator: std.mem.Allocator,
@@ -51,6 +58,8 @@ pub fn HostCalls(comptime params: Params) type {
             deferred_transfers: std.ArrayList(DeferredTransfer),
             accumulation_output: ?types.AccumulateRoot,
             operands: []const @import("../accumulate.zig").AccumulationOperand,
+            // Track provided preimages (x_p set) for post-accumulation integration
+            provided_preimages: std.AutoHashMap(ProvidedKey, []const u8),
 
             pub fn commit(self: *@This()) !void {
                 try self.context.commit();
@@ -58,6 +67,16 @@ pub fn HostCalls(comptime params: Params) type {
 
             pub fn deepClone(self: *const @This()) !@This() {
                 // Create a new context with the same allocator
+                var cloned_preimages = std.AutoHashMap(ProvidedKey, []const u8).init(self.allocator);
+                errdefer cloned_preimages.deinit();
+
+                // Clone all provided preimages
+                var iter = self.provided_preimages.iterator();
+                while (iter.next()) |entry| {
+                    const data_copy = try self.allocator.dupe(u8, entry.value_ptr.*);
+                    try cloned_preimages.put(entry.key_ptr.*, data_copy);
+                }
+
                 const new_context = @This(){
                     .allocator = self.allocator,
                     .context = try self.context.deepClone(),
@@ -66,6 +85,7 @@ pub fn HostCalls(comptime params: Params) type {
                     .deferred_transfers = try self.deferred_transfers.clone(),
                     .accumulation_output = self.accumulation_output,
                     .operands = self.operands,
+                    .provided_preimages = cloned_preimages,
                 };
 
                 return new_context;
@@ -80,6 +100,13 @@ pub fn HostCalls(comptime params: Params) type {
             }
 
             pub fn deinit(self: *@This()) void {
+                // Free all provided preimage data
+                var iter = self.provided_preimages.iterator();
+                while (iter.next()) |entry| {
+                    self.allocator.free(entry.value_ptr.*);
+                }
+                self.provided_preimages.deinit();
+
                 self.deferred_transfers.deinit();
                 self.context.deinit();
                 self.* = undefined;
@@ -982,10 +1009,7 @@ pub fn HostCalls(comptime params: Params) type {
                         span.err("Out of memory while soliciting preimage", .{});
                         return .{ .terminal = .panic };
                     },
-                    error.AlreadySolicited,
-                    error.AlreadyAvailable,
-                    error.AlreadyReSolicited,
-                    error.InvalidState => {
+                    error.AlreadySolicited, error.AlreadyAvailable, error.AlreadyReSolicited, error.InvalidState => {
                         span.err("Invalid solicitation attempt: {}", .{err});
                         return HostCallError.HUH;
                     },
@@ -1232,40 +1256,52 @@ pub fn HostCalls(comptime params: Params) type {
             };
             defer data_slice.deinit();
 
-            // Create a copy of the data for storage
-            const data_copy = ctx_regular.allocator.dupe(u8, data_slice.buffer) catch {
-                span.err("Failed to allocate memory for provide data", .{});
-                return .{ .terminal = .panic };
-            };
-
             // Hash the data
             var data_hash: [32]u8 = undefined;
-            std.crypto.hash.blake2.Blake2b256.hash(data_copy, &data_hash, .{});
+            std.crypto.hash.blake2.Blake2b256.hash(data_slice.buffer, &data_hash, .{});
 
             span.trace("Data hash: {s}", .{std.fmt.fmtSliceHexLower(&data_hash)});
 
-            // Check if this data is already in the preimage lookups (per graypaper condition)
-            if (service_account.getPreimageLookup(service_id, data_hash, @intCast(data_size))) |lookup_status| {
-                const status = lookup_status.asSlice();
-                if (status.len != 0) {
-                    span.debug("Data already has preimage lookup status, returning HUH error", .{});
-                    ctx_regular.allocator.free(data_copy);
-                    return HostCallError.HUH;
-                }
+            // Check if preimage was solicited (must have status [])
+            const lookup = service_account.getPreimageLookup(service_id, data_hash, @intCast(data_size));
+            if (lookup == null) {
+                // Not solicited - no lookup exists
+                span.debug("Preimage not solicited (no lookup exists), returning HUH", .{});
+                return HostCallError.HUH;
             }
 
-            // Check if this provision already exists
-            // TODO: Check if the provision already exists in the set (graypaper condition)
+            const status = lookup.?.asSlice();
+            if (status.len != 0) {
+                // Wrong status - only [] (empty) is valid for providing
+                span.debug("Preimage has wrong status (len={d}), only empty status [] allowed, returning HUH", .{status.len});
+                return HostCallError.HUH;
+            }
 
-            // Add to provisions set
-            // For now, implement a basic version - this needs to be integrated with the actual provision tracking
-            span.debug("Adding provision for service {d}, data size {d}", .{ service_id, data_size });
+            // Check for duplicate provision
+            const key = ProvidedKey{
+                .service_id = service_id,
+                .hash = data_hash,
+                .size = @intCast(data_size),
+            };
+            if (ctx_regular.provided_preimages.contains(key)) {
+                span.debug("Preimage already provided in this accumulation, returning HUH", .{});
+                return HostCallError.HUH;
+            }
 
-            // TODO: Implement proper provision set management
-            // The provision should be stored in the accumulation context
+            // Store in context (x_p), NOT in service
+            // The data will be applied to services after accumulation completes
+            // Create a copy of the data for storage
+            const data_owned = data_slice.takeBufferOwnership(ctx_regular.allocator) catch {
+                span.err("Failed to take ownership of data buffer", .{});
+                return .{ .terminal = .panic };
+            };
+            ctx_regular.provided_preimages.put(key, data_owned) catch |err| {
+                span.err("Failed to store provided preimage: {}", .{err});
+                ctx_regular.allocator.free(data_owned);
+                return .{ .terminal = .panic };
+            };
 
-            // Free the data copy for now since we don't have proper storage yet
-            ctx_regular.allocator.free(data_copy);
+            span.debug("Provision stored in context for post-accumulation integration", .{});
 
             // Return success
             span.debug("Provision added successfully", .{});
@@ -1395,12 +1431,12 @@ pub fn HostCalls(comptime params: Params) type {
                 2...13 => {
                     // Selectors 2-13 are for work package/refine contexts only
                     // 2-3: Header data (Refine only)
-                    // 4-6: Work reports (Refine only)  
+                    // 4-6: Work reports (Refine only)
                     // 7-13: Work package data (Is-Authorized/Refine only)
                     span.debug("Selector {d} not available in accumulate context (work package/refine only)", .{selector});
                     return HostCallError.NONE;
                 },
-                
+
                 else => {
                     // Invalid selector
                     span.debug("Invalid fetch selector: {d} (valid for accumulate: 0,1,14,15,16,17)", .{selector});
