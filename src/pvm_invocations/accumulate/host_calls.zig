@@ -4,14 +4,15 @@ const state = @import("../../state.zig");
 const state_keys = @import("../../state_keys.zig");
 
 const general = @import("../host_calls_general.zig");
+const host_calls = @import("../host_calls.zig");
 
 const service_util = @import("service_util.zig");
 const DeferredTransfer = @import("types.zig").DeferredTransfer;
 const AccumulationContext = @import("context.zig").AccumulationContext;
 const Params = @import("../../jam_params.zig").Params;
 
-const ReturnCode = @import("../host_calls.zig").ReturnCode;
-const HostCallError = @import("../host_calls.zig").HostCallError;
+const ReturnCode = host_calls.ReturnCode;
+const HostCallError = host_calls.HostCallError;
 
 const PVM = @import("../../pvm.zig").PVM;
 
@@ -1177,11 +1178,8 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("Host call: provide", .{});
             span.debug("Service ID reg: {d}, data ptr: 0x{x}, data size: {d}", .{ service_id_reg, data_ptr, data_size });
 
-            // Determine the actual service ID
-            const service_id: types.ServiceId = if (service_id_reg == 0xFFFFFFFFFFFFFFFF)
-                ctx_regular.service_id
-            else
-                @intCast(service_id_reg);
+            // Determine the actual service ID using graypaper convention
+            const service_id: types.ServiceId = host_calls.resolveTargetService(ctx_regular, service_id_reg);
 
             span.debug("Providing data for service: {d}", .{service_id});
 

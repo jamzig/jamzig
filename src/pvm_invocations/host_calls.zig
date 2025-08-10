@@ -48,6 +48,17 @@ pub const ReturnCode = enum(u64) {
     HUH = 0xFFFFFFFFFFFFFFF7, // The item is already solicited or cannot be forgotten (2^64 - 9)
 };
 
+/// Resolves a target service ID from a register value using the graypaper convention:
+/// - 0xFFFFFFFFFFFFFFFF (ReturnCode.NONE) means use current service from context
+/// - Any other value is treated as the target service ID
+/// The host_ctx must have a service_id field.
+pub fn resolveTargetService(host_ctx: anytype, register_value: u64) u32 {
+    return if (register_value == @intFromEnum(ReturnCode.NONE)) 
+        host_ctx.service_id 
+    else 
+        @as(u32, @intCast(register_value));
+}
+
 /// Host call error set matching JAM protocol return codes from the Graypaper.
 /// These use capital names to match the specification exactly.
 /// All host call functions should return these errors instead of setting registers directly.

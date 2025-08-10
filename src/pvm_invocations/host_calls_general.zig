@@ -8,8 +8,9 @@ const Params = @import("../jam_params.zig").Params;
 
 const DeltaSnapshot = @import("../services_snapshot.zig").DeltaSnapshot;
 
-const ReturnCode = @import("host_calls.zig").ReturnCode;
-const HostCallError = @import("host_calls.zig").HostCallError;
+const host_calls = @import("host_calls.zig");
+const ReturnCode = host_calls.ReturnCode;
+const HostCallError = host_calls.HostCallError;
 
 // Add tracing import
 const trace = @import("../tracing.zig").scoped(.host_calls);
@@ -128,25 +129,22 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
-            const service_id = exec_ctx.registers[7];
+            const service_id_reg = exec_ctx.registers[7];
             const hash_ptr = exec_ctx.registers[8];
             const output_ptr = exec_ctx.registers[9];
             const offset = exec_ctx.registers[10];
             const limit = exec_ctx.registers[11];
 
             span.debug("Host call: lookup preimage. Service: {d}, Hash ptr: 0x{x}, Output ptr: 0x{x}", .{
-                service_id, hash_ptr, output_ptr,
+                service_id_reg, hash_ptr, output_ptr,
             });
             span.debug("Offset: {d}, Limit: {d}", .{ offset, limit });
 
-            // Get service account based on special cases as per graypaper
-            const service_account = if (service_id == host_ctx.service_id or service_id == 0xFFFFFFFFFFFFFFFF) blk: {
-                span.debug("Using current service ID: {d}", .{host_ctx.service_id});
-                break :blk host_ctx.service_accounts.getReadOnly(host_ctx.service_id);
-            } else blk: {
-                span.debug("Looking up service ID: {d}", .{service_id});
-                break :blk host_ctx.service_accounts.getReadOnly(@intCast(service_id));
-            };
+            // Resolve service ID using graypaper convention
+            const resolved_service_id = host_calls.resolveTargetService(host_ctx, service_id_reg);
+
+            // Get service account
+            const service_account = host_ctx.service_accounts.getReadOnly(resolved_service_id);
 
             if (service_account == null) {
                 span.debug("Service not found, returning NONE", .{});
@@ -161,8 +159,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
 
             // Look up preimage at the specified timeslot
             span.debug("Looking up preimage", .{});
-            const actual_service_id = if (service_id == 0xFFFFFFFFFFFFFFFF) host_ctx.service_id else @as(u32, @intCast(service_id));
-            const preimage_key = state_keys.constructServicePreimageKey(actual_service_id, hash);
+            const preimage_key = state_keys.constructServicePreimageKey(resolved_service_id, hash);
             const preimage = service_account.?.getPreimage(preimage_key) orelse {
                 // Preimage not found, return error status
                 span.debug("Preimage not found, returning NONE", .{});
@@ -206,14 +203,15 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             exec_ctx.gas -= 10;
 
             // Get registers per graypaper B.7: (s*, k_o, k_z, o)
-            const service_id = exec_ctx.registers[7]; // Service ID (s*)
+            const service_id_reg = exec_ctx.registers[7]; // Service ID (s*)
             const k_o = exec_ctx.registers[8]; // Key offset (k_o)
             const k_z = exec_ctx.registers[9]; // Key size (k_z)
             const output_ptr = exec_ctx.registers[10]; // Output buffer pointer (o)
             const offset = exec_ctx.registers[11]; // Offset in the value (f)
             const limit = exec_ctx.registers[12]; // Length limit (l)
-            //
-            const resolved_service_id = if (service_id == 0xFFFFFFFFFFFFFFFF) host_ctx.service_id else @as(u32, @intCast(service_id));
+
+            // Resolve service ID using graypaper convention
+            const resolved_service_id = host_calls.resolveTargetService(host_ctx, service_id_reg);
 
             span.debug("Host call: read storage for service {d}", .{resolved_service_id});
             span.trace("Key ptr: 0x{x}, Key size: {d}, Output ptr: 0x{x}", .{
@@ -472,20 +470,17 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             exec_ctx.gas -= 10;
 
             // Get registers per graypaper B.7: service ID and output pointer
-            const service_id = exec_ctx.registers[7];
+            const service_id_reg = exec_ctx.registers[7];
             const output_ptr = exec_ctx.registers[8];
 
-            span.debug("Host call: info for service {d}", .{service_id});
+            // Resolve service ID using graypaper convention
+            const resolved_service_id = host_calls.resolveTargetService(host_ctx, service_id_reg);
+
+            span.debug("Host call: info for service {d}", .{resolved_service_id});
             span.debug("Output pointer: 0x{x}", .{output_ptr});
 
-            // Get service account based on special cases as per graypaper
-            const service_account: ?*const ServiceAccount = if (service_id == 0xFFFFFFFFFFFFFFFF) blk: {
-                span.debug("Using current service ID: {d}", .{host_ctx.service_id});
-                break :blk host_ctx.service_accounts.getReadOnly(host_ctx.service_id);
-            } else blk: {
-                span.debug("Looking up service ID: {d}", .{service_id});
-                break :blk host_ctx.service_accounts.getReadOnly(@intCast(service_id));
-            };
+            // Get service account
+            const service_account = host_ctx.service_accounts.getReadOnly(resolved_service_id);
 
             if (service_account == null) {
                 span.debug("Service not found, returning NONE", .{});
