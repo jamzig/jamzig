@@ -1065,6 +1065,12 @@ pub fn HostCalls(comptime params: Params) type {
             const span = trace.span(.host_call_designate);
             defer span.deinit();
 
+            // Graypaper specifies exactly 336 bytes per validator
+            const VALIDATOR_DATA_SIZE = 336;
+            comptime {
+                std.debug.assert(@sizeOf(types.ValidatorData) == VALIDATOR_DATA_SIZE);
+            }
+
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
@@ -1077,18 +1083,20 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("Host call: designate validators", .{});
             span.debug("Offset pointer: 0x{x}", .{offset_ptr});
 
-            // Check if current service has the delegator privilege
+            // Check if current service has the validator privilege (x_s = (x_u)_v)
             const privileges: *const state.Chi = ctx_regular.context.privileges.getReadOnly();
+            // Note: Chi incorrectly names this field 'designate' but it represents the validator service
             if (privileges.designate != ctx_regular.service_id) {
-                span.debug("Service {d} does not have designate privilege, current designator is {?d}", .{
+                span.debug("Service {d} does not have validator privilege, current validator service is {?d}", .{
                     ctx_regular.service_id, privileges.designate,
                 });
-                return HostCallError.HUH;
+                exec_ctx.registers[7] = @intFromEnum(ReturnCode.HUH);
+                return .play;
             }
 
-            // Calculate total size needed: 336 bytes per validator * V validators
+            // Calculate total size needed: VALIDATOR_DATA_SIZE bytes per validator * V validators
             const validator_count: u32 = params.validators_count;
-            const total_size: u32 = 336 * validator_count;
+            const total_size: u32 = VALIDATOR_DATA_SIZE * validator_count;
 
             span.debug("Reading {d} validators, total size: {d} bytes", .{ validator_count, total_size });
 
@@ -1099,13 +1107,47 @@ pub fn HostCalls(comptime params: Params) type {
             };
             defer validator_data.deinit();
 
-            // Parse the validator keys (336 bytes each)
-            // TODO: Implement proper validator key parsing and storage
-            // For now, just validate the memory is accessible and return success
+            // Parse the validator keys directly from memory using bytesAsSlice
+            // Each validator is exactly VALIDATOR_DATA_SIZE bytes:
+            // - 32 bytes: Bandersnatch public key
+            // - 32 bytes: Ed25519 public key
+            // - 144 bytes: BLS public key
+            // - 128 bytes: Metadata
 
-            // Update the staging set in the state
-            // TODO: Implement proper staging set update
-            span.debug("Validator keys read successfully, updating staging set", .{});
+            // Verify the buffer size is correct
+            if (validator_data.buffer.len != validator_count * VALIDATOR_DATA_SIZE) {
+                span.err("Invalid validator data size: expected {d}, got {d}", .{ validator_count * VALIDATOR_DATA_SIZE, validator_data.buffer.len });
+                return .{ .terminal = .panic };
+            }
+
+            // Cast the byte buffer directly to ValidatorData slice - no allocation needed!
+            const validators = std.mem.bytesAsSlice(types.ValidatorData, validator_data.buffer);
+
+            // Log some validator keys for debugging
+            for (validators, 0..) |validator, i| {
+                if (i < 3) { // Log first 3 validators
+                    span.trace("Validator {d}: bandersnatch={s}, ed25519={s}", .{
+                        i,
+                        std.fmt.fmtSliceHexLower(&validator.bandersnatch),
+                        std.fmt.fmtSliceHexLower(&validator.ed25519),
+                    });
+                }
+            }
+
+            // Update the staging validator set (iota)
+            const validator_keys = ctx_regular.context.validator_keys.getMutable() catch {
+                span.err("Problem getting mutable validator keys", .{});
+                return .{ .terminal = .panic };
+            };
+
+            // Replace the entire validator set - duplicate the data since validator_data.buffer will be freed
+            ctx_regular.allocator.free(validator_keys.validators);
+            validator_keys.validators = ctx_regular.allocator.dupe(types.ValidatorData, validators) catch {
+                span.err("Failed to duplicate validator data", .{});
+                return .{ .terminal = .panic };
+            };
+
+            span.debug("Updated staging validator set with {d} validators", .{validator_count});
 
             // Return success
             span.debug("Validators designated successfully", .{});
