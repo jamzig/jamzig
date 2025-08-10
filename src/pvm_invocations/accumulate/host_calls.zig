@@ -1377,9 +1377,18 @@ pub fn HostCalls(comptime params: Params) type {
                     }
                 },
 
+                2...13 => {
+                    // Selectors 2-13 are for work package/refine contexts only
+                    // 2-3: Header data (Refine only)
+                    // 4-6: Work reports (Refine only)  
+                    // 7-13: Work package data (Is-Authorized/Refine only)
+                    span.debug("Selector {d} not available in accumulate context (work package/refine only)", .{selector});
+                    return HostCallError.NONE;
+                },
+                
                 else => {
-                    // Invalid selector for accumulate context
-                    span.debug("Invalid fetch selector for accumulate: {d} (valid: 0,1,14,15,16,17)", .{selector});
+                    // Invalid selector
+                    span.debug("Invalid fetch selector: {d} (valid for accumulate: 0,1,14,15,16,17)", .{selector});
                     return HostCallError.NONE;
                 },
             }

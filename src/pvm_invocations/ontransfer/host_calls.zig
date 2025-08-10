@@ -174,15 +174,18 @@ pub fn HostCalls(comptime params: Params) type {
                     data_to_fetch = host_ctx.entropy[0..];
                 },
 
-                2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 => {
-                    // Selectors 2-13: Work package related data - NOT available in ontransfer
-                    span.debug("Work package data (selector {d}) not available in ontransfer context", .{selector});
+                2...13 => {
+                    // Selectors 2-13: Work package/refine data - NOT available in OnTransfer
+                    // 2-3: Header data (Refine only)
+                    // 4-6: Work reports (Refine only)
+                    // 7-13: Work package data (Is-Authorized/Refine only)
+                    span.debug("Selector {d} not available in OnTransfer context (work package/refine only)", .{selector});
                     return HostCallError.NONE;
                 },
 
                 14, 15 => {
-                    // Selectors 14-15: Operand data - NOT available in ontransfer
-                    span.debug("Operand data (selector {d}) not available in ontransfer context", .{selector});
+                    // Selectors 14-15: Operand data - Accumulate context only
+                    span.debug("Operand data (selector {d}) not available in OnTransfer context (accumulate only)", .{selector});
                     return HostCallError.NONE;
                 },
 
