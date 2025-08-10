@@ -32,6 +32,15 @@ pub const StorageFootprint = struct {
     a_t: Balance,
 };
 
+/// Result of analyzing a potential storage write operation
+/// Contains all necessary information to avoid duplicate lookups
+pub const StorageWriteAnalysis = struct {
+    new_footprint: StorageFootprint,
+    storage_key: types.StateKey, // Already constructed key
+    prior_value: ?[]const u8, // Existing value if any
+    prior_value_length: u64, // Length or NONE constant for return value
+};
+
 pub const PreimageLookup = struct {
     // Timeslot updates for preimage submissions (up to three slots stored)
     // As per Section 9.2.2. Semantics, the historical status component h ∈ ⟦NT⟧:3
@@ -344,15 +353,36 @@ pub const ServiceAccount = struct {
         if (self.data.get(key)) |existing_data| {
             var preimage_lookup = try decodePreimageLookup(existing_data);
             const pi = preimage_lookup.asSlice();
-            if (pi.len == 2) { // [x,y]
-                preimage_lookup.status[2] = current_timeslot;
-                // Re-encode and store
-                const encoded = try encodePreimageLookup(self.data.allocator, preimage_lookup);
-                self.data.allocator.free(existing_data);
-                try self.data.put(key, encoded);
-                return;
+
+            // Validate status transitions per graypaper
+            switch (pi.len) {
+                0 => {
+                    // Status [] - Already pending, can't re-solicit
+                    return error.AlreadySolicited;
+                },
+                1 => {
+                    // Status [x] - Already available, no need to solicit
+                    return error.AlreadyAvailable;
+                },
+                2 => {
+                    // Status [x,y] - Valid re-solicitation after unavailable period
+                    // Transition: [x,y] → [x,y,t]
+                    preimage_lookup.status[2] = current_timeslot;
+                    // Re-encode and store
+                    const encoded = try encodePreimageLookup(self.data.allocator, preimage_lookup);
+                    self.data.allocator.free(existing_data);
+                    try self.data.put(key, encoded);
+                    return;
+                },
+                3 => {
+                    // Status [x,y,z] - Already re-solicited, can't re-solicit again
+                    return error.AlreadyReSolicited;
+                },
+                else => {
+                    // Invalid status length
+                    return error.InvalidState;
+                },
             }
-            return error.AlreadySolicited;
         } else {
             // If no lookup exists yet, create a new one with an empty status
             const new_lookup = PreimageLookup{
@@ -575,6 +605,115 @@ pub const ServiceAccount = struct {
     /// Compatibility wrapper - calls getStorageFootprint
     pub fn storageFootprint(self: *const ServiceAccount) StorageFootprint {
         return self.getStorageFootprint();
+    }
+
+    /// Analyze a potential storage write operation
+    /// Returns all necessary information to avoid duplicate lookups and key construction
+    /// StorageWriteAnalysis does not own any data.
+    pub fn analyzeStorageWrite(
+        self: *const ServiceAccount,
+        service_id: u32,
+        key: []const u8,
+        new_value_len: usize,
+    ) StorageWriteAnalysis {
+        const storage_key = state_keys.constructStorageKey(service_id, key);
+        const old_value = self.data.get(storage_key);
+
+        // Calculate potential new a_i and a_o
+        var new_a_i = self.footprint_items;
+        var new_a_o = self.footprint_bytes;
+
+        if (old_value) |old| {
+            // Updating existing entry - only a_o changes (value size difference)
+            new_a_o = new_a_o - old.len + new_value_len;
+        } else {
+            // New entry - increment both a_i and a_o
+            new_a_i += 1; // One new storage item
+            new_a_o += 34 + key.len + new_value_len; // 34 + key length + value length
+        }
+
+        // Calculate threshold balance with potential new values
+        const billable_bytes = if (self.storage_offset > 0)
+            new_a_o -| self.storage_offset
+        else
+            new_a_o;
+
+        const new_a_t: Balance = B_S + B_I * new_a_i + B_L * billable_bytes;
+
+        // Use NONE constant (2^64 - 1) when no prior value exists
+        const NONE = std.math.maxInt(u64) - 0; // ReturnCode.NONE value
+        const prior_value_length: u64 = if (old_value) |old| old.len else NONE;
+
+        return .{
+            .new_footprint = .{ .a_i = new_a_i, .a_o = new_a_o, .a_t = new_a_t },
+            .storage_key = storage_key,
+            .prior_value = old_value,
+            .prior_value_length = prior_value_length,
+        };
+    }
+
+    /// Calculate what the storage footprint WOULD BE after a write operation
+    /// Does not modify state, only calculates the potential new footprint
+    /// (Kept for backward compatibility, but analyzeStorageWrite is preferred)
+    pub fn calculateStorageFootprintAfterWrite(
+        self: *const ServiceAccount,
+        service_id: u32,
+        key: []const u8,
+        new_value_len: usize,
+    ) StorageFootprint {
+        const analysis = self.analyzeStorageWrite(service_id, key, new_value_len);
+        return analysis.new_footprint;
+    }
+
+    /// Calculate what the storage footprint WOULD BE after a removal
+    /// Returns null if key doesn't exist (can't remove non-existent key)
+    pub fn calculateStorageFootprintAfterRemoval(
+        self: *const ServiceAccount,
+        service_id: u32,
+        key: []const u8,
+    ) ?StorageFootprint {
+        const storage_key = state_keys.constructStorageKey(service_id, key);
+        const old_value = self.data.get(storage_key) orelse return null;
+
+        // Calculate potential new a_i and a_o after removal
+        const new_a_i = self.footprint_items - 1; // One storage item removed
+        const new_a_o = self.footprint_bytes - (34 + key.len + old_value.len); // 34 + key length + value length
+
+        // Calculate threshold balance with potential new values
+        const billable_bytes = if (self.storage_offset > 0)
+            new_a_o -| self.storage_offset
+        else
+            new_a_o;
+
+        const new_a_t: Balance = B_S + B_I * new_a_i + B_L * billable_bytes;
+
+        return .{ .a_i = new_a_i, .a_o = new_a_o, .a_t = new_a_t };
+    }
+
+    /// Check if a write operation would exceed balance
+    /// Returns true if the operation is affordable, false otherwise
+    pub fn canAffordStorageWrite(
+        self: *const ServiceAccount,
+        service_id: u32,
+        key: []const u8,
+        new_value_len: usize,
+    ) bool {
+        const new_footprint = self.calculateStorageFootprintAfterWrite(service_id, key, new_value_len);
+        return new_footprint.a_t <= self.balance;
+    }
+
+    /// Check if we can afford to remove a key
+    /// Removal always reduces storage cost, so should always be affordable
+    /// Returns false if key doesn't exist
+    pub fn canAffordStorageRemoval(
+        self: *const ServiceAccount,
+        service_id: u32,
+        key: []const u8,
+    ) bool {
+        const new_footprint = self.calculateStorageFootprintAfterRemoval(service_id, key) orelse return false;
+        // Removal reduces storage, so should always be affordable
+        // But we check anyway for consistency
+        return new_footprint.a_t <= self.balance;
     }
 };
 

@@ -27,10 +27,9 @@ pub fn decode(
 
     // Read manager index
     try context.push(.{ .field = "manager" });
-    const manager_idx = reader.readInt(u32, .little) catch |err| {
+    chi.manager = reader.readInt(u32, .little) catch |err| {
         return context.makeError(error.EndOfStream, "failed to read manager index: {s}", .{@errorName(err)});
     };
-    chi.manager = if (manager_idx == 0) null else manager_idx;
     context.pop();
 
     // Read assigners - fixed-size array (one per core)
@@ -51,10 +50,9 @@ pub fn decode(
 
     // Read designate index
     try context.push(.{ .field = "designate" });
-    const designate_idx = reader.readInt(u32, .little) catch |err| {
+    chi.designate = reader.readInt(u32, .little) catch |err| {
         return context.makeError(error.EndOfStream, "failed to read designate index: {s}", .{@errorName(err)});
     };
-    chi.designate = if (designate_idx == 0) null else designate_idx;
     context.pop();
 
     // Read always_accumulate map

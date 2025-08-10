@@ -98,6 +98,7 @@ pub fn invoke(
         .deferred_transfers = std.ArrayList(DeferredTransfer).init(allocator),
         .accumulation_output = null,
         .operands = accumulation_operands,
+        .provided_preimages = std.AutoHashMap(AccumulateHostCalls(params).ProvidedKey, []const u8).init(allocator),
     });
     defer host_call_context.deinit();
     span.debug("Generated new service ID: {d}", .{host_call_context.regular.new_service_id});
@@ -168,7 +169,41 @@ pub fn invoke(
 
     pvm_span.debug("PVM invocation completed: {s}", .{@tagName(result.result)});
 
-    // B12. Based on result we collapse to either the regular domain or the exceptional domain
+    // IMPORTANT: Understanding the collapsed dimension and why we still process transfers/preimages:
+    //
+    // The PVM execution maintains two context dimensions:
+    // 1. Regular dimension (x): Contains all state changes from the execution
+    // 2. Exceptional dimension (y): Contains the checkpoint/rollback state
+    //
+    // The checkpoint hostcall (Ω_C) copies regular → exceptional, creating a savepoint.
+    //
+    // After PVM execution, we collapse to one dimension based on success/failure:
+    // - SUCCESS: Use regular dimension (all changes preserved)
+    // - FAILURE: Use exceptional dimension (rollback to checkpoint or initial state)
+    //
+    // The collapsed dimension may contain valid transfers and preimages in THREE scenarios:
+    //
+    // 1. SUCCESSFUL EXECUTION:
+    //    - collapsed_dimension = regular
+    //    - Contains all transfers and preimages from the entire execution
+    //    - Everything should be applied
+    //
+    // 2. FAILED EXECUTION WITHOUT CHECKPOINT:
+    //    - collapsed_dimension = exceptional (initial state)
+    //    - Contains no transfers or preimages (empty initial state)
+    //    - Nothing to apply (correct behavior - full rollback)
+    //
+    // 3. FAILED EXECUTION WITH CHECKPOINT:
+    //    - collapsed_dimension = exceptional (checkpoint state)
+    //    - Contains transfers and preimages from BEFORE the checkpoint
+    //    - These should still be applied (partial commit up to checkpoint)
+    //
+    // This design allows services to checkpoint successful work before attempting
+    // risky operations. If the risky operations fail, the work before the checkpoint
+    // is still preserved and applied.
+    //
+    // Therefore, we ALWAYS extract transfers and apply preimages from the collapsed
+    // dimension, regardless of whether the execution succeeded or failed.
     var collapsed_dimension = if (result.result.isSuccess())
         &host_call_context.regular
     else
@@ -179,6 +214,8 @@ pub fn invoke(
     span.debug("Gas used for invocation: {d}", .{gas_used});
 
     // Build the result array of deferred transfers
+    // Note: toOwnedSlice() removes items from the ArrayList, but these transfers
+    // will be applied later in the accumulation pipeline
     const transfers = try collapsed_dimension.deferred_transfers.toOwnedSlice();
     span.debug("Number of deferred transfers created: {d}", .{transfers.len});
 
@@ -215,11 +252,15 @@ pub fn invoke(
         //
         // The outputs are accumulated in order of service execution, providing a chronological
         // record of accumulation results that can be used by subsequent services for decision making.
+        // TODO: why do we store this here, seems overkill
         try collapsed_dimension.context.outputs.append(output);
         span.debug("Added accumulation output to context outputs list (total: {d})", .{collapsed_dimension.context.outputs.items.len});
     } else {
         span.debug("No accumulation output produced", .{});
     }
+
+    // Apply provided preimages before committing (x_p integration per graypaper)
+    try applyProvidedPreimages(params, collapsed_dimension, tau);
 
     // Commit our changes of the collapsed dimension to the state
     try collapsed_dimension.commit();
@@ -230,6 +271,64 @@ pub fn invoke(
         .accumulation_output = accumulation_output,
         .gas_used = gas_used,
     };
+}
+
+/// Apply provided preimages after accumulation
+/// Filters still-relevant preimages and updates service accounts
+fn applyProvidedPreimages(
+    comptime params: Params,
+    dimension: *AccumulateHostCalls(params).Dimension,
+    current_timeslot: types.TimeSlot,
+) !void {
+    const span = trace.span(.apply_provided_preimages);
+    defer span.deinit();
+
+    var iter = dimension.provided_preimages.iterator();
+    while (iter.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const data = entry.value_ptr.*;
+
+        span.debug("Processing provided preimage for service {d}, hash: {s}, size: {d}", .{
+            key.service_id,
+            std.fmt.fmtSliceHexLower(&key.hash),
+            key.size,
+        });
+
+        // Get mutable service account
+        const service = dimension.context.service_accounts.getMutable(key.service_id) catch {
+            span.debug("Failed to get mutable service account {d}, skipping", .{key.service_id});
+            continue;
+        } orelse {
+            span.debug("Service {d} not found, skipping", .{key.service_id});
+            continue;
+        };
+
+        // Check if still needed (R function from graypaper)
+        // Only apply if lookup still has status []
+        const lookup = service.getPreimageLookup(key.service_id, key.hash, key.size);
+        if (lookup != null and lookup.?.asSlice().len == 0) {
+            span.debug("Preimage still needed (status []), applying to service", .{});
+
+            // Store preimage in service (δ[s]_p[hash(p)] = p)
+            const preimage_key = state_keys.constructServicePreimageKey(key.service_id, key.hash);
+            // TODO: OPTIMIZE we can optimize here to take ownership of the data
+            try service.dupeAndAddPreimage(preimage_key, data);
+
+            // Update lookup status from [] to [τ'] (δ[s]_l[(hash(p), |p|)] = [τ'])
+            try service.registerPreimageAvailable(
+                key.service_id,
+                key.hash,
+                key.size,
+                current_timeslot,
+            );
+
+            span.debug("Preimage applied: stored and status updated to [{d}]", .{current_timeslot});
+        } else {
+            span.debug("Preimage no longer needed (status changed), skipping", .{});
+        }
+    }
+
+    span.debug("Completed applying {d} provided preimages", .{dimension.provided_preimages.count()});
 }
 
 pub const AccumulationOperands = struct {

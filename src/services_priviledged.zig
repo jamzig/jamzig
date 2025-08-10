@@ -25,17 +25,17 @@ pub const GasLimit = u64;
 pub const Timeslot = u32;
 
 pub const Chi = struct {
-    manager: ?ServiceIndex,
+    manager: ServiceIndex,
     assign: std.ArrayListUnmanaged(ServiceIndex),
-    designate: ?ServiceIndex,
+    designate: ServiceIndex,
     always_accumulate: std.AutoHashMap(ServiceIndex, GasLimit),
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) Chi {
         return .{
-            .manager = null,
+            .manager = 0,
             .assign = .{},
-            .designate = null,
+            .designate = 0,
             .always_accumulate = std.AutoHashMap(ServiceIndex, GasLimit).init(allocator),
             .allocator = allocator,
         };
@@ -61,7 +61,7 @@ pub const Chi = struct {
         try formatter.format(fmt, options, writer);
     }
 
-    pub fn setManager(self: *Chi, index: ?ServiceIndex) void {
+    pub fn setManager(self: *Chi, index: ServiceIndex) void {
         self.manager = index;
     }
 
@@ -69,7 +69,7 @@ pub const Chi = struct {
         try self.assign.append(self.allocator, index);
     }
 
-    pub fn setDesignate(self: *Chi, index: ?ServiceIndex) void {
+    pub fn setDesignate(self: *Chi, index: ServiceIndex) void {
         self.designate = index;
     }
 
@@ -94,9 +94,9 @@ pub const Chi = struct {
             break :blk false;
         };
         
-        return (self.manager != null and index == self.manager.?) or
+        return (self.manager != 0 and index == self.manager) or
             is_assign_service or
-            (self.designate != null and index == self.designate.?) or
+            (self.designate != 0 and index == self.designate) or
             self.always_accumulate.contains(index);
     }
 
