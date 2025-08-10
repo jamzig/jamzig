@@ -276,6 +276,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
         }
 
         /// Host call implementation for write storage (Ω_W)
+        /// Follows graypaper approach: check balance BEFORE modifying state
         pub fn writeStorage(
             exec_ctx: *PVM.ExecutionContext,
             host_ctx: anytype,
@@ -301,7 +302,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             span.debug("Looking up service account", .{});
             const service_account: *ServiceAccount = host_ctx.service_accounts.getMutable(host_ctx.service_id) catch {
                 // Service not found, should never happen but handle gracefully
-                span.err("Could get create mutable instance of service accounts", .{});
+                span.err("Could not create mutable instance of service accounts", .{});
                 return .{ .terminal = .panic };
             } orelse {
                 // Service not found, should never happen but handle gracefully
@@ -324,8 +325,9 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             // Check if this is a removal operation (v_z == 0)
             if (v_z == 0) {
                 span.debug("Removal operation detected (v_z = 0)", .{});
-                // Remove the key from storage
+                // Remove the key from storage (removal always reduces cost, so always affordable)
                 if (service_account.removeStorage(host_ctx.service_id, key_data.buffer)) |value_length| {
+                    span.debug("Key removed successfully, prior value length: {d}", .{value_length});
                     exec_ctx.registers[7] = value_length;
                     return .play;
                 }
@@ -352,52 +354,51 @@ pub fn GeneralHostCalls(comptime params: Params) type {
                 }
             }
 
-            // Write and get the prior value owned
-            var maybe_prior_value: ?[]const u8 = pv: {
-                const value_owned = host_ctx.allocator.dupe(u8, value.buffer) catch {
-                    return HostCallError.FULL;
-                };
-                break :pv service_account.writeStorage(host_ctx.service_id, key_data.buffer, value_owned) catch {
-                    host_ctx.allocator.free(value_owned);
-                    span.err("Failed to write to storage", .{});
-                    return HostCallError.FULL;
-                };
+            // GRAYPAPER COMPLIANCE: Check balance BEFORE modifying state
+            // Analyze the storage write operation - returns all needed info in one call
+            const analysis = service_account.analyzeStorageWrite(
+                host_ctx.service_id,
+                key_data.buffer,
+                value.buffer.len,
+            );
+
+            span.debug("Checking if operation is affordable: new a_t={d} vs balance={d}", .{
+                analysis.new_footprint.a_t,
+                service_account.balance,
+            });
+
+            // Check if we can afford this operation (a_t > a_b check from graypaper)
+            if (analysis.new_footprint.a_t > service_account.balance) {
+                span.warn("Insufficient balance for storage operation, returning FULL without modifying state", .{});
+                exec_ctx.registers[7] = @intFromEnum(ReturnCode.FULL);
+                return .play;
+            }
+
+            // We can afford it, so proceed with the write
+            span.debug("Balance check passed, proceeding with write operation", .{});
+
+            // Allocate the new value (panic on allocation failure per graypaper)
+            const value_owned = value.takeBufferOwnership(host_ctx.allocator) catch {
+                span.err("Failed to allocate memory for value", .{});
+                return .{ .terminal = .panic }; // Memory allocation failure should panic
             };
-            defer if (maybe_prior_value) |pv| host_ctx.allocator.free(pv);
+            errdefer host_ctx.allocator.free(value_owned); // Clean up on any error
 
-            if (maybe_prior_value) |prior_value| {
-                span.debug("Prior value found: {s}", .{std.fmt.fmtSliceHexLower(prior_value)});
+            // Write storage using the helper that frees old value automatically
+            service_account.writeStorageFreeOldValue(host_ctx.service_id, key_data.buffer, value_owned) catch {
+                span.err("Failed to write to storage", .{});
+                return .{ .terminal = .panic }; // Panic on write failure
+            };
+
+            if (analysis.prior_value) |_| {
+                span.debug("Replaced existing value", .{});
             } else {
-                span.debug("No prior value found", .{});
+                span.debug("Wrote new key", .{});
             }
 
-            // Check if service has enough balance to store this data
-            // REFACTOR: this can be simplified to first check if we alrady have a prior value
-            // and actually determine the length and the delta
-            const footprint = service_account.storageFootprint();
-            span.debug("Checking storage footprint a_t {d} against balance {d}", .{ footprint.a_t, service_account.balance });
-            if (footprint.a_t > service_account.balance) {
-                span.warn("Insufficient balance for storage, returning FULL", .{});
-                // Restore old value, if we had a prior value, otherwise
-                // we remove the storage key, as we do not have enough balance
-                if (maybe_prior_value) |prior_value| {
-                    service_account.writeStorageFreeOldValue(host_ctx.service_id, key_data.buffer, prior_value) catch {
-                        return HostCallError.FULL;
-                    };
-                    maybe_prior_value = null; // to avoid deferred deint
-                } else {
-                    _ = service_account.removeStorage(host_ctx.service_id, key_data.buffer);
-                }
-                return HostCallError.FULL;
-            } else {
-                span.debug("Enough balance for storage", .{});
-            }
-
-            // This is GP
-            exec_ctx.registers[7] = if (maybe_prior_value) |_|
-                maybe_prior_value.?.len
-            else
-                @intFromEnum(ReturnCode.NONE);
+            // Return prior value length or NONE per graypaper B.7
+            exec_ctx.registers[7] = analysis.prior_value_length;
+            span.debug("Write successful, returning prior value length: {d}", .{analysis.prior_value_length});
 
             return .play;
         }
