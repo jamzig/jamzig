@@ -23,6 +23,14 @@ pub const PVM = struct {
 
     pub const ExecutionContext = @import("./pvm/execution_context.zig").ExecutionContext;
 
+    /// Configuration for host calls including an optional catchall handler
+    pub const HostCallsConfig = struct {
+        /// Map of host call IDs to their implementations
+        map: HostCallMap,
+        /// Optional catchall handler for non-existent host calls
+        catchall: ?HostCallFn = null,
+    };
+
     // Helper to log memory writes for execution trace
     fn logMemoryWrite(context: *ExecutionContext, addr: u32, value: u64, size: usize) void {
         context.exec_trace.logMemoryWrite(addr, value, size);
@@ -117,9 +125,9 @@ pub const PVM = struct {
         // Execute instruction (no per-instruction gas charge)
         const result = executeInstruction(context, instruction);
 
-        // After execute instruction, as instructions also deduct gas
-        if (context.gas < gas_cost) {
-            span.debug("Out of gas - remaining: {d}, required: {d}", .{ context.gas, gas_cost });
+        // After execute instruction, check if gas went negative
+        if (context.gas < 0) {
+            span.debug("Out of gas - remaining: {d}", .{context.gas});
             return .{ .terminal = .out_of_gas };
         }
 
@@ -176,10 +184,17 @@ pub const PVM = struct {
 
     // Host call invocation invocation
     pub fn hostcallInvocation(context: *ExecutionContext, call_ctx: *anyopaque) Error!HostCallInvocationResult {
+        const span = trace.span(.host_call_invocation);
+        defer span.deinit();
+
         switch (try basicInvocation(context)) {
             .host_call => |params| {
-                if (context.host_calls) |host_calls_map| {
-                    if (host_calls_map.get(params.idx)) |host_call_fn| {
+                if (context.host_calls) |host_calls_ptr| {
+                    // Cast the anyopaque pointer to our HostCallsConfig
+                    const host_calls_config = @as(*const HostCallsConfig, @ptrCast(@alignCast(host_calls_ptr)));
+
+                    const maybe_host_call_fn: ?HostCallFn = host_calls_config.map.get(params.idx) orelse host_calls_config.catchall;
+                    if (maybe_host_call_fn) |host_call_fn| {
                         const gas_before = context.gas;
                         const pc_before = context.pc;
                         const registers_before = context.registers;
@@ -187,7 +202,7 @@ pub const PVM = struct {
                         const result = host_call_fn(context, call_ctx) catch |err| {
                             // Map protocol error to return code and continue
                             context.registers[7] = @intFromEnum(errorToReturnCode(err));
-                            
+
                             // Log the host call with error result
                             context.exec_trace.logHostCall(
                                 params.idx,
@@ -198,15 +213,20 @@ pub const PVM = struct {
                                 pc_before,
                                 params.next_pc,
                             );
-                            
+
                             // Update total gas used
                             context.exec_trace.total_gas_used += gas_before - context.gas;
                             context.pc = params.next_pc;
                             return try hostcallInvocation(context, call_ctx);
                         };
-                        
+
                         switch (result) {
                             .play => {
+                                // Check for out of gas immediately after host call
+                                if (context.gas < 0) {
+                                    return .{ .terminal = .out_of_gas };
+                                }
+
                                 // Log the host call with comprehensive information
                                 context.exec_trace.logHostCall(
                                     params.idx,
@@ -229,10 +249,17 @@ pub const PVM = struct {
                                 };
                             },
                         }
+                    } else {
+                        // No catchall provided - return panic as no handler exists
+                        span.warn("No host calls catchall provided - return panic", .{});
+                        return .{ .terminal = .panic };
                     }
+                } else {
+                    // No host calls configured at all - return panic
+                    //
+                    span.warn("No host calls configured at all - return panic", .{});
+                    return .{ .terminal = .panic };
                 }
-
-                return Error.NonExistentHostCall;
             },
             .terminal => |terminal| {
                 return .{ .terminal = terminal };

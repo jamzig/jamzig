@@ -34,6 +34,16 @@ pub const Id = enum(u32) {
     log = 100, // Host call for logging
 };
 
+/// Default catchall handler that follows the graypaper specification
+/// Deducts 10 gas and sets R7 to WHAT return code
+pub fn defaultHostCallCatchall(context: *@import("../pvm/execution_context.zig").ExecutionContext, _: *anyopaque) HostCallError!@import("../pvm/execution_context.zig").ExecutionContext.HostCallResult {
+    // Deduct 10 gas as per graypaper for non-existent host calls
+    context.gas -= 10;
+    // Set R7 to WHAT (unknown host call)
+    context.registers[7] = @intFromEnum(ReturnCode.WHAT);
+    return .play;
+}
+
 /// Return codes for host call operations
 pub const ReturnCode = enum(u64) {
     OK = 0, // The return value indicating general success
@@ -53,9 +63,9 @@ pub const ReturnCode = enum(u64) {
 /// - Any other value is treated as the target service ID
 /// The host_ctx must have a service_id field.
 pub fn resolveTargetService(host_ctx: anytype, register_value: u64) u32 {
-    return if (register_value == @intFromEnum(ReturnCode.NONE)) 
-        host_ctx.service_id 
-    else 
+    return if (register_value == @intFromEnum(ReturnCode.NONE))
+        host_ctx.service_id
+    else
         @as(u32, @intCast(register_value));
 }
 

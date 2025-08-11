@@ -17,8 +17,8 @@ pub const ExecutionContext = struct {
     decoder: Decoder,
     registers: [13]u64,
     memory: Memory,
-    // NOTE: we cannot use HostCallMap here due to circular dep
-    host_calls: ?*const std.AutoHashMapUnmanaged(u32, *const fn (*ExecutionContext, *anyopaque) HostCallError!HostCallResult),
+    // NOTE: we cannot use HostCallsConfig directly here due to circular dep, but we can use a forward declaration
+    host_calls: ?*const anyopaque, // Will be cast to *const PVM.HostCallsConfig when used
 
     gas: i64,
     pc: u32,
@@ -365,12 +365,12 @@ pub const ExecutionContext = struct {
         self.* = undefined;
     }
 
-    pub fn setHostCalls(self: *ExecutionContext, new_host_calls: *const HostCallMap) void {
+    pub fn setHostCalls(self: *ExecutionContext, new_host_calls: *const anyopaque) void {
         const span = trace.span(.set_host_calls);
         defer span.deinit();
         span.debug("Setting host calls", .{});
 
-        // Replace with the new one
+        // Replace with the new one (will be cast to HostCallsConfig when used)
         self.host_calls = new_host_calls;
 
         span.debug("Host calls set successfully", .{});

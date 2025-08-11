@@ -84,6 +84,13 @@ pub fn invoke(
     span.debug("Setting up host call functions", .{});
     var host_call_map = try HostCallMap.buildOrGetCached(params, allocator);
     defer host_call_map.deinit(allocator);
+    
+    // Create HostCallsConfig with the default catchall
+    const host_calls = @import("host_calls.zig");
+    const host_calls_config = pvm.PVM.HostCallsConfig{
+        .map = host_call_map,
+        .catchall = host_calls.defaultHostCallCatchall,
+    };
 
     span.debug("Cloning accumulation context and updating fetch context", .{});
 
@@ -162,7 +169,7 @@ pub fn invoke(
         5, // Accumulation entry point index per section 9.1
         @intCast(gas_limit),
         args_buffer.items,
-        &host_call_map,
+        &host_calls_config,
         @ptrCast(&host_call_context),
     );
     defer result.deinit(allocator);

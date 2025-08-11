@@ -367,7 +367,14 @@ pub const PVMFuzzer = struct {
                 return .play;
             }
         }.func);
-        exec_ctx.setHostCalls(&host_calls_map);
+
+        // Create HostCallsConfig with the map and default catchall
+        const host_calls = @import("../../pvm_invocations/host_calls.zig");
+        const host_calls_config = PVM.HostCallsConfig{
+            .map = host_calls_map,
+            .catchall = host_calls.defaultHostCallCatchall,
+        };
+        exec_ctx.setHostCalls(@ptrCast(&host_calls_config));
 
         // Limit PVM allocations
         exec_ctx.memory.heap_allocation_limit = 8;
@@ -510,7 +517,10 @@ pub const PVMFuzzer = struct {
             switch (step_result) {
                 .cont => continue,
                 .host_call => |host| {
-                    const handler = exec_ctx.host_calls.?.get(host.idx) orelse
+                    // Cast to HostCallsConfig and get handler
+                    const config = @as(*const PVM.HostCallsConfig, @ptrCast(@alignCast(exec_ctx.host_calls.?)));
+                    const handler = config.map.get(host.idx) orelse
+                        config.catchall orelse
                         return FuzzResult{
                             .seed = seed,
                             .status = .{ .terminal = .panic },
