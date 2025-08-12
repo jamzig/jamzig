@@ -70,7 +70,6 @@ pub fn processAccumulationReports(
         params,
         allocator,
         stx,
-        chi,
         accumulatable,
         gas_limit,
     );

@@ -352,7 +352,6 @@ pub fn executeAccumulation(
     comptime params: jam_params.Params,
     allocator: std.mem.Allocator,
     stx: *state_delta.StateTransition(params),
-    _: *state.Chi,
     accumulatable: []const types.WorkReport,
     gas_limit: u64,
 ) !OuterAccumulationResult {
@@ -451,7 +450,7 @@ fn collectServiceIds(
 
     // First the always accumulates (only in first batch)
     if (include_privileged) {
-        var it = &context.privileges.getReadOnly().always_accumulate.iterator();
+        var it = context.privileges.getReadOnly().always_accumulate.iterator();
         while (it.next()) |entry| {
             try service_ids.put(entry.key_ptr.*, {});
         }

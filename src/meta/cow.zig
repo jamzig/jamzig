@@ -41,7 +41,7 @@ pub fn CopyOnWrite(comptime T: type) type {
             return &self.mutable.?;
         }
 
-        pub fn getReadOnly(self: *Self) *const T {
+        pub fn getReadOnly(self: *const Self) *const T {
             return if (self.mutable) |*m| m else self.source;
         }
 
