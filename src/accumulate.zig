@@ -81,7 +81,7 @@ pub fn processAccumulationReports(
     const transfer_executor = TransferExecutor(params).init(allocator);
     const transfer_stats = try transfer_executor.applyDeferredTransfers(
         stx,
-        execution_result.transfers,
+        execution_result.deferred_transfers,
     );
 
     // Step 5: Update history

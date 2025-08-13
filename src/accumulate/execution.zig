@@ -44,18 +44,18 @@ pub const TransferServiceStats = struct {
 /// Result of the outer accumulation function
 pub const OuterAccumulationResult = struct {
     accumulated_count: usize,
-    transfers: []DeferredTransfer,
+    deferred_transfers: []DeferredTransfer,
     accumulation_outputs: HashSet(ServiceAccumulationOutput),
     gas_used_per_service: std.AutoHashMap(types.ServiceId, types.Gas), // Gas used per service ID
 
     pub fn takeTransfers(self: *@This()) []DeferredTransfer {
-        const result = self.transfers;
-        self.transfers = &[_]DeferredTransfer{};
+        const result = self.deferred_transfers;
+        self.deferred_transfers = &[_]DeferredTransfer{};
         return result;
     }
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.transfers);
+        allocator.free(self.deferred_transfers);
         self.accumulation_outputs.deinit(allocator);
         self.gas_used_per_service.deinit(); // Deinit the new map
         self.* = undefined;
@@ -113,7 +113,7 @@ pub fn outerAccumulation(
         span.debug("No work reports to process", .{});
         return .{
             .accumulated_count = 0,
-            .transfers = &[_]DeferredTransfer{},
+            .deferred_transfers = &[_]DeferredTransfer{},
             .accumulation_outputs = accumulation_outputs,
             .gas_used_per_service = gas_used_per_service,
         };
@@ -205,7 +205,7 @@ pub fn outerAccumulation(
 
     return .{
         .accumulated_count = total_accumulated_count,
-        .transfers = try transfers.toOwnedSlice(),
+        .deferred_transfers = try transfers.toOwnedSlice(),
         .accumulation_outputs = accumulation_outputs,
         .gas_used_per_service = gas_used_per_service,
     };
