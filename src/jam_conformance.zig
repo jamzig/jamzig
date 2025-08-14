@@ -8,12 +8,8 @@ const messages = @import("fuzz_protocol/messages.zig");
 const version = @import("version.zig");
 
 // Use FUZZ_PARAMS for consistency with fuzz protocol testing
-const FUZZ_PARAMS = messages.FUZZ_PARAMS;
+const FUZZ_PARAMS = jam_params.TINY_PARAMS;
 const RunConfig = trace_runner.RunConfig;
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 test "jam-conformance:jamzig" {
     const allocator = testing.allocator;
@@ -24,13 +20,47 @@ test "jam-conformance:jamzig" {
 
 test "jam-conformance:archive" {
     const allocator = testing.allocator;
-    const archive_path = try buildArchivePath(allocator);
-    defer allocator.free(archive_path);
 
-    try runReportsInDirectory(allocator, archive_path, "Archive");
+    // Check for environment variable
+    const archive_timestamp = std.process.getEnvVarOwned(allocator, "JAM_CONFORMANCE_ARCHIVE") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => {
+            std.debug.print("Skipping archive test. Set JAM_CONFORMANCE_ARCHIVE=<timestamp> to run a specific archive\n", .{});
+            return;
+        },
+        else => return err,
+    };
+    defer allocator.free(archive_timestamp);
+
+    // Build path to specific archive directory
+    const archive_base = try buildArchivePath(allocator);
+    defer allocator.free(archive_base);
+
+    const specific_archive_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ archive_base, archive_timestamp });
+    defer allocator.free(specific_archive_path);
+
+    // Check if directory exists
+    var dir = std.fs.cwd().openDir(specific_archive_path, .{}) catch |err| {
+        std.debug.print("Error: Archive directory not found: {s}\n", .{specific_archive_path});
+        return err;
+    };
+    dir.close();
+
+    std.debug.print("Running archive test for: {s}\n", .{archive_timestamp});
+
+    // Run test for the specific directory only
+    const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
+    const loader = w3f_loader.loader();
+
+    try trace_runner.runTracesInDir(
+        FUZZ_PARAMS,
+        loader,
+        allocator,
+        specific_archive_path,
+        RunConfig{ .mode = .CONTINOUS_MODE, .quiet = false },
+    );
 }
 
-test "jam-conformance:archive-summary" {
+test "jam-conformance:summary" {
     const allocator = testing.allocator;
     const archive_path = try buildArchivePath(allocator);
     defer allocator.free(archive_path);
@@ -152,7 +182,7 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
         failed,
         @as(f64, @floatFromInt(passed)) * 100.0 / @as(f64, @floatFromInt(directories.items.len)),
     });
-    
+
     // List failed cases
     if (failures.items.len > 0) {
         std.debug.print("\nFailed cases:\n", .{});
