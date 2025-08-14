@@ -20,6 +20,7 @@ pub fn validateAndProcessAssuranceExtrinsic(
         test_case.input.assurances,
         test_case.input.parent,
         kappa,
+        rho,
     );
 
     // Process the validated extrinsic

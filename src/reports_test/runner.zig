@@ -55,13 +55,23 @@ pub fn validateAndProcessGuaranteeExtrinsic(
     );
 
     // Process the statistics
-    try stats.transition(
+    var empty_accumulate_stats = std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.AccumulationServiceStats).init(allocator);
+    defer empty_accumulate_stats.deinit();
+    var empty_transfer_stats = std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.TransferServiceStats).init(allocator);
+    defer empty_transfer_stats.deinit();
+    
+    const accumulate_result = @import("../accumulate.zig").ProcessAccumulationResult{
+        .accumulate_root = [_]u8{0} ** 32,
+        .accumulation_stats = empty_accumulate_stats,
+        .transfer_stats = empty_transfer_stats,
+    };
+    
+    try stats.transitionWithInput(
         params,
         &stx,
         buildValidatorStatsInput(test_case),
+        &accumulate_result,
         &[_]types.WorkReport{}, // No ready reports in the test
-        &std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.AccumulationServiceStats).init(allocator),
-        &std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.TransferServiceStats).init(allocator),
     );
 
     // Merge the prime onto base
