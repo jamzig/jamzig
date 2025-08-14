@@ -58,6 +58,11 @@ pub fn stateTransition(
         stx,
     );
 
+    try validator_stats.transitionEpoch(
+        params,
+        stx,
+    );
+
     // => rho_dagger
     _ = try disputes.transition(
         params,
@@ -144,11 +149,6 @@ pub fn stateTransition(
         &assurance_result,
         &accumulate_result,
         ready_reports,
-    );
-
-    try validator_stats.transitionEpoch(
-        params,
-        stx,
     );
 
     return stx;
