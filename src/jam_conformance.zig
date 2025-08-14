@@ -10,27 +10,41 @@ const version = @import("version.zig");
 // Use FUZZ_PARAMS for consistency with fuzz protocol testing
 const FUZZ_PARAMS = messages.FUZZ_PARAMS;
 
-fn discoverReportDirectories(allocator: std.mem.Allocator, base_path: []const u8) !std.ArrayList([]const u8) {
-    var directories = std.ArrayList([]const u8).init(allocator);
-    errdefer {
-        for (directories.items) |dir| {
-            allocator.free(dir);
-        }
-        directories.deinit();
-    }
+// ============================================================================
+// Tests
+// ============================================================================
 
-    var base_dir = try std.fs.cwd().openDir(base_path, .{ .iterate = true });
-    defer base_dir.close();
+test "jam-conformance:jamzig" {
+    const allocator = testing.allocator;
+    const jamzig_path = "src/jam-conformance/fuzz-reports/jamzig";
 
-    var it = base_dir.iterate();
-    while (try it.next()) |entry| {
-        if (entry.kind == .directory) {
-            const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base_path, entry.name });
-            try directories.append(full_path);
-        }
-    }
+    try runReportsInDirectory(allocator, jamzig_path, "JamZig");
+}
 
-    return directories;
+test "jam-conformance:archive" {
+    const allocator = testing.allocator;
+    const archive_path = try buildArchivePath(allocator);
+    defer allocator.free(archive_path);
+
+    try runReportsInDirectory(allocator, archive_path, "Archive");
+}
+
+test "jam-conformance:archive-summary" {
+    const allocator = testing.allocator;
+    const archive_path = try buildArchivePath(allocator);
+    defer allocator.free(archive_path);
+
+    try runArchiveSummary(allocator, archive_path);
+}
+
+// -- Helper Functions --
+
+fn buildArchivePath(allocator: std.mem.Allocator) ![]u8 {
+    const graypaper = version.GRAYPAPER_VERSION;
+    const version_str = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}", .{ graypaper.major, graypaper.minor, graypaper.patch });
+    defer allocator.free(version_str);
+
+    return try std.fmt.allocPrint(allocator, "src/jam-conformance/fuzz-reports/archive/{s}", .{version_str});
 }
 
 fn runReportsInDirectory(allocator: std.mem.Allocator, base_path: []const u8, name: []const u8) !void {
@@ -58,7 +72,6 @@ fn runReportsInDirectory(allocator: std.mem.Allocator, base_path: []const u8, na
     for (directories.items, 1..) |dir, idx| {
         std.log.info("[{d}/{d}] Running traces in: {s}", .{ idx, directories.items.len, dir });
 
-        // Use TRACE_MODE to validate each transition independently
         try trace_runner.runTracesInDir(
             FUZZ_PARAMS,
             loader,
@@ -69,24 +82,98 @@ fn runReportsInDirectory(allocator: std.mem.Allocator, base_path: []const u8, na
     }
 }
 
-test "jam-conformance:jamzig" {
-    const allocator = testing.allocator;
-    const jamzig_path = "src/jam-conformance/fuzz-reports/jamzig";
+fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void {
+    const directories = try discoverReportDirectories(allocator, base_path);
+    defer {
+        for (directories.items) |dir| {
+            allocator.free(dir);
+        }
+        directories.deinit();
+    }
 
-    try runReportsInDirectory(allocator, jamzig_path, "JamZig");
+    std.log.info("\n=== Archive Conformance Summary ===", .{});
+    std.log.info("Testing archive reports from: {s}", .{base_path});
+    std.log.info("Found {d} report directories\n", .{directories.items.len});
+
+    if (directories.items.len == 0) {
+        std.log.warn("No report directories found in {s}", .{base_path});
+        return;
+    }
+
+    // Create W3F loader for the traces
+    const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
+    const loader = w3f_loader.loader();
+
+    var passed: usize = 0;
+    var failed: usize = 0;
+
+    // Track failures for summary
+    var failures = std.ArrayList(struct {
+        dir: []const u8,
+        err: anyerror,
+    }).init(allocator);
+    defer failures.deinit();
+
+    // Run traces in each directory and track results
+    for (directories.items, 1..) |dir, idx| {
+        std.log.info("[{d}/{d}] Testing: {s}", .{ idx, directories.items.len, dir });
+
+        // Try to run traces, catch and record any errors
+        trace_runner.runTracesInDir(
+            FUZZ_PARAMS,
+            loader,
+            allocator,
+            dir,
+            .CONTINOUS_MODE,
+        ) catch |err| {
+            std.log.err("  ❌ FAILED: {s}", .{@errorName(err)});
+            failed += 1;
+            try failures.append(.{ .dir = dir, .err = err });
+            continue;
+        };
+
+        std.log.info("  ✅ PASSED", .{});
+        passed += 1;
+    }
+
+    // Print summary
+    std.log.info("\n=== Results Summary ===", .{});
+    std.log.info("Total reports: {d}", .{directories.items.len});
+    std.log.info("Passed: {d} ({d:.1}%)", .{ passed, @as(f64, @floatFromInt(passed)) * 100.0 / @as(f64, @floatFromInt(directories.items.len)) });
+    std.log.info("Failed: {d} ({d:.1}%)", .{ failed, @as(f64, @floatFromInt(failed)) * 100.0 / @as(f64, @floatFromInt(directories.items.len)) });
+
+    if (failures.items.len > 0) {
+        std.log.info("\n=== Failed Reports ===", .{});
+        for (failures.items) |failure| {
+            // Extract just the report ID from the path
+            const last_slash = std.mem.lastIndexOf(u8, failure.dir, "/") orelse 0;
+            const report_id = if (last_slash > 0) failure.dir[last_slash + 1 ..] else failure.dir;
+            std.log.info("  {s}: {s}", .{ report_id, @errorName(failure.err) });
+        }
+    }
+
+    std.log.info("\n=== End Summary ===\n", .{});
 }
 
-test "jam-conformance:archive" {
-    const allocator = testing.allocator;
+fn discoverReportDirectories(allocator: std.mem.Allocator, base_path: []const u8) !std.ArrayList([]const u8) {
+    var directories = std.ArrayList([]const u8).init(allocator);
+    errdefer {
+        for (directories.items) |dir| {
+            allocator.free(dir);
+        }
+        directories.deinit();
+    }
 
-    // Use the graypaper version to navigate to the correct archive directory
-    const graypaper = version.GRAYPAPER_VERSION;
-    const version_str = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}", .{ graypaper.major, graypaper.minor, graypaper.patch });
-    defer allocator.free(version_str);
+    var base_dir = try std.fs.cwd().openDir(base_path, .{ .iterate = true });
+    defer base_dir.close();
 
-    const archive_version_path = try std.fmt.allocPrint(allocator, "src/jam-conformance/fuzz-reports/archive/{s}", .{version_str});
-    defer allocator.free(archive_version_path);
+    var it = base_dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind == .directory) {
+            const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base_path, entry.name });
+            try directories.append(full_path);
+        }
+    }
 
-    // Run reports in the version-specific archive directory
-    try runReportsInDirectory(allocator, archive_version_path, "Archive");
+    return directories;
 }
