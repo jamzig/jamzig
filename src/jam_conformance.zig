@@ -9,6 +9,7 @@ const version = @import("version.zig");
 
 // Use FUZZ_PARAMS for consistency with fuzz protocol testing
 const FUZZ_PARAMS = messages.FUZZ_PARAMS;
+const RunConfig = trace_runner.RunConfig;
 
 // ============================================================================
 // Tests
@@ -56,11 +57,11 @@ fn runReportsInDirectory(allocator: std.mem.Allocator, base_path: []const u8, na
         directories.deinit();
     }
 
-    std.log.info("Running {s} conformance tests from: {s}", .{ name, base_path });
-    std.log.info("Found {d} report directories", .{directories.items.len});
+    std.debug.print("Running {s} conformance tests from: {s}\n", .{ name, base_path });
+    std.debug.print("Found {d} report directories\n", .{directories.items.len});
 
     if (directories.items.len == 0) {
-        std.log.warn("No report directories found in {s}", .{base_path});
+        std.debug.print("No report directories found in {s}\n", .{base_path});
         return;
     }
 
@@ -70,14 +71,14 @@ fn runReportsInDirectory(allocator: std.mem.Allocator, base_path: []const u8, na
 
     // Run traces in each directory
     for (directories.items, 1..) |dir, idx| {
-        std.log.info("[{d}/{d}] Running traces in: {s}", .{ idx, directories.items.len, dir });
+        std.debug.print("[{d}/{d}] Running traces in: {s}\n", .{ idx, directories.items.len, dir });
 
         try trace_runner.runTracesInDir(
             FUZZ_PARAMS,
             loader,
             allocator,
             dir,
-            .CONTINOUS_MODE,
+            RunConfig{ .mode = .CONTINOUS_MODE, .quiet = false },
         );
     }
 }
@@ -91,12 +92,11 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
         directories.deinit();
     }
 
-    std.log.info("\n=== Archive Conformance Summary ===", .{});
-    std.log.info("Testing archive reports from: {s}", .{base_path});
-    std.log.info("Found {d} report directories\n", .{directories.items.len});
+    std.debug.print("\n=== Conformance Summary: {s} ===\n", .{base_path});
+    std.debug.print("Found {d} report directories\n", .{directories.items.len});
 
     if (directories.items.len == 0) {
-        std.log.warn("No report directories found in {s}", .{base_path});
+        std.debug.print("No report directories found in {s}\n", .{base_path});
         return;
     }
 
@@ -109,14 +109,21 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
 
     // Track failures for summary
     var failures = std.ArrayList(struct {
-        dir: []const u8,
+        id: []u8,
         err: anyerror,
     }).init(allocator);
-    defer failures.deinit();
+    defer {
+        for (failures.items) |failure| {
+            allocator.free(failure.id);
+        }
+        failures.deinit();
+    }
 
     // Run traces in each directory and track results
     for (directories.items, 1..) |dir, idx| {
-        std.log.info("[{d}/{d}] Testing: {s}", .{ idx, directories.items.len, dir });
+        // Extract just the report ID from the path
+        const last_slash = std.mem.lastIndexOf(u8, dir, "/") orelse 0;
+        const report_id = if (last_slash > 0) dir[last_slash + 1 ..] else dir;
 
         // Try to run traces, catch and record any errors
         trace_runner.runTracesInDir(
@@ -124,35 +131,35 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
             loader,
             allocator,
             dir,
-            .CONTINOUS_MODE,
+            RunConfig{ .mode = .CONTINOUS_MODE, .quiet = true },
         ) catch |err| {
-            std.log.err("  ❌ FAILED: {s}", .{@errorName(err)});
+            std.debug.print("[{d:3}/{d:3}] {s}: ❌ {s}\n", .{ idx, directories.items.len, report_id, @errorName(err) });
             failed += 1;
-            try failures.append(.{ .dir = dir, .err = err });
+            const id_copy = try allocator.dupe(u8, report_id);
+            try failures.append(.{ .id = id_copy, .err = err });
             continue;
         };
 
-        std.log.info("  ✅ PASSED", .{});
+        std.debug.print("[{d:3}/{d:3}] {s}: ✅ PASS\n", .{ idx, directories.items.len, report_id });
         passed += 1;
     }
 
     // Print summary
-    std.log.info("\n=== Results Summary ===", .{});
-    std.log.info("Total reports: {d}", .{directories.items.len});
-    std.log.info("Passed: {d} ({d:.1}%)", .{ passed, @as(f64, @floatFromInt(passed)) * 100.0 / @as(f64, @floatFromInt(directories.items.len)) });
-    std.log.info("Failed: {d} ({d:.1}%)", .{ failed, @as(f64, @floatFromInt(failed)) * 100.0 / @as(f64, @floatFromInt(directories.items.len)) });
-
+    std.debug.print("\n=== Summary ===\n", .{});
+    std.debug.print("Total: {d} | Passed: {d} | Failed: {d} | Pass rate: {d:.1}%\n", .{
+        directories.items.len,
+        passed,
+        failed,
+        @as(f64, @floatFromInt(passed)) * 100.0 / @as(f64, @floatFromInt(directories.items.len)),
+    });
+    
+    // List failed cases
     if (failures.items.len > 0) {
-        std.log.info("\n=== Failed Reports ===", .{});
+        std.debug.print("\nFailed cases:\n", .{});
         for (failures.items) |failure| {
-            // Extract just the report ID from the path
-            const last_slash = std.mem.lastIndexOf(u8, failure.dir, "/") orelse 0;
-            const report_id = if (last_slash > 0) failure.dir[last_slash + 1 ..] else failure.dir;
-            std.log.info("  {s}: {s}", .{ report_id, @errorName(failure.err) });
+            std.debug.print("  - {s}: {s}\n", .{ failure.id, @errorName(failure.err) });
         }
     }
-
-    std.log.info("\n=== End Summary ===\n", .{});
 }
 
 fn discoverReportDirectories(allocator: std.mem.Allocator, base_path: []const u8) !std.ArrayList([]const u8) {
