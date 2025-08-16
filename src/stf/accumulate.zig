@@ -25,7 +25,11 @@ fn updateLastAccumulationSlot(
     var iter = result.accumulation_stats.iterator();
     while (iter.next()) |entry| {
         if (delta_prime.getAccount(entry.key_ptr.*)) |account| {
-            account.last_accumulation_slot = stx.time.current_slot;
+            // Only update if the service was not created in this same slot
+            // A service created in the current slot hasn't accumulated yet
+            if (account.creation_slot != stx.time.current_slot) {
+                account.last_accumulation_slot = stx.time.current_slot;
+            }
         }
     }
 
@@ -33,7 +37,12 @@ fn updateLastAccumulationSlot(
     var transfer_iter = result.transfer_stats.iterator();
     while (transfer_iter.next()) |entry| {
         if (delta_prime.getAccount(entry.key_ptr.*)) |account| {
-            account.last_accumulation_slot = stx.time.current_slot;
+            // Only update if the service was not created in this same slot
+            // A service created in the current slot that receives a transfer should update
+            // But based on graypaper, newly created services shouldn't be in transfer_stats
+            if (account.creation_slot != stx.time.current_slot) {
+                account.last_accumulation_slot = stx.time.current_slot;
+            }
         }
     }
 }
