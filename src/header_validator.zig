@@ -6,7 +6,7 @@ const codec = @import("codec.zig");
 const crypto = @import("crypto.zig");
 
 const tracing = @import("tracing.zig");
-const trace = tracing.scoped(.header_validator);
+const trace = tracing.scoped(.stf);
 
 // Constants for seal contexts
 const SEAL_CONTEXT_TICKET = "jam_ticket_seal";
@@ -291,7 +291,7 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             }
 
             // Check tickets marker timing
-            if (transition_time.didCrossTicketSubmissionEnd()) {
+            if (transition_time.didCrossTicketSubmissionEndInSameEpoch()) {
                 // Tickets marker validation would go here if needed
             } else if (header.tickets_mark != null) {
                 span.err("Tickets marker present but we did not cross didCrossTicketSubmissionEnd", .{});

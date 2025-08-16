@@ -71,11 +71,11 @@ pub fn Time(comptime epoch_length: u32, comptime slot_period: u32, comptime tick
             return ticket_submission_end_epoch_slot - self.current_slot_in_epoch;
         }
 
-        pub fn didCrossTicketSubmissionEnd(self: Self) bool {
+        pub fn didCrossTicketSubmissionEndInSameEpoch(self: Self) bool {
             const prior_was_before = self.prior_slot_in_epoch < self.ticket_submission_end_epoch_slot;
             const current_is_after = self.current_slot_in_epoch >= self.ticket_submission_end_epoch_slot;
             const same_epoch = self.isSameEpoch();
-            
+
             return prior_was_before and current_is_after and same_epoch;
         }
 
