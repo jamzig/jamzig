@@ -1256,15 +1256,13 @@ pub fn HostCalls(comptime params: Params) type {
             // Cast the byte buffer directly to ValidatorData slice - no allocation needed!
             const validators = std.mem.bytesAsSlice(types.ValidatorData, validator_data.buffer);
 
-            // Log some validator keys for debugging
+            // Log validator keys for debugging
             for (validators, 0..) |validator, i| {
-                if (i < 3) { // Log first 3 validators
-                    span.trace("Validator {d}: bandersnatch={s}, ed25519={s}", .{
-                        i,
-                        std.fmt.fmtSliceHexLower(&validator.bandersnatch),
-                        std.fmt.fmtSliceHexLower(&validator.ed25519),
-                    });
-                }
+                span.trace("Validator {d}: bandersnatch={s}, ed25519={s}", .{
+                    i,
+                    std.fmt.fmtSliceHexLower(&validator.bandersnatch),
+                    std.fmt.fmtSliceHexLower(&validator.ed25519),
+                });
             }
 
             // Update the staging validator set (iota)
