@@ -18,71 +18,77 @@ pub const W3F_PARAMS = jam_params.TINY_PARAMS;
 test "w3f:traces:fallback" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    try runTracesInDir(
+    var result = try runTracesInDir(
         W3F_PARAMS,
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/fallback",
         RunConfig{ .mode = .CONTINOUS_MODE },
     );
+    defer result.deinit(allocator);
 }
 
 test "w3f:traces:safrole" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    try runTracesInDir(
+    var result = try runTracesInDir(
         W3F_PARAMS,
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/safrole",
         RunConfig{ .mode = .CONTINOUS_MODE },
     );
+    defer result.deinit(allocator);
 }
 
 test "w3f:traces:preimages" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    try runTracesInDir(
+    var result = try runTracesInDir(
         W3F_PARAMS,
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/preimages",
         RunConfig{ .mode = .CONTINOUS_MODE },
     );
+    defer result.deinit(allocator);
 }
 
 test "w3f:traces:preimages_light" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    try runTracesInDir(
+    var result = try runTracesInDir(
         W3F_PARAMS,
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/preimages_light",
         RunConfig{ .mode = .CONTINOUS_MODE },
     );
+    defer result.deinit(allocator);
 }
 
 test "w3f:traces:storage" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    try runTracesInDir(
+    var result = try runTracesInDir(
         W3F_PARAMS,
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/preimages_light",
         RunConfig{ .mode = .CONTINOUS_MODE },
     );
+    defer result.deinit(allocator);
 }
 
 test "w3f:traces:storage_light" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    try runTracesInDir(
+    var result = try runTracesInDir(
         W3F_PARAMS,
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/preimages_light",
         RunConfig{ .mode = .CONTINOUS_MODE },
     );
+    defer result.deinit(allocator);
 }
