@@ -51,13 +51,14 @@ test "jam-conformance:archive" {
     const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
     const loader = w3f_loader.loader();
 
-    try trace_runner.runTracesInDir(
+    var run_result = try trace_runner.runTracesInDir(
         FUZZ_PARAMS,
         loader,
         allocator,
         specific_archive_path,
         RunConfig{ .mode = .CONTINOUS_MODE, .quiet = false },
     );
+    defer run_result.deinit(allocator);
 }
 
 test "jam-conformance:summary" {
@@ -103,13 +104,14 @@ fn runReportsInDirectory(allocator: std.mem.Allocator, base_path: []const u8, na
     for (directories.items, 1..) |dir, idx| {
         std.debug.print("[{d}/{d}] Running traces in: {s}\n", .{ idx, directories.items.len, dir });
 
-        try trace_runner.runTracesInDir(
+        var run_result = try trace_runner.runTracesInDir(
             FUZZ_PARAMS,
             loader,
             allocator,
             dir,
             RunConfig{ .mode = .CONTINOUS_MODE, .quiet = false },
         );
+        defer run_result.deinit(allocator);
     }
 }
 
@@ -137,7 +139,7 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
     var passed: usize = 0;
     var failed: usize = 0;
 
-    // Track failures for summary
+    // Track failures and no-op blocks for summary
     var failures = std.ArrayList(struct {
         id: []u8,
         err: anyerror,
@@ -148,6 +150,18 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
         }
         failures.deinit();
     }
+    
+    var no_op_blocks = std.ArrayList(struct {
+        id: []u8,
+        exceptions: []const u8,
+    }).init(allocator);
+    defer {
+        for (no_op_blocks.items) |block| {
+            allocator.free(block.id);
+            allocator.free(block.exceptions);
+        }
+        no_op_blocks.deinit();
+    }
 
     // Run traces in each directory and track results
     for (directories.items, 1..) |dir, idx| {
@@ -156,7 +170,7 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
         const report_id = if (last_slash > 0) dir[last_slash + 1 ..] else dir;
 
         // Try to run traces, catch and record any errors
-        trace_runner.runTracesInDir(
+        var run_result = trace_runner.runTracesInDir(
             FUZZ_PARAMS,
             loader,
             allocator,
@@ -169,8 +183,19 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
             try failures.append(.{ .id = id_copy, .err = err });
             continue;
         };
+        defer run_result.deinit(allocator);
 
-        std.debug.print("[{d:3}/{d:3}] {s}: ✅ PASS\n", .{ idx, directories.items.len, report_id });
+        // Track no-op blocks if any
+        if (run_result.had_no_op_blocks) {
+            const id_copy = try allocator.dupe(u8, report_id);
+            const exceptions_copy = try allocator.dupe(u8, run_result.no_op_exceptions);
+            try no_op_blocks.append(.{ .id = id_copy, .exceptions = exceptions_copy });
+            std.debug.print("[{d:3}/{d:3}] {s}: ✅ PASS (no-op block: {s})\n", .{ 
+                idx, directories.items.len, report_id, run_result.no_op_exceptions 
+            });
+        } else {
+            std.debug.print("[{d:3}/{d:3}] {s}: ✅ PASS\n", .{ idx, directories.items.len, report_id });
+        }
         passed += 1;
     }
 
@@ -182,6 +207,14 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
         failed,
         @as(f64, @floatFromInt(passed)) * 100.0 / @as(f64, @floatFromInt(directories.items.len)),
     });
+
+    // List tests with no-op blocks
+    if (no_op_blocks.items.len > 0) {
+        std.debug.print("\nTests with no-op blocks:\n", .{});
+        for (no_op_blocks.items) |block| {
+            std.debug.print("  - {s}: {s}\n", .{ block.id, block.exceptions });
+        }
+    }
 
     // List failed cases
     if (failures.items.len > 0) {

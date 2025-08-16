@@ -21,13 +21,24 @@ pub const RunConfig = struct {
     quiet: bool = false,
 };
 
+pub const RunResult = struct {
+    had_no_op_blocks: bool = false,
+    no_op_exceptions: []const u8 = "",
+    
+    pub fn deinit(self: *RunResult, allocator: std.mem.Allocator) void {
+        if (self.no_op_exceptions.len > 0) {
+            allocator.free(self.no_op_exceptions);
+        }
+    }
+};
+
 pub fn runTracesInDir(
     comptime params: jam_params.Params,
     loader: trace_runner.Loader,
     allocator: std.mem.Allocator,
     test_dir: []const u8,
     config: RunConfig,
-) !void {
+) !RunResult {
     if (!config.quiet) {
         std.debug.print("\nRunning block import tests from: {s}\n", .{test_dir});
     }
@@ -69,6 +80,11 @@ pub fn runTracesInDir(
 
     // Track last post-state root to verify trace continuity
     var last_post_state_root: ?[32]u8 = null;
+    
+    // Track no-op blocks for result
+    var result = RunResult{};
+    var no_op_exceptions = std.ArrayList(u8).init(allocator);
+    defer no_op_exceptions.deinit();
 
     for (state_transition_vectors.items()[offset..], offset..) |state_transition_vector, idx| {
         // This is sometimes placed in the dir
@@ -203,6 +219,13 @@ pub fn runTracesInDir(
                     std.debug.print("Error: {s}\n", .{@errorName(err)});
                     std.debug.print("Verifying state remained unchanged...\n", .{});
                 }
+                
+                // Track this no-op block and its exception
+                result.had_no_op_blocks = true;
+                if (no_op_exceptions.items.len > 0) {
+                    try no_op_exceptions.appendSlice(", ");
+                }
+                try no_op_exceptions.appendSlice(@errorName(err));
 
                 // For no-op blocks, the current state should still match the expected post-state
                 // (which is the same as pre-state)
@@ -247,7 +270,7 @@ pub fn runTracesInDir(
                 defer tracing.runtime.disableScope("block_import") catch {};
 
                 // Retry the import with tracing
-                var result = importer.importBlock(
+                var retry_result = importer.importBlock(
                     &current_state.?,
                     state_transition.block(),
                 ) catch |retry_err| {
@@ -257,6 +280,15 @@ pub fn runTracesInDir(
                     }
                     // Check again if it's a no-op block
                     if (is_no_op_block) {
+                        // Track the exception if not already tracked
+                        if (!result.had_no_op_blocks) {
+                            result.had_no_op_blocks = true;
+                            if (no_op_exceptions.items.len > 0) {
+                                try no_op_exceptions.appendSlice(", ");
+                            }
+                            try no_op_exceptions.appendSlice(@errorName(retry_err));
+                        }
+                        
                         const current_root = try current_state.?.buildStateRoot(allocator);
                         if (std.mem.eql(u8, &expected_post_root, &current_root)) {
                             if (!config.quiet) {
@@ -268,7 +300,7 @@ pub fn runTracesInDir(
                     }
                     return retry_err;
                 };
-                defer result.deinit();
+                defer retry_result.deinit();
             }
 
             return err;
@@ -373,4 +405,11 @@ pub fn runTracesInDir(
         // Save this post-state root for next iteration's continuity check
         last_post_state_root = expected_post_root;
     }
+    
+    // Build final result
+    if (no_op_exceptions.items.len > 0) {
+        result.no_op_exceptions = try no_op_exceptions.toOwnedSlice();
+    }
+    
+    return result;
 }
