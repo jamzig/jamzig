@@ -11,6 +11,19 @@ const version = @import("version.zig");
 const FUZZ_PARAMS = jam_params.TINY_PARAMS;
 const RunConfig = trace_runner.RunConfig;
 
+// Skipped tests configuration
+const SkippedTest = struct {
+    id: []const u8,
+    reason: []const u8,
+};
+
+const SKIPPED_TESTS = [_]SkippedTest{
+    .{
+        .id = "1754982087",
+        .reason = "Invalid test: service ID generation used LE instead of varint (B.10)",
+    },
+};
+
 test "jam-conformance:jamzig" {
     const allocator = testing.allocator;
     const jamzig_path = "src/jam-conformance/fuzz-reports/jamzig";
@@ -30,6 +43,13 @@ test "jam-conformance:archive" {
         else => return err,
     };
     defer allocator.free(archive_timestamp);
+
+    // Check if this test is skipped
+    if (isSkippedTest(archive_timestamp)) |reason| {
+        std.debug.print("\n⏭️  SKIPPED: Test {s} is known to be invalid\n", .{archive_timestamp});
+        std.debug.print("   Reason: {s}\n\n", .{reason});
+        return;
+    }
 
     // Build path to specific archive directory
     const archive_base = try buildArchivePath(allocator);
@@ -70,6 +90,15 @@ test "jam-conformance:summary" {
 }
 
 // -- Helper Functions --
+
+fn isSkippedTest(id: []const u8) ?[]const u8 {
+    for (SKIPPED_TESTS) |skipped| {
+        if (std.mem.eql(u8, skipped.id, id)) {
+            return skipped.reason;
+        }
+    }
+    return null;
+}
 
 fn buildArchivePath(allocator: std.mem.Allocator) ![]u8 {
     const graypaper = version.GRAYPAPER_VERSION;
@@ -138,6 +167,7 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
 
     var passed: usize = 0;
     var failed: usize = 0;
+    var skipped: usize = 0;
 
     // Track failures and no-op blocks for summary
     var failures = std.ArrayList(struct {
@@ -163,11 +193,31 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
         no_op_blocks.deinit();
     }
 
+    var skipped_tests = std.ArrayList(struct {
+        id: []u8,
+        reason: []const u8,
+    }).init(allocator);
+    defer {
+        for (skipped_tests.items) |skipped_test| {
+            allocator.free(skipped_test.id);
+        }
+        skipped_tests.deinit();
+    }
+
     // Run traces in each directory and track results
     for (directories.items, 1..) |dir, idx| {
         // Extract just the report ID from the path
         const last_slash = std.mem.lastIndexOf(u8, dir, "/") orelse 0;
         const report_id = if (last_slash > 0) dir[last_slash + 1 ..] else dir;
+
+        // Check if this test is skipped
+        if (isSkippedTest(report_id)) |reason| {
+            std.debug.print("[{d:3}/{d:3}] {s}: ⏭️  SKIPPED ({s})\n", .{ idx, directories.items.len, report_id, reason });
+            skipped += 1;
+            const id_copy = try allocator.dupe(u8, report_id);
+            try skipped_tests.append(.{ .id = id_copy, .reason = reason });
+            continue;
+        }
 
         // Try to run traces, catch and record any errors
         var run_result = trace_runner.runTracesInDir(
@@ -201,12 +251,18 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
 
     // Print summary
     std.debug.print("\n=== Summary ===\n", .{});
-    std.debug.print("Total: {d} | Passed: {d} | Failed: {d} | Pass rate: {d:.1}%\n", .{
-        directories.items.len,
-        passed,
-        failed,
-        @as(f64, @floatFromInt(passed)) * 100.0 / @as(f64, @floatFromInt(directories.items.len)),
-    });
+    const total_runnable = directories.items.len - skipped;
+    if (total_runnable > 0) {
+        std.debug.print("Total: {d} | Passed: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
+            directories.items.len,
+            passed,
+            failed,
+            skipped,
+            @as(f64, @floatFromInt(passed)) * 100.0 / @as(f64, @floatFromInt(total_runnable)),
+        });
+    } else {
+        std.debug.print("Total: {d} | All tests skipped\n", .{directories.items.len});
+    }
 
     // List tests with no-op blocks
     if (no_op_blocks.items.len > 0) {
@@ -221,6 +277,14 @@ fn runArchiveSummary(allocator: std.mem.Allocator, base_path: []const u8) !void 
         std.debug.print("\nFailed cases:\n", .{});
         for (failures.items) |failure| {
             std.debug.print("  - {s}: {s}\n", .{ failure.id, @errorName(failure.err) });
+        }
+    }
+
+    // List skipped tests
+    if (skipped_tests.items.len > 0) {
+        std.debug.print("\nSkipped tests:\n", .{});
+        for (skipped_tests.items) |skipped_test| {
+            std.debug.print("  - {s}: {s}\n", .{ skipped_test.id, skipped_test.reason });
         }
     }
 }
