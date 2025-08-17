@@ -2,6 +2,7 @@ const std = @import("std");
 
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
+const codec = @import("../../codec.zig");
 
 const trace = @import("../../tracing.zig").scoped(.accumulate);
 
@@ -39,21 +40,30 @@ pub fn generateServiceId(service_accounts: *const state.Delta.Snapshot, creator_
 
     // Create input for hash: service ID + entropy + timeslot
     // According to graypaper B.9: encode(s, η'_0, H_t)
-    var hash_input: [4 + 32 + 4]u8 = undefined;
+    // Use varint encoding for integers as per JAM codec specification
+    var hash_input_buf: [9 + 32 + 9]u8 = undefined; // Max size for two varint-encoded u32s + entropy
+    var offset: usize = 0;
 
-    // Copy service ID as bytes (4 bytes in little-endian format) FIRST
-    std.mem.writeInt(u32, hash_input[0..4], creator_id, .little);
+    // Encode service ID using varint encoding FIRST
+    const service_id_encoded = codec.encoder.encodeInteger(creator_id);
+    std.mem.copyForwards(u8, hash_input_buf[offset..], service_id_encoded.as_slice());
+    offset += service_id_encoded.len;
 
     // Copy entropy (32 bytes) SECOND
-    std.mem.copyForwards(u8, hash_input[4..36], &entropy);
+    std.mem.copyForwards(u8, hash_input_buf[offset..offset + 32], &entropy);
+    offset += 32;
 
-    // Copy timeslot (4 bytes in little-endian format) THIRD
-    std.mem.writeInt(u32, hash_input[36..40], timeslot, .little);
-    span.trace("Hash input: {s}", .{std.fmt.fmtSliceHexLower(&hash_input)});
+    // Encode timeslot using varint encoding THIRD
+    const timeslot_encoded = codec.encoder.encodeInteger(timeslot);
+    std.mem.copyForwards(u8, hash_input_buf[offset..], timeslot_encoded.as_slice());
+    offset += timeslot_encoded.len;
+
+    const hash_input = hash_input_buf[0..offset];
+    span.trace("Hash input: {s}", .{std.fmt.fmtSliceHexLower(hash_input)});
 
     // Hash the input using Blake2b-256
     var hash_output: [32]u8 = undefined;
-    std.crypto.hash.blake2.Blake2b256.hash(&hash_input, &hash_output, .{});
+    std.crypto.hash.blake2.Blake2b256.hash(hash_input, &hash_output, .{});
     span.trace("Hash output: {s}", .{std.fmt.fmtSliceHexLower(&hash_output)});
 
     // Generate initial ID: take first 4 bytes of hash mod (2^32 - 2^9) + 2^8
