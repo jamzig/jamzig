@@ -26,7 +26,8 @@ const SKIPPED_TESTS = [_]SkippedTest{
 
 test "jam-conformance:jamzig" {
     const allocator = testing.allocator;
-    const jamzig_path = "src/jam-conformance/fuzz-reports/jamzig";
+    const jamzig_path = try buildImplementationPath(allocator, "jamzig");
+    defer allocator.free(jamzig_path);
 
     try runReportsInDirectory(allocator, jamzig_path, "JamZig");
 }
@@ -106,6 +107,14 @@ fn buildArchivePath(allocator: std.mem.Allocator) ![]u8 {
     defer allocator.free(version_str);
 
     return try std.fmt.allocPrint(allocator, "src/jam-conformance/fuzz-reports/archive/{s}", .{version_str});
+}
+
+fn buildImplementationPath(allocator: std.mem.Allocator, impl_name: []const u8) ![]u8 {
+    const graypaper = version.GRAYPAPER_VERSION;
+    const version_str = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}", .{ graypaper.major, graypaper.minor, graypaper.patch });
+    defer allocator.free(version_str);
+
+    return try std.fmt.allocPrint(allocator, "src/jam-conformance/fuzz-reports/{s}/{s}", .{ impl_name, version_str });
 }
 
 fn runReportsInDirectory(allocator: std.mem.Allocator, base_path: []const u8, name: []const u8) !void {
