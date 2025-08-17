@@ -767,7 +767,8 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("Integrating preimage lookup", .{});
             new_account.solicitPreimage(ctx_regular.new_service_id, code_hash, code_len, ctx_regular.context.time.current_slot) catch {
                 span.err("Failed to integrate preimage lookup, out of memory", .{});
-                // FIXME: Should rollback service creation here
+                // Rollback service creation
+                _ = ctx_regular.context.service_accounts.removeService(ctx_regular.new_service_id) catch {};
                 return .{ .terminal = .panic };
             };
 
@@ -785,7 +786,8 @@ pub fn HostCalls(comptime params: Params) type {
             // Check if caller has enough balance
             if (calling_service.balance < initial_balance) {
                 span.debug("Insufficient balance to create new service, returning CASH error", .{});
-                // FIXME: Should rollback service creation here
+                // Rollback service creation
+                _ = ctx_regular.context.service_accounts.removeService(ctx_regular.new_service_id) catch {};
                 return HostCallError.CASH;
             }
 
