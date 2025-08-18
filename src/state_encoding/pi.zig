@@ -137,9 +137,7 @@ fn encodeServiceStats(stats: std.AutoHashMap(types.ServiceId, ServiceActivityRec
         entry_span.trace("Refinement gas used: {}", .{record.refinement_gas_used});
         try codec.writeInteger(record.refinement_gas_used, writer);
 
-        // Encode I/O stats
-        // FIXME: fix ordering back to @davxy ordering after merge
-        // of: https://github.com/jam-duna/jamtestnet/issues/181
+        // Encode I/O stats (Graypaper 13.6 and 13.7)
         entry_span.trace("Imports: {}", .{record.imports});
         try codec.writeInteger(record.imports, writer);
         entry_span.trace("Exports: {}", .{record.exports});

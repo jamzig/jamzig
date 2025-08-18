@@ -162,8 +162,7 @@ fn decodeServiceStats(context: *DecodingContext, reader: anytype, stats: *std.Au
             return context.makeError(error.EndOfStream, "failed to read refinement_gas_used: {s}", .{@errorName(err)});
         };
 
-        // FIXME: fix ordering back to @davxy ordering after merge
-        // of: https://github.com/jam-duna/jamtestnet/issues/181
+        // Decode I/O stats (Graypaper 13.6 and 13.7)
         const imports = @as(u32, @truncate(codec.readInteger(reader) catch |err| {
             return context.makeError(error.EndOfStream, "failed to read imports: {s}", .{@errorName(err)});
         }));
