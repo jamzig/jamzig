@@ -213,8 +213,13 @@ pub fn runTestFixture(allocator: Allocator, test_vector: *const PVMFixture, path
 
     // Check if gas matches
 
-    // FIXME: disabled this as there are no final gas prices for instruction. To pass the jamduna:assurance
-    //        I had to put gas on 0. Enable this once we have consensus over gas prices
+    // NOTE: Gas validation is disabled because the JAM specification does not yet define
+    //       final gas costs for PVM instructions. Currently, instructions have a placeholder
+    //       cost of 1 gas unit each (see src/pvm.zig getInstructionGasCost), while host calls
+    //       have standardized costs (transfer: 10 + ω_9, others: 10, log: 0 per JIP-1).
+    //       The test vectors use expected_gas=0 to maintain compatibility across implementations.
+    //       This should be re-enabled once the JAM community establishes consensus on 
+    //       per-instruction gas pricing in the Graypaper.
     // if (exec_ctx.gas != test_vector.expected_gas) {
     //     std.debug.print("Gas mismatch: expected {}, got {}\n", .{ test_vector.expected_gas, exec_ctx.gas });
     //     test_passed = false;

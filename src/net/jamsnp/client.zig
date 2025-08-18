@@ -543,18 +543,18 @@ pub const JamSnpClient = struct {
             // Log specific read errors from xev
             span.err("xev UDP read failed: {s}", .{@errorName(read_err)});
             // TODO: Decide if this is fatal. Maybe just log and re-arm?
-            // FIXME: remove this
-            std.debug.panic("onPacketsIn failed with: {s}", .{@errorName(read_err)});
         }
 
-        const bytes_read = try xev_read_result;
+        const bytes_read = xev_read_result catch |err| {
+            span.err("Failed to read bytes: {s}", .{@errorName(err)});
+            return .rearm;
+        };
         if (bytes_read == 0) {
             // Should not happen with UDP? But handle defensively.
             span.warn("Received 0 bytes from UDP read, rearming.", .{});
             return .rearm;
         }
         span.trace("Received {d} bytes from {}", .{ bytes_read, peer_address });
-        // span.trace("Packet data: {any}", .{std.fmt.fmtSliceHexLower(xev_read_buffer.slice[0..bytes_read])});
 
         const self = maybe_self orelse {
             std.debug.panic("onPacketsIn called with null self context!", .{});
