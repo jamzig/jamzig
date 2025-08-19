@@ -102,7 +102,32 @@ pub fn processAccumulationReports(
         },
     );
 
-    // Step 7: Calculate statistics
+    // Step 7: Update theta with accumulation outputs
+    const theta = try stx.ensure(.theta_prime);
+    theta.outputs.clearRetainingCapacity();
+    
+    // Convert ServiceAccumulationOutput to AccumulationOutput and add to theta
+    var iter = execution_result.accumulation_outputs.iterator();
+    while (iter.next()) |entry| {
+        try theta.outputs.append(.{
+            .service_id = entry.key_ptr.service_id,
+            .hash = entry.key_ptr.output,
+        });
+    }
+    
+    // Sort theta outputs by service ID as per graypaper specification
+    std.mem.sort(
+        @import("accumulation_outputs.zig").AccumulationOutput,
+        theta.outputs.items,
+        {},
+        struct {
+            fn lessThan(_: void, a: @import("accumulation_outputs.zig").AccumulationOutput, b: @import("accumulation_outputs.zig").AccumulationOutput) bool {
+                return a.service_id < b.service_id;
+            }
+        }.lessThan,
+    );
+
+    // Step 8: Calculate statistics
     const stats_calculator = StatisticsCalculator(params).init(allocator);
     return try stats_calculator.computeAllStatistics(
         accumulated,
