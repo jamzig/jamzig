@@ -22,6 +22,14 @@ const SKIPPED_TESTS = [_]SkippedTest{
         .id = "1754982087",
         .reason = "Invalid test: service ID generation used LE instead of varint (B.10)",
     },
+    .{
+        .id = "1755530535",
+        .reason = "PolkaJam error: incorrect accumulation handling and gas accounting",
+    },
+    .{
+        .id = "1755531000",
+        .reason = "PolkaJam error: incorrect expectation for invalid host call handling - expects 0 gas but should use gas",
+    },
 };
 
 test "jam-conformance:traces" {
