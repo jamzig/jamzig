@@ -65,7 +65,7 @@ pub const ExecutionContext = struct {
 
     /// Initialize execution context with standard program code format.
     /// This implements the Y function initialization from the JAM specification.
-    /// 
+    ///
     /// @param program_code The program blob containing: E_3(|o|) ∥ E_3(|w|) ∥ E_2(z) ∥ E_3(s) ∥ o ∥ w ∥ E_4(|c|) ∥ c
     /// @param input The argument data (a) passed separately from the program blob, limited to Z_I bytes
     pub fn initStandardProgramCodeFormat(
@@ -377,32 +377,30 @@ pub const ExecutionContext = struct {
     }
 
     /// Read memory with protocol error handling
-    /// Maps memory access errors (PageFault, UnalignedAddress, PageOverlap) to HostCallError.OOB
     pub fn readMemory(self: *ExecutionContext, addr: u32, size: usize) HostCallError!Memory.MemorySlice {
         return self.memory.readSlice(addr, size) catch |err| switch (err) {
-            error.PageFault => return HostCallError.OOB,
+            error.PageFault => return HostCallError.MemoryAccessFault,
             else => {
                 std.log.err("Unexpected memory read error: {}", .{err});
-                return HostCallError.OOB;
+                return HostCallError.MemoryAccessFault;
             },
         };
     }
 
     /// Write memory with protocol error handling
-    /// Maps memory access errors to HostCallError.OOB
     pub fn writeMemory(self: *ExecutionContext, addr: u32, data: []const u8) HostCallError!void {
         self.memory.writeSlice(addr, data) catch |err| switch (err) {
-            error.PageFault => return HostCallError.OOB,
+            error.PageFault => return HostCallError.MemoryAccessFault,
             else => {
                 std.log.err("Unexpected memory write error: {}", .{err});
-                return HostCallError.OOB;
+                return HostCallError.MemoryAccessFault;
             },
         };
     }
 
     /// Read a hash from memory with protocol error handling
     pub fn readHash(self: *ExecutionContext, addr: u32) HostCallError!types.Hash {
-        return self.memory.readHash(addr) catch return HostCallError.OOB;
+        return self.memory.readHash(addr) catch return HostCallError.MemoryAccessFault;
     }
 
     /// Enable or disable dynamic memory allocation

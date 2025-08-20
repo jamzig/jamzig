@@ -94,17 +94,42 @@ pub fn invoke(
     span.debug("Setting up host call functions", .{});
     var host_call_map = try host_calls_map.buildOrGetCached(params, allocator);
     defer host_call_map.deinit(allocator);
-    
-    // Create HostCallsConfig with the default catchall
+
+    // Import host_calls for the wrapper function
     const host_calls = @import("host_calls.zig");
+
+    // Create error handling wrapper for ontransfer context
+    const ontransfer_wrapper = struct {
+        fn wrap(
+            host_call_fn: pvm.PVM.HostCallFn,
+            exec_ctx: *pvm.PVM.ExecutionContext,
+            host_ctx: *anyopaque,
+        ) pvm.PVM.HostCallResult {
+            const result = host_call_fn(exec_ctx, host_ctx) catch |err| switch (err) {
+                error.MemoryAccessFault => {
+                    // Memory faults cause panic per graypaper
+                    return .{ .terminal = .panic };
+                },
+                else => {
+                    // Handle protocol errors by setting register and continuing
+                    exec_ctx.registers[7] = @intFromEnum(host_calls.errorToReturnCode(err));
+
+                    return .play;
+                },
+            };
+            return result;
+        }
+    }.wrap;
+
+    // Create HostCallsConfig with the default catchall and wrapper
     const host_calls_config = pvm.PVM.HostCallsConfig{
         .map = host_call_map,
         .catchall = host_calls.defaultHostCallCatchall,
+        .wrapper = ontransfer_wrapper,
     };
 
     // Initialize host call context
     span.debug("Initializing host call context", .{});
-
 
     // Apply transfer balance to service before execution (as per the graypaper)
     span.debug("Applying transfer balance to service", .{});

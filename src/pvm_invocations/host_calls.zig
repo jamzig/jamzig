@@ -82,6 +82,7 @@ pub const HostCallError = error{
     CASH, // Insufficient funds (maps to ReturnCode.CASH)
     LOW, // Gas limit too low (maps to ReturnCode.LOW)
     HUH, // Already solicited or cannot be forgotten (maps to ReturnCode.HUH)
+    MemoryAccessFault, // Memory access failure that should cause panic
 };
 
 /// Maps a HostCallError to its corresponding ReturnCode value
@@ -96,5 +97,6 @@ pub fn errorToReturnCode(err: HostCallError) ReturnCode {
         HostCallError.CASH => .CASH,
         HostCallError.LOW => .LOW,
         HostCallError.HUH => .HUH,
+        HostCallError.MemoryAccessFault => @panic("MemoryAccessFault should not be returned, it causes panic in the host call wrapper"),
     };
 }

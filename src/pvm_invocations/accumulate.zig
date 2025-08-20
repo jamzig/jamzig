@@ -83,11 +83,35 @@ pub fn invoke(
     var host_call_map = try HostCallMap.buildOrGetCached(params, allocator);
     defer host_call_map.deinit(allocator);
 
-    // Create HostCallsConfig with the default catchall
     const host_calls = @import("host_calls.zig");
+
+    const accumulate_wrapper = struct {
+        fn wrap(
+            host_call_fn: pvm.PVM.HostCallFn,
+            exec_ctx: *pvm.PVM.ExecutionContext,
+            host_ctx: *anyopaque,
+        ) pvm.PVM.HostCallResult {
+            const result = host_call_fn(exec_ctx, host_ctx) catch |err| switch (err) {
+                error.MemoryAccessFault => {
+                    // Memory faults cause panic per graypaper
+                    return .{ .terminal = .panic };
+                },
+                else => {
+                    // Handle protocol errors by setting register and continuing
+                    exec_ctx.registers[7] = @intFromEnum(host_calls.errorToReturnCode(err));
+
+                    return .play;
+                },
+            };
+            return result;
+        }
+    }.wrap;
+
+    // Create HostCallsConfig with the default catchall and wrapper
     const host_calls_config = pvm.PVM.HostCallsConfig{
         .map = host_call_map,
         .catchall = host_calls.defaultHostCallCatchall,
+        .wrapper = accumulate_wrapper,
     };
 
     span.debug("Cloning accumulation context and updating fetch context", .{});

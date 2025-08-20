@@ -2,9 +2,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const trace = @import("tracing.zig").scoped(.pvm);
-const host_calls = @import("pvm_invocations/host_calls.zig");
-const HostCallError = host_calls.HostCallError;
-const errorToReturnCode = host_calls.errorToReturnCode;
 
 pub const invoke = @import("pvm/invocation.zig");
 
@@ -29,6 +26,9 @@ pub const PVM = struct {
         map: HostCallMap,
         /// Optional catchall handler for non-existent host calls
         catchall: ?HostCallFn = null,
+        /// Optional wrapper that intercepts all host calls for error handling
+        /// The wrapper receives additional context for proper error handling
+        wrapper: ?*const fn (HostCallFn, *ExecutionContext, *anyopaque) HostCallResult = null,
     };
 
     // Helper to log memory writes for execution trace
@@ -199,26 +199,29 @@ pub const PVM = struct {
                         const pc_before = context.pc;
                         const registers_before = context.registers;
 
-                        const result = host_call_fn(context, call_ctx) catch |err| {
-                            // Map protocol error to return code and continue
-                            context.registers[7] = @intFromEnum(errorToReturnCode(err));
-
-                            // Log the host call with error result
-                            context.exec_trace.logHostCall(
-                                params.idx,
-                                gas_before,
-                                context.gas,
-                                &registers_before,
-                                &context.registers,
-                                pc_before,
-                                params.next_pc,
-                            );
-
-                            // Update total gas used
-                            context.exec_trace.total_gas_used += gas_before - context.gas;
-                            context.pc = params.next_pc;
-                            return try hostcallInvocation(context, call_ctx);
+                        const result = blk: {
+                            // Use wrapper if configured, otherwise panic on errors
+                            if (host_calls_config.wrapper) |wrapper| {
+                                // Wrapper handles all error processing
+                                break :blk wrapper(host_call_fn, context, call_ctx);
+                            } else {
+                                // No wrapper - any error should panic to decouple PVM from implementation details
+                                break :blk host_call_fn(context, call_ctx) catch {
+                                    return .{ .terminal = .panic };
+                                };
+                            }
                         };
+
+                        // Log the host call with comprehensive information
+                        context.exec_trace.logHostCall(
+                            params.idx,
+                            gas_before,
+                            context.gas,
+                            &registers_before,
+                            &context.registers,
+                            pc_before,
+                            params.next_pc,
+                        );
 
                         switch (result) {
                             .play => {
@@ -226,17 +229,6 @@ pub const PVM = struct {
                                 if (context.gas < 0) {
                                     return .{ .terminal = .out_of_gas };
                                 }
-
-                                // Log the host call with comprehensive information
-                                context.exec_trace.logHostCall(
-                                    params.idx,
-                                    gas_before,
-                                    context.gas,
-                                    &registers_before,
-                                    &context.registers,
-                                    pc_before,
-                                    params.next_pc,
-                                );
 
                                 // Update total gas used
                                 context.exec_trace.total_gas_used += gas_before - context.gas;
