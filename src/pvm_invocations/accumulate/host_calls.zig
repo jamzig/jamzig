@@ -456,8 +456,9 @@ pub fn HostCalls(comptime params: Params) type {
             const gas_limit = exec_ctx.registers[9]; // Gas limit for on_transfer
             const memo_ptr = exec_ctx.registers[10]; // Pointer to memo data
 
-            span.debug("charging 10 gas", .{});
-            exec_ctx.gas -= 10 + @as(i64, @intCast(gas_limit));
+            const gas_costs = 10 + @as(i64, @intCast(gas_limit));
+            span.debug("charging {d} gas", .{gas_costs});
+            exec_ctx.gas -= gas_costs;
 
             span.debug("Host call: transfer from service {d} to {d}", .{
                 ctx_regular.service_id, destination_id,
