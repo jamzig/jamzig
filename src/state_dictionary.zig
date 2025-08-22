@@ -553,7 +553,7 @@ pub fn buildStateMerklizationDictionaryWithConfig(
                 // Base account data
                 const base_key = state_keys.constructServiceBaseKey(service_idx);
                 var base_value = std.ArrayList(u8).init(allocator);
-                try state_encoder.delta.encodeServiceAccountBase(account, base_value.writer());
+                try state_encoder.delta.encodeServiceAccountBase(params, account, base_value.writer());
 
                 try map.put(base_key, .{
                     .key = base_key,
@@ -566,14 +566,14 @@ pub fn buildStateMerklizationDictionaryWithConfig(
                 while (data_iter.next()) |data_entry| {
                     const data_key = data_entry.key_ptr.*; // Already a properly formatted StateKey
                     const data_value = data_entry.value_ptr.*;
-                    
+
                     // Check if we should include this entry based on config
                     // Storage keys always included (when include_storage is true)
                     // Preimage keys included only if include_preimages is true
                     // Preimage lookup keys included only if include_preimages and include_preimage_timestamps are true
-                    
+
                     var should_include = false;
-                    
+
                     // Identify key type by examining the interleaved pattern
                     if (data_key[3] == 255 and data_key[5] == 255 and data_key[7] == 255) {
                         if (data_key[1] == 255) {
@@ -590,7 +590,7 @@ pub fn buildStateMerklizationDictionaryWithConfig(
                         // Other preimage lookup keys
                         should_include = config.include_preimages and config.include_preimage_timestamps;
                     }
-                    
+
                     if (should_include) {
                         try map.put(data_key, .{
                             .key = data_key,

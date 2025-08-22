@@ -31,7 +31,6 @@ pub const WorkItemMetadata = struct {
 
 /// General host calls following the same pattern as accumulate
 pub fn GeneralHostCalls(comptime params: Params) type {
-    _ = params;
     return struct {
         // Removed deprecated InvocationContext
 
@@ -358,6 +357,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             // GRAYPAPER COMPLIANCE: Check balance BEFORE modifying state
             // Analyze the storage write operation - returns all needed info in one call
             const analysis = service_account.analyzeStorageWrite(
+                params,
                 host_ctx.service_id,
                 key_data.buffer,
                 value.buffer.len,
@@ -493,7 +493,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
 
             // Serialize service account info according to the graypaper
             span.debug("Service found, assembling info", .{});
-            const fprint = service_account.?.storageFootprint();
+            const fprint = service_account.?.getStorageFootprint(params);
             const service_info = ServiceInfo{
                 .code_hash = service_account.?.code_hash,
                 .balance = service_account.?.balance,

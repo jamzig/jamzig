@@ -4,14 +4,9 @@ const mem = std.mem;
 
 const types = @import("types.zig");
 const state_keys = @import("state_keys.zig");
+const Params = @import("jam_params.zig").Params;
 
 const Allocator = std.mem.Allocator;
-
-// These constants are related to economic parameters
-// Refer to Section 4.6 "Economics" for details on `BI`, `BL`, `BS`.
-pub const B_S: Balance = 100;
-pub const B_I: Balance = 10;
-pub const B_L: Balance = 1;
 
 pub const Transfer = struct {
     from: ServiceId,
@@ -583,8 +578,7 @@ pub const ServiceAccount = struct {
 
     /// Calculate storage footprint from tracked values
     /// Returns the footprint metrics including the threshold balance
-    /// REFACTOR: we need B_S, B_I and B_L to be passed in as jam_params.Params
-    pub fn getStorageFootprint(self: *const ServiceAccount) StorageFootprint {
+    pub fn getStorageFootprint(self: *const ServiceAccount, params: Params) StorageFootprint {
         // We directly track a_i and a_o
         const a_i = self.footprint_items;
         const a_o = self.footprint_bytes;
@@ -592,21 +586,16 @@ pub const ServiceAccount = struct {
         // Calculate threshold balance a_t
         // Per graypaper: a_t = max(0, B_S + B_I·a_i + B_L·a_o - a_f)
         // Where a_f is the storage_offset (free storage allowance)
-        const base_cost = B_S + B_I * a_i + B_L * a_o;
-        
+        const base_cost = params.basic_service_balance + params.min_balance_per_item * a_i + params.min_balance_per_octet * a_o;
+
         // Subtract free storage allowance if set (a_f > 0), otherwise use base cost
         // storage_offset == 0 means no free storage, storage_offset > 0 means free storage granted
         const a_t: Balance = if (self.storage_offset > 0)
-            base_cost -| self.storage_offset  // Saturating subtraction ensures max(0, ...)
+            base_cost -| self.storage_offset // Saturating subtraction ensures max(0, ...)
         else
             base_cost;
 
         return .{ .a_i = a_i, .a_o = a_o, .a_t = a_t };
-    }
-
-    /// Compatibility wrapper - calls getStorageFootprint
-    pub fn storageFootprint(self: *const ServiceAccount) StorageFootprint {
-        return self.getStorageFootprint();
     }
 
     /// Analyze a potential storage write operation
@@ -614,6 +603,7 @@ pub const ServiceAccount = struct {
     /// StorageWriteAnalysis does not own any data.
     pub fn analyzeStorageWrite(
         self: *const ServiceAccount,
+        params: Params,
         service_id: u32,
         key: []const u8,
         new_value_len: usize,
@@ -636,9 +626,9 @@ pub const ServiceAccount = struct {
 
         // Calculate threshold balance with potential new values
         // Per graypaper: a_t = max(0, B_S + B_I·a_i + B_L·a_o - a_f)
-        const base_cost = B_S + B_I * new_a_i + B_L * new_a_o;
+        const base_cost = params.basic_service_balance + params.min_balance_per_item * new_a_i + params.min_balance_per_octet * new_a_o;
         const new_a_t: Balance = if (self.storage_offset > 0)
-            base_cost -| self.storage_offset  // Saturating subtraction ensures max(0, ...)
+            base_cost -| self.storage_offset // Saturating subtraction ensures max(0, ...)
         else
             base_cost;
 
@@ -659,11 +649,12 @@ pub const ServiceAccount = struct {
     /// (Kept for backward compatibility, but analyzeStorageWrite is preferred)
     pub fn calculateStorageFootprintAfterWrite(
         self: *const ServiceAccount,
+        params: Params,
         service_id: u32,
         key: []const u8,
         new_value_len: usize,
     ) StorageFootprint {
-        const analysis = self.analyzeStorageWrite(service_id, key, new_value_len);
+        const analysis = self.analyzeStorageWrite(params, service_id, key, new_value_len);
         return analysis.new_footprint;
     }
 
@@ -671,6 +662,7 @@ pub const ServiceAccount = struct {
     /// Returns null if key doesn't exist (can't remove non-existent key)
     pub fn calculateStorageFootprintAfterRemoval(
         self: *const ServiceAccount,
+        params: Params,
         service_id: u32,
         key: []const u8,
     ) ?StorageFootprint {
@@ -683,9 +675,9 @@ pub const ServiceAccount = struct {
 
         // Calculate threshold balance with potential new values
         // Per graypaper: a_t = max(0, B_S + B_I·a_i + B_L·a_o - a_f)
-        const base_cost = B_S + B_I * new_a_i + B_L * new_a_o;
+        const base_cost = params.basic_service_balance + params.min_balance_per_item * new_a_i + params.min_balance_per_octet * new_a_o;
         const new_a_t: Balance = if (self.storage_offset > 0)
-            base_cost -| self.storage_offset  // Saturating subtraction ensures max(0, ...)
+            base_cost -| self.storage_offset // Saturating subtraction ensures max(0, ...)
         else
             base_cost;
 
@@ -696,11 +688,12 @@ pub const ServiceAccount = struct {
     /// Returns true if the operation is affordable, false otherwise
     pub fn canAffordStorageWrite(
         self: *const ServiceAccount,
+        params: Params,
         service_id: u32,
         key: []const u8,
         new_value_len: usize,
     ) bool {
-        const new_footprint = self.calculateStorageFootprintAfterWrite(service_id, key, new_value_len);
+        const new_footprint = self.calculateStorageFootprintAfterWrite(params, service_id, key, new_value_len);
         return new_footprint.a_t <= self.balance;
     }
 
@@ -709,10 +702,11 @@ pub const ServiceAccount = struct {
     /// Returns false if key doesn't exist
     pub fn canAffordStorageRemoval(
         self: *const ServiceAccount,
+        params: Params,
         service_id: u32,
         key: []const u8,
     ) bool {
-        const new_footprint = self.calculateStorageFootprintAfterRemoval(service_id, key) orelse return false;
+        const new_footprint = self.calculateStorageFootprintAfterRemoval(params, service_id, key) orelse return false;
         // Removal reduces storage, so should always be affordable
         // But we check anyway for consistency
         return new_footprint.a_t <= self.balance;

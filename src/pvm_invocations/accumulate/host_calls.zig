@@ -747,8 +747,8 @@ pub fn HostCalls(comptime params: Params) type {
                 return .{ .terminal = .panic };
             };
 
-            // Now calculate the actual threshold balance using storageFootprint
-            const footprint = new_account.storageFootprint();
+            // Now calculate the actual threshold balance using getStorageFootprint
+            const footprint = new_account.getStorageFootprint(params);
             const initial_balance = footprint.a_t;
 
             span.debug("Footprint: items={d}, bytes={d}, threshold={d}", .{
@@ -840,7 +840,7 @@ pub fn HostCalls(comptime params: Params) type {
 
             // Per graypaper, check if the lookup status has a valid record
             // First determine the length
-            const footprint = target_service.storageFootprint();
+            const footprint = target_service.getStorageFootprint(params);
             const l = @max(81, footprint.a_o) - 81;
             const lookup_status = target_service.getPreimageLookup(@intCast(target_service_id), hash, @intCast(l)) orelse {
                 span.debug("Hash lookup not found, returning HUH error", .{});
@@ -1039,7 +1039,7 @@ pub fn HostCalls(comptime params: Params) type {
 
             // Check if service has enough balance to store this data
             span.debug("Checking if service has enough balance to store preimage", .{});
-            const footprint = service_account.storageFootprint();
+            const footprint = service_account.getStorageFootprint(params);
             const additional_balance_needed = params.min_balance_per_item +
                 params.min_balance_per_octet * additional_storage_size;
 

@@ -4,12 +4,13 @@ const types = @import("../types.zig");
 const services = @import("../services.zig");
 const ServiceAccount = services.ServiceAccount;
 const PreimageLookup = services.PreimageLookup;
+const Params = @import("../jam_params.zig").Params;
 // PreimageLookupKey removed - using types.StateKey directly
 
 const trace = @import("../tracing.zig").scoped(.codec);
 
 /// Encodes base service account data: C(255, s) ↦ a_c ⌢ E_8(a_b, a_g, a_m, a_l) ⌢ E_4(a_i)
-pub fn encodeServiceAccountBase(account: *const ServiceAccount, writer: anytype) !void {
+pub fn encodeServiceAccountBase(params: Params, account: *const ServiceAccount, writer: anytype) !void {
     const span = trace.span(.encode_service_account_base);
     defer span.deinit();
     span.debug("Starting service account base encoding", .{});
@@ -27,7 +28,7 @@ pub fn encodeServiceAccountBase(account: *const ServiceAccount, writer: anytype)
     try writer.writeInt(u64, account.min_gas_on_transfer, .little); // a_m
 
     // Calculate a_o and a_i from tracked values
-    const footprint = account.getStorageFootprint();
+    const footprint = account.getStorageFootprint(params);
     span.trace("Writing storage length (a_o): {d}", .{footprint.a_o});
     try writer.writeInt(u64, footprint.a_o, .little); // a_o
     //
