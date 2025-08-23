@@ -17,6 +17,12 @@ test "pvm:jamduna_service_code:machine_invocation" {
 
     var map = pvmlib.PVM.HostCallMap{};
     defer map.deinit(allocator);
+    
+    // Create HostCallsConfig with empty map and no catchall
+    const host_calls_config = pvmlib.PVM.HostCallsConfig{
+        .map = map,
+        .catchall = null,
+    };
 
     var ctx = .{ .empty = true };
 
@@ -26,7 +32,7 @@ test "pvm:jamduna_service_code:machine_invocation" {
         5,
         std.math.maxInt(u32),
         &[_]u8{0} ** 20,
-        &map,
+        &host_calls_config,
         @ptrCast(&ctx),
     );
     defer result.deinit(allocator);

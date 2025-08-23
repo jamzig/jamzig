@@ -59,7 +59,7 @@ pub fn StateTransition(comptime params: Params) type {
             };
         }
 
-        pub fn initHeap(
+        pub fn create(
             allocator: std.mem.Allocator,
             base_state: *const state.JamState(params),
             transition_time: params.Time(),
@@ -224,9 +224,10 @@ pub fn StateTransition(comptime params: Params) type {
             self.* = undefined;
         }
 
-        pub fn deinitHeap(self: *Self) void {
+        pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             self.prime.deinit(self.allocator);
-            self.allocator.destroy(self);
+            self.* = undefined;
+            allocator.destroy(self);
         }
 
         /// Creates a view struct containing *const pointers to the latest version of each field

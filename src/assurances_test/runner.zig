@@ -20,6 +20,7 @@ pub fn validateAndProcessAssuranceExtrinsic(
         test_case.input.assurances,
         test_case.input.parent,
         kappa,
+        rho,
     );
 
     // Process the validated extrinsic
@@ -80,7 +81,7 @@ pub fn runAssuranceTest(comptime params: Params, allocator: std.mem.Allocator, t
                 const mapped_expected_error = switch (expected_error) {
                     .bad_attestation_parent => error.InvalidAnchorHash,
                     .bad_validator_index => error.InvalidValidatorIndex,
-                    .core_not_engaged => error.CoreNotEngaged,
+                    .core_not_engaged => error.BitSetForEmptyCore,
                     .bad_signature => error.InvalidSignature,
                     .not_sorted_or_unique_assurers => error.NotSortedOrUniqueValidatorIndex,
                 };

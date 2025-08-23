@@ -42,18 +42,16 @@ const AccumulateArgs = struct {
 pub fn invoke(
     comptime params: Params,
     allocator: std.mem.Allocator,
-    context: *const AccumulationContext(params),
-    tau: types.TimeSlot,
-    entropy: types.Entropy, // n0
+    context: AccumulationContext(params),
     service_id: types.ServiceId,
     gas_limit: types.Gas,
     accumulation_operands: []const AccumulationOperand, // O
-) !AccumulationResult {
+) !AccumulationResult(params) {
     const span = trace.span(.invoke);
     defer span.deinit();
     span.debug("Starting accumulation invocation for service {d}", .{service_id});
-    span.debug("Time slot: {d}, Gas limit: {d}, Operand count: {d}", .{ tau, gas_limit, accumulation_operands.len });
-    span.trace("Entropy: {s}", .{std.fmt.fmtSliceHexLower(&entropy)});
+    span.debug("Time slot: {d}, Gas limit: {d}, Operand count: {d}", .{ context.time.current_slot, gas_limit, accumulation_operands.len });
+    span.trace("Entropy: {s}", .{std.fmt.fmtSliceHexLower(&context.entropy)});
 
     // Look up the service account
     const service_account = context.service_accounts.getReadOnly(service_id) orelse {
@@ -69,7 +67,7 @@ pub fn invoke(
     defer args_buffer.deinit();
 
     const arguments = AccumulateArgs{
-        .timeslot = tau,
+        .timeslot = context.time.current_slot,
         .service_id = service_id,
         .operand_count = @intCast(accumulation_operands.len), // Just the count!
     };
@@ -85,6 +83,37 @@ pub fn invoke(
     var host_call_map = try HostCallMap.buildOrGetCached(params, allocator);
     defer host_call_map.deinit(allocator);
 
+    const host_calls = @import("host_calls.zig");
+
+    const accumulate_wrapper = struct {
+        fn wrap(
+            host_call_fn: pvm.PVM.HostCallFn,
+            exec_ctx: *pvm.PVM.ExecutionContext,
+            host_ctx: *anyopaque,
+        ) pvm.PVM.HostCallResult {
+            const result = host_call_fn(exec_ctx, host_ctx) catch |err| switch (err) {
+                error.MemoryAccessFault => {
+                    // Memory faults cause panic per graypaper
+                    return .{ .terminal = .panic };
+                },
+                else => {
+                    // Handle protocol errors by setting register and continuing
+                    exec_ctx.registers[7] = @intFromEnum(host_calls.errorToReturnCode(err));
+
+                    return .play;
+                },
+            };
+            return result;
+        }
+    }.wrap;
+
+    // Create HostCallsConfig with the default catchall and wrapper
+    const host_calls_config = pvm.PVM.HostCallsConfig{
+        .map = host_call_map,
+        .catchall = host_calls.defaultHostCallCatchall,
+        .wrapper = accumulate_wrapper,
+    };
+
     span.debug("Cloning accumulation context and updating fetch context", .{});
 
     // Initialize host call context B.6
@@ -92,12 +121,13 @@ pub fn invoke(
     var host_call_context = try AccumulateHostCalls(params).Context.constructUsingRegular(.{
         .allocator = allocator,
         .service_id = service_id,
-        // TODO: check if we cannot just feed the reference here
-        .context = try context.deepClone(),
-        .new_service_id = service_util.generateServiceId(&context.service_accounts, service_id, entropy, tau),
+        // Clone the context for this invocation to ensure isolation
+        .context = context,
+        .new_service_id = service_util.generateServiceId(&context.service_accounts, service_id, context.entropy, context.time.current_slot),
         .deferred_transfers = std.ArrayList(DeferredTransfer).init(allocator),
         .accumulation_output = null,
         .operands = accumulation_operands,
+        .provided_preimages = std.AutoHashMap(AccumulateHostCalls(params).ProvidedKey, []const u8).init(allocator),
     });
     defer host_call_context.deinit();
     span.debug("Generated new service ID: {d}", .{host_call_context.regular.new_service_id});
@@ -111,7 +141,7 @@ pub fn invoke(
     const code_key = state_keys.constructServicePreimageKey(service_id, service_account.code_hash);
     const code_preimage = service_account.getPreimage(code_key) orelse {
         span.err("Service code not available for hash: {s}", .{std.fmt.fmtSliceHexLower(&service_account.code_hash)});
-        return AccumulationResult.Empty;
+        return try AccumulationResult(params).createEmpty(allocator, context, service_id);
     };
 
     // Now this has some metadata attached to it
@@ -161,14 +191,48 @@ pub fn invoke(
         5, // Accumulation entry point index per section 9.1
         @intCast(gas_limit),
         args_buffer.items,
-        &host_call_map,
+        &host_calls_config,
         @ptrCast(&host_call_context),
     );
     defer result.deinit(allocator);
 
     pvm_span.debug("PVM invocation completed: {s}", .{@tagName(result.result)});
 
-    // B12. Based on result we collapse to either the regular domain or the exceptional domain
+    // IMPORTANT: Understanding the collapsed dimension and why we still process transfers/preimages:
+    //
+    // The PVM execution maintains two context dimensions:
+    // 1. Regular dimension (x): Contains all state changes from the execution
+    // 2. Exceptional dimension (y): Contains the checkpoint/rollback state
+    //
+    // The checkpoint hostcall (Ω_C) copies regular → exceptional, creating a savepoint.
+    //
+    // After PVM execution, we collapse to one dimension based on success/failure:
+    // - SUCCESS: Use regular dimension (all changes preserved)
+    // - FAILURE: Use exceptional dimension (rollback to checkpoint or initial state)
+    //
+    // The collapsed dimension may contain valid transfers and preimages in THREE scenarios:
+    //
+    // 1. SUCCESSFUL EXECUTION:
+    //    - collapsed_dimension = regular
+    //    - Contains all transfers and preimages from the entire execution
+    //    - Everything should be applied
+    //
+    // 2. FAILED EXECUTION WITHOUT CHECKPOINT:
+    //    - collapsed_dimension = exceptional (initial state)
+    //    - Contains no transfers or preimages (empty initial state)
+    //    - Nothing to apply (correct behavior - full rollback)
+    //
+    // 3. FAILED EXECUTION WITH CHECKPOINT:
+    //    - collapsed_dimension = exceptional (checkpoint state)
+    //    - Contains transfers and preimages from BEFORE the checkpoint
+    //    - These should still be applied (partial commit up to checkpoint)
+    //
+    // This design allows services to checkpoint successful work before attempting
+    // risky operations. If the risky operations fail, the work before the checkpoint
+    // is still preserved and applied.
+    //
+    // Therefore, we ALWAYS extract transfers and apply preimages from the collapsed
+    // dimension, regardless of whether the execution succeeded or failed.
     var collapsed_dimension = if (result.result.isSuccess())
         &host_call_context.regular
     else
@@ -179,6 +243,8 @@ pub fn invoke(
     span.debug("Gas used for invocation: {d}", .{gas_used});
 
     // Build the result array of deferred transfers
+    // Note: toOwnedSlice() removes items from the ArrayList, but these transfers
+    // will be applied later in the accumulation pipeline
     const transfers = try collapsed_dimension.deferred_transfers.toOwnedSlice();
     span.debug("Number of deferred transfers created: {d}", .{transfers.len});
 
@@ -203,32 +269,14 @@ pub fn invoke(
         else => null,
     };
 
-    if (accumulation_output) |output| {
-        span.debug("Accumulation output present: {s}", .{std.fmt.fmtSliceHexLower(&output)});
-
-        // Add the accumulation output to the outputs list for future services to access via fetch selector 17
-        //
-        // JAM graypaper §1.7.2 specifies that fetch selector 17 returns "The sequence of 32-byte
-        // accumulation outputs made available in the current block." This enables services to
-        // access results from previously executed accumulation invocations within the same block,
-        // allowing for cross-service communication and coordination.
-        //
-        // The outputs are accumulated in order of service execution, providing a chronological
-        // record of accumulation results that can be used by subsequent services for decision making.
-        try collapsed_dimension.context.outputs.append(output);
-        span.debug("Added accumulation output to context outputs list (total: {d})", .{collapsed_dimension.context.outputs.items.len});
-    } else {
-        span.debug("No accumulation output produced", .{});
-    }
-
-    // Commit our changes of the collapsed dimension to the state
-    try collapsed_dimension.commit();
-
+    // Return the collapsed dimension to the caller, who will apply preimages and commit changes
+    // at the appropriate level after all services have been processed
     span.debug("Accumulation invocation completed", .{});
-    return AccumulationResult{
+    return AccumulationResult(params){
         .transfers = transfers,
         .accumulation_output = accumulation_output,
         .gas_used = gas_used,
+        .collapsed_dimension = try collapsed_dimension.deepCloneHeap(),
     };
 }
 
@@ -466,30 +514,57 @@ test "AccumulationOperand.Output encode/decode" {
 }
 
 /// Return type for the accumulation invoke function,
-pub const AccumulationResult = struct {
-    /// Sequence of deferred transfers resulting from accumulation
-    transfers: []DeferredTransfer,
+/// Parameterized to allow proper typing of the collapsed dimension
+pub fn AccumulationResult(comptime params: Params) type {
+    return struct {
+        /// Sequence of deferred transfers resulting from accumulation
+        transfers: []DeferredTransfer,
 
-    /// Optional accumulation output hash (null if no output was produced)
-    accumulation_output: ?types.AccumulateOutput,
+        /// Optional accumulation output hash (null if no output was produced)
+        accumulation_output: ?types.AccumulateOutput,
 
-    /// Amount of gas consumed during accumulation
-    gas_used: types.Gas,
+        /// Amount of gas consumed during accumulation
+        gas_used: types.Gas,
 
-    pub const Empty = @This(){
-        .transfers = &[_]DeferredTransfer{},
-        .accumulation_output = null,
-        .gas_used = 0,
+        /// The collapsed dimension containing all state changes from accumulation
+        /// This allows the caller to apply preimages and commit changes at the appropriate level
+        collapsed_dimension: *AccumulateHostCalls(params).Dimension,
+
+        /// Create an empty result with a valid dimension
+        /// The caller must provide an allocator and context reference
+        pub fn createEmpty(allocator: std.mem.Allocator, context: AccumulationContext(params), service_id: types.ServiceId) !@This() {
+            const dimension = try allocator.create(AccumulateHostCalls(params).Dimension);
+            dimension.* = .{
+                .allocator = allocator,
+                .context = context,
+                .service_id = service_id,
+                .new_service_id = service_id, // No new service generated for empty result
+                .deferred_transfers = std.ArrayList(DeferredTransfer).init(allocator),
+                .accumulation_output = null,
+                .operands = &[_]@import("accumulate.zig").AccumulationOperand{},
+                .provided_preimages = std.AutoHashMap(AccumulateHostCalls(params).ProvidedKey, []const u8).init(allocator),
+            };
+
+            return @This(){
+                .transfers = &[_]DeferredTransfer{},
+                .accumulation_output = null,
+                .gas_used = 0,
+                .collapsed_dimension = dimension,
+            };
+        }
+
+        pub fn takeTransfers(self: *@This()) []DeferredTransfer {
+            const result = self.transfers;
+            self.transfers = &[_]DeferredTransfer{};
+            return result;
+        }
+
+        pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+            alloc.free(self.transfers);
+            // Now we own the dimension and must clean it up
+            self.collapsed_dimension.deinit();
+            alloc.destroy(self.collapsed_dimension);
+            self.* = undefined;
+        }
     };
-
-    pub fn takeTransfers(self: *@This()) []DeferredTransfer {
-        const result = self.transfers;
-        self.transfers = &[_]DeferredTransfer{};
-        return result;
-    }
-
-    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
-        alloc.free(self.transfers);
-        self.* = undefined;
-    }
-};
+}

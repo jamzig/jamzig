@@ -18,6 +18,8 @@ pub fn buildValidatorStatsInput(test_case: *const tvector.TestCase) stats.Valida
         .assurances = &[_]types.AvailAssurance{}, // Empty as test vectors don't include assurances
         .tickets_count = 0, // No tickets in the test vector
         .preimages = &[_]types.Preimage{}, // No preimages in the test vector
+        .guarantor_validators = &[_]types.ValidatorIndex{}, // Empty for test vectors
+        .assurance_validators = &[_]types.ValidatorIndex{}, // Empty for test vectors
     };
 }
 
@@ -53,13 +55,23 @@ pub fn validateAndProcessGuaranteeExtrinsic(
     );
 
     // Process the statistics
-    try stats.transition(
+    var empty_accumulate_stats = std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.AccumulationServiceStats).init(allocator);
+    defer empty_accumulate_stats.deinit();
+    var empty_transfer_stats = std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.TransferServiceStats).init(allocator);
+    defer empty_transfer_stats.deinit();
+    
+    const accumulate_result = @import("../accumulate.zig").ProcessAccumulationResult{
+        .accumulate_root = [_]u8{0} ** 32,
+        .accumulation_stats = empty_accumulate_stats,
+        .transfer_stats = empty_transfer_stats,
+    };
+    
+    try stats.transitionWithInput(
         params,
         &stx,
         buildValidatorStatsInput(test_case),
+        &accumulate_result,
         &[_]types.WorkReport{}, // No ready reports in the test
-        &std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.AccumulationServiceStats).init(allocator),
-        &std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.TransferServiceStats).init(allocator),
     );
 
     // Merge the prime onto base
@@ -120,6 +132,7 @@ pub fn runReportTest(comptime params: Params, allocator: std.mem.Allocator, test
                     .segment_root_lookup_invalid => error.SegmentRootLookupInvalid,
                     .bad_signature => error.BadSignature,
                     .work_report_too_big => error.WorkReportTooBig,
+                    .banned_validators => error.BannedValidators,
                 };
                 if (mapped_expected_error != actual_error) {
                     std.debug.print("\nExpected error: {any} => {any} got error {any}\n", .{ expected_error, mapped_expected_error, actual_error });

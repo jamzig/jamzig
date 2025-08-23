@@ -43,14 +43,14 @@ pub fn processAccumulationReports(
 
     // Initialize state components
     const xi = try stx.ensure(.xi_prime);
-    const theta = try stx.ensure(.theta_prime);
+    const vartheta = try stx.ensure(.vartheta_prime);
     const chi = try stx.ensure(.chi_prime);
 
     // Step 1: Resolve dependencies and prepare reports
     const resolver = DependencyResolver(params).init(allocator);
     var prepared = try resolver.prepareReportsForAccumulation(
         xi,
-        theta,
+        vartheta,
         reports,
         stx.time.current_slot_in_epoch,
     );
@@ -70,7 +70,6 @@ pub fn processAccumulationReports(
         params,
         allocator,
         stx,
-        chi,
         accumulatable,
         gas_limit,
     );
@@ -82,7 +81,7 @@ pub fn processAccumulationReports(
     const transfer_executor = TransferExecutor(params).init(allocator);
     const transfer_stats = try transfer_executor.applyDeferredTransfers(
         stx,
-        execution_result.transfers,
+        execution_result.deferred_transfers,
     );
 
     // Step 5: Update history
@@ -92,7 +91,7 @@ pub fn processAccumulationReports(
     // Step 6: Update state
     const state_updater = StateUpdater(params).init(allocator);
     try state_updater.updateThetaState(
-        theta,
+        vartheta,
         &prepared.queued,
         accumulated,
         &prepared.map_buffer,
@@ -103,7 +102,14 @@ pub fn processAccumulationReports(
         },
     );
 
-    // Step 7: Calculate statistics
+    // Step 7: Update theta with accumulation outputs
+    const theta = try stx.ensure(.theta_prime);
+    try state_updater.updateAccumulationOutputs(
+        theta,
+        execution_result.accumulation_outputs,
+    );
+
+    // Step 8: Calculate statistics
     const stats_calculator = StatisticsCalculator(params).init(allocator);
     return try stats_calculator.computeAllStatistics(
         accumulated,

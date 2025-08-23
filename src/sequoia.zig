@@ -560,7 +560,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn prepareTicketsMark(self: *const Self) !?types.TicketsMark {
-            if (self.block_time.didCrossTicketSubmissionEnd() and
+            if (self.block_time.didCrossTicketSubmissionEndInSameEpoch() and
                 self.state.gamma.?.a.len == params.epoch_length)
             {
                 return .{ .tickets = try safrole.ordering.outsideInOrdering(types.TicketBody, self.allocator, self.state.gamma.?.a) };

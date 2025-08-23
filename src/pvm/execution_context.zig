@@ -2,6 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const codec = @import("../codec.zig");
+const types = @import("../types.zig");
+const HostCallError = @import("../pvm_invocations/host_calls.zig").HostCallError;
 
 const Program = @import("program.zig").Program;
 const Decoder = @import("decoder.zig").Decoder;
@@ -15,8 +17,8 @@ pub const ExecutionContext = struct {
     decoder: Decoder,
     registers: [13]u64,
     memory: Memory,
-    // NOTE: we cannot use HostCallMap here due to circular dep
-    host_calls: ?*const std.AutoHashMapUnmanaged(u32, *const fn (*ExecutionContext, *anyopaque) HostCallResult),
+    // NOTE: we cannot use HostCallsConfig directly here due to circular dep, but we can use a forward declaration
+    host_calls: ?*const anyopaque, // Will be cast to *const PVM.HostCallsConfig when used
 
     gas: i64,
     pc: u32,
@@ -27,7 +29,7 @@ pub const ExecutionContext = struct {
         play,
         terminal: @import("../pvm.zig").PVM.InvocationException,
     };
-    pub const HostCallFn = *const fn (*ExecutionContext, *anyopaque) HostCallResult;
+    pub const HostCallFn = *const fn (*ExecutionContext, *anyopaque) HostCallError!HostCallResult;
     pub const HostCallMap = std.AutoHashMapUnmanaged(u32, HostCallFn);
 
     pub const ErrorData = union(enum) {
@@ -63,7 +65,7 @@ pub const ExecutionContext = struct {
 
     /// Initialize execution context with standard program code format.
     /// This implements the Y function initialization from the JAM specification.
-    /// 
+    ///
     /// @param program_code The program blob containing: E_3(|o|) ∥ E_3(|w|) ∥ E_2(z) ∥ E_3(s) ∥ o ∥ w ∥ E_4(|c|) ∥ c
     /// @param input The argument data (a) passed separately from the program blob, limited to Z_I bytes
     pub fn initStandardProgramCodeFormat(
@@ -363,15 +365,42 @@ pub const ExecutionContext = struct {
         self.* = undefined;
     }
 
-    pub fn setHostCalls(self: *ExecutionContext, new_host_calls: *const HostCallMap) void {
+    pub fn setHostCalls(self: *ExecutionContext, new_host_calls: *const anyopaque) void {
         const span = trace.span(.set_host_calls);
         defer span.deinit();
         span.debug("Setting host calls", .{});
 
-        // Replace with the new one
+        // Replace with the new one (will be cast to HostCallsConfig when used)
         self.host_calls = new_host_calls;
 
         span.debug("Host calls set successfully", .{});
+    }
+
+    /// Read memory with protocol error handling
+    pub fn readMemory(self: *ExecutionContext, addr: u32, size: usize) HostCallError!Memory.MemorySlice {
+        return self.memory.readSlice(addr, size) catch |err| switch (err) {
+            error.PageFault => return HostCallError.MemoryAccessFault,
+            else => {
+                std.log.err("Unexpected memory read error: {}", .{err});
+                return HostCallError.MemoryAccessFault;
+            },
+        };
+    }
+
+    /// Write memory with protocol error handling
+    pub fn writeMemory(self: *ExecutionContext, addr: u32, data: []const u8) HostCallError!void {
+        self.memory.writeSlice(addr, data) catch |err| switch (err) {
+            error.PageFault => return HostCallError.MemoryAccessFault,
+            else => {
+                std.log.err("Unexpected memory write error: {}", .{err});
+                return HostCallError.MemoryAccessFault;
+            },
+        };
+    }
+
+    /// Read a hash from memory with protocol error handling
+    pub fn readHash(self: *ExecutionContext, addr: u32) HostCallError!types.Hash {
+        return self.memory.readHash(addr) catch return HostCallError.MemoryAccessFault;
     }
 
     /// Enable or disable dynamic memory allocation

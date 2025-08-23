@@ -30,7 +30,8 @@ pub const JumpTable = struct {
     }
 
     pub inline fn getDestination(self: *const JumpTable, index: usize) u32 {
-        return self.indices[index % self.indices.len]; // FIXME: error checking
+        std.debug.assert(index < self.indices.len); // Bounds check - caller must ensure valid index
+        return self.indices[index];
     }
 
     pub inline fn len(self: *const JumpTable) usize {

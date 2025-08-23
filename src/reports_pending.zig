@@ -145,7 +145,7 @@ pub fn Rho(comptime core_count: u16) type {
             return self.reports[core];
         }
 
-        pub fn getReportOwned(self: *const @This(), allocator: std.mem.Allocator, core: usize) !?RhoEntry {
+        pub fn getReportCloned(self: *const @This(), allocator: std.mem.Allocator, core: usize) !?RhoEntry {
             const span = trace.span(.get_report_owned);
             defer span.deinit();
             span.debug("Getting owned (deep clone) report for core {d}", .{core});
@@ -177,7 +177,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         /// takes a report out of the core leaving the core empty
-        pub fn takeReportOwned(self: *@This(), core: usize) ?RhoEntry {
+        pub fn takeReport(self: *@This(), core: usize) ?RhoEntry {
             const span = trace.span(.take_report);
             defer span.deinit();
             span.debug("Taking ownership of report for core {d}", .{core});

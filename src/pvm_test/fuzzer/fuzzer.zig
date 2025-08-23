@@ -360,13 +360,21 @@ pub const PVMFuzzer = struct {
         // Register host call handler
         var host_calls_map = std.AutoHashMapUnmanaged(u32, PVM.HostCallFn){};
         defer host_calls_map.deinit(self.allocator);
+        const HostCallError = @import("../../pvm_invocations/host_calls.zig").HostCallError;
         try host_calls_map.put(self.allocator, 0, struct {
-            pub fn func(ctx: *PVM.ExecutionContext, _: *anyopaque) PVM.HostCallResult {
+            pub fn func(ctx: *PVM.ExecutionContext, _: *anyopaque) HostCallError!PVM.HostCallResult {
                 _ = ctx;
                 return .play;
             }
         }.func);
-        exec_ctx.setHostCalls(&host_calls_map);
+
+        // Create HostCallsConfig with the map and default catchall
+        const host_calls = @import("../../pvm_invocations/host_calls.zig");
+        const host_calls_config = PVM.HostCallsConfig{
+            .map = host_calls_map,
+            .catchall = host_calls.defaultHostCallCatchall,
+        };
+        exec_ctx.setHostCalls(@ptrCast(&host_calls_config));
 
         // Limit PVM allocations
         exec_ctx.memory.heap_allocation_limit = 8;
@@ -509,7 +517,10 @@ pub const PVMFuzzer = struct {
             switch (step_result) {
                 .cont => continue,
                 .host_call => |host| {
-                    const handler = exec_ctx.host_calls.?.get(host.idx) orelse
+                    // Cast to HostCallsConfig and get handler
+                    const config = @as(*const PVM.HostCallsConfig, @ptrCast(@alignCast(exec_ctx.host_calls.?)));
+                    const handler = config.map.get(host.idx) orelse
+                        config.catchall orelse
                         return FuzzResult{
                             .seed = seed,
                             .status = .{ .terminal = .panic },
@@ -520,7 +531,13 @@ pub const PVMFuzzer = struct {
 
                     // Execute host call
                     const dummy_ctx = struct {};
-                    const result = handler(&exec_ctx, @ptrCast(@constCast(&dummy_ctx)));
+                    const result = handler(&exec_ctx, @ptrCast(@constCast(&dummy_ctx))) catch |err| {
+                        // Map error to return code as the PVM does
+                        const errorToReturnCode = @import("../../pvm_invocations/host_calls.zig").errorToReturnCode;
+                        exec_ctx.registers[7] = @intFromEnum(errorToReturnCode(err));
+                        exec_ctx.pc = host.next_pc;
+                        continue;
+                    };
                     switch (result) {
                         .play => {
                             exec_ctx.pc = host.next_pc;

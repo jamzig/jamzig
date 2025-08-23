@@ -118,7 +118,6 @@ pub const ValidatorData = struct {
     ed25519: Ed25519Public,
     bls: BlsPublic,
     metadata: ValidatorMetadata,
-
 };
 
 pub const WorkItem = struct {
@@ -360,7 +359,7 @@ pub const AvailabilityAssignment = struct {
     timeout: U32,
 
     pub fn isTimedOut(self: @This(), work_replacement_period: u8, timeslot: TimeSlot) bool {
-        return self.timeout + work_replacement_period <= timeslot;
+        return timeslot >= self.timeout + work_replacement_period;
     }
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
@@ -616,6 +615,10 @@ pub const ValidatorSet = struct {
         Ed25519Public,
     };
 
+    pub fn validators_size(params: jam_params.Params) usize {
+        return params.validators_count;
+    }
+
     /// Find the index of a validator by their public key
     /// key_type must be "bls", "bandersnatch", or "edwards"
     /// Returns error.ValidatorNotFound if the key doesn't match any validator
@@ -635,9 +638,19 @@ pub const ValidatorSet = struct {
         }
         return error.ValidatorNotFound;
     }
-
-    pub fn validators_size(params: jam_params.Params) usize {
-        return params.validators_count;
+    
+    /// Find indices of multiple validators by their public keys
+    /// Returns an allocated slice of validator indices
+    /// Caller must free the returned slice
+    pub fn findValidatorIndices(self: ValidatorSet, allocator: std.mem.Allocator, comptime key_type: KeyType, keys: anytype) ![]ValidatorIndex {
+        var indices = try allocator.alloc(ValidatorIndex, keys.len);
+        errdefer allocator.free(indices);
+        
+        for (keys, 0..) |key, i| {
+            indices[i] = try self.findValidatorIndex(key_type, key);
+        }
+        
+        return indices;
     }
 
     pub fn init(allocator: std.mem.Allocator, validators_count: u32) !@This() {
@@ -1075,12 +1088,19 @@ pub const AssurancesExtrinsic = struct {
 
     pub fn deepClone(self: @This(), allocator: std.mem.Allocator) !@This() {
         var cloned_data = try allocator.alloc(AvailAssurance, self.data.len);
-        // FIXME: in case of error below we need to run through and dealloc each allocated
-        // item
         errdefer allocator.free(cloned_data);
 
-        for (self.data, 0..) |assurance, i| {
-            cloned_data[i] = try assurance.deepClone(allocator);
+        var cloned_count: usize = 0;
+        errdefer {
+            // Clean up any successfully cloned items
+            for (cloned_data[0..cloned_count]) |*item| {
+                item.deinit(allocator);
+            }
+        }
+
+        for (self.data) |assurance| {
+            cloned_data[cloned_count] = try assurance.deepClone(allocator);
+            cloned_count += 1;
         }
 
         return @This(){
@@ -1130,9 +1150,17 @@ pub const GuaranteesExtrinsic = struct {
         var cloned_data = try allocator.alloc(ReportGuarantee, self.data.len);
         errdefer allocator.free(cloned_data);
 
-        for (self.data, 0..) |guarantee, i| {
-            // FIXME: in case of errors we need to deallocate what was allocated
-            cloned_data[i] = try guarantee.deepClone(allocator);
+        var cloned_count: usize = 0;
+        errdefer {
+            // Clean up any successfully cloned items
+            for (cloned_data[0..cloned_count]) |*item| {
+                item.deinit(allocator);
+            }
+        }
+
+        for (self.data) |guarantee| {
+            cloned_data[cloned_count] = try guarantee.deepClone(allocator);
+            cloned_count += 1;
         }
 
         return @This(){

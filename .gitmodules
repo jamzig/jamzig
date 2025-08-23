@@ -1,6 +1,3 @@
-[submodule "src/stf_test/jamtestnet"]
-	path = src/jamtestnet/teams/jamduna
-	url = https://github.com/jam-duna/jamtestnet.git
 [submodule "src/jamtestvectors/data"]
 	path = src/jamtestvectors/data
 	url = https://github.com/w3f/jamtestvectors/
@@ -13,9 +10,6 @@
 [submodule "src/jamtestvectors/pulls/fisher-yates"]
 	path = src/jamtestvectors/pulls/fisher-yates
 	url = https://github.com/w3f/jamtestvectors/
-[submodule "src/jamtestnet/teams/javajam"]
-	path = src/jamtestnet/teams/javajam
-	url = https://github.com/javajamio/javajam-trace.git
-[submodule "src/jamtestnet/teams/jamzig"]
-	path = src/jamtestnet/teams/jamzig
-	url = https://github.com/jamzig/jamtestnet.git
+[submodule "src/jam-conformance"]
+	path = src/jam-conformance
+	url = https://github.com/davxy/jam-conformance.git

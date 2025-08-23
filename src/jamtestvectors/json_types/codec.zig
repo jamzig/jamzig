@@ -365,11 +365,16 @@ pub const LookupMetaEntry = struct {
     value: ?[]U32,
 };
 
+pub const StorageEntry = struct {
+    key: HexBytes,
+    value: HexBytes,
+};
+
 pub const AccountData = struct {
     service: ServiceInfo,
     preimages: ?[]PreimageEntry,
     lookup_meta: []LookupMetaEntry,
-    // storage: ?std.StringHashMap(HexBytes), // FIXME:
+    storage: []StorageEntry,
 };
 
 pub const Account = struct {

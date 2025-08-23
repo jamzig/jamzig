@@ -37,7 +37,7 @@ pub fn BlockImporter(comptime params: jam_params.Params) type {
 
             pub fn deinit(self: *ImportResult) void {
                 // Deinitialize the state transition
-                self.state_transition.deinitHeap();
+                self.state_transition.destroy(self.state_transition.allocator);
                 // Clear the struct to avoid dangling pointers
                 self.* = undefined;
             }

@@ -31,7 +31,7 @@ pub fn machineInvocation(
     pc: u32,
     gas: u32,
     args: []const u8,
-    host_call_fns: *const PVM.HostCallMap,
+    host_calls_config: *const PVM.HostCallsConfig,
     host_call_ctx: *anyopaque,
 ) PVM.Error!MachineInvocationResult {
     const span = trace.span(.machine_invocation);
@@ -56,8 +56,8 @@ pub fn machineInvocation(
     exec_ctx.initRegisters(args.len);
     exec_ctx.pc = pc;
 
-    // Register host calls
-    exec_ctx.setHostCalls(host_call_fns);
+    // Register host calls (pass as anyopaque to avoid circular dependency)
+    exec_ctx.setHostCalls(@ptrCast(host_calls_config));
 
     // result
     const result = try PVM.machineInvocation(allocator, &exec_ctx, host_call_ctx);

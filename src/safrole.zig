@@ -87,8 +87,7 @@ pub fn transition(
     }
 
     var winning_ticket_marker: ?types.TicketsMark = null;
-    if (stx.time.isSameEpoch() and
-        stx.time.didCrossTicketSubmissionEnd() and
+    if (stx.time.didCrossTicketSubmissionEndInSameEpoch() and
         gamma_prime.a.len == params.epoch_length)
     {
         winning_ticket_marker = .{

@@ -6,7 +6,7 @@ const codec = @import("codec.zig");
 const crypto = @import("crypto.zig");
 
 const tracing = @import("tracing.zig");
-const trace = tracing.scoped(.header_validator);
+const trace = tracing.scoped(.stf);
 
 // Constants for seal contexts
 const SEAL_CONTEXT_TICKET = "jam_ticket_seal";
@@ -243,7 +243,13 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             const span = trace.span(.validate_author);
             defer span.deinit();
 
-            const validators = state.kappa.?.validators;
+            // Determine which validator set to use based on epoch transition
+            // According to graypaper: use posterior κ' which at epoch boundaries is γ_k
+            const time = params.Time().init(state.tau.?, header.slot);
+            const validators = if (time.isNewEpoch())
+                state.gamma.?.k.validators // Use gamma.k for first block of new epoch
+            else
+                state.kappa.?.validators; // Use kappa for regular blocks
 
             // Validate author index
             if (header.author_index >= validators.len) {
@@ -285,7 +291,7 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             }
 
             // Check tickets marker timing
-            if (transition_time.didCrossTicketSubmissionEnd()) {
+            if (transition_time.didCrossTicketSubmissionEndInSameEpoch()) {
                 // Tickets marker validation would go here if needed
             } else if (header.tickets_mark != null) {
                 span.err("Tickets marker present but we did not cross didCrossTicketSubmissionEnd", .{});
@@ -329,10 +335,11 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
                     } else {
                         break :brl null;
                     }
-                    // Else we have settled
-                } else if (state.gamma.?.s == .tickets)
+                    // As long as we are in the same epoch, use tickets
+                } else if (time.isSameEpoch() and state.gamma.?.s == .tickets)
                     state.gamma.?.s.tickets
                 else
+                    // If we skipped an epoch or anything else fallback
                     null;
 
             // No tickets available

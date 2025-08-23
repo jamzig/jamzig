@@ -8,6 +8,7 @@ const services = @import("../services.zig");
 const state_theta = @import("../reports_ready.zig");
 const state_keys = @import("../state_keys.zig");
 const validator_stats = @import("../validator_stats.zig");
+const accumulation_outputs = @import("../accumulation_outputs.zig");
 
 const tv_types = @import("../jamtestvectors/accumulate.zig");
 const jam_types = @import("../jamtestvectors/jam_types.zig");
@@ -38,11 +39,12 @@ pub fn convertTestStateIntoJamState(
     );
 
     jam_state.chi = try convertPrivileges(
+        params.core_count,
         allocator,
         test_state.privileges,
     );
 
-    jam_state.theta = try convertReadyQueue(
+    jam_state.vartheta = try convertReadyQueue(
         params.epoch_length,
         allocator,
         test_state.ready_queue,
@@ -61,6 +63,9 @@ pub fn convertTestStateIntoJamState(
         params.validators_count,
         params.core_count,
     );
+
+    // Initialize theta (accumulation outputs) as empty - new in v0.6.7
+    jam_state.theta = accumulation_outputs.Theta.init(allocator);
 
     return jam_state;
 }
@@ -83,11 +88,22 @@ pub fn convertServiceAccount(allocator: std.mem.Allocator, account: tv_types.Ser
     var service_account = state.services.ServiceAccount.init(allocator);
     errdefer service_account.deinit();
 
-    // Set the code hash and basic account info
-    service_account.code_hash = account.data.service.code_hash;
-    service_account.balance = account.data.service.balance;
-    service_account.min_gas_accumulate = account.data.service.min_item_gas;
-    service_account.min_gas_on_transfer = account.data.service.min_memo_gas;
+    // Convert test vector ServiceInfo to core ServiceInfo using toCore()
+    const core_service_info = account.data.service.toCore();
+
+    // Set the code hash and basic account info from core type
+    service_account.code_hash = core_service_info.code_hash;
+    service_account.balance = core_service_info.balance;
+    service_account.min_gas_accumulate = core_service_info.min_item_gas;
+    service_account.min_gas_on_transfer = core_service_info.min_memo_gas;
+    service_account.footprint_bytes = core_service_info.bytes;
+    service_account.footprint_items = core_service_info.items;
+    
+    // Set the last_accumulation_slot and other fields from the test vector
+    service_account.last_accumulation_slot = account.data.service.last_accumulation_slot;
+    service_account.creation_slot = account.data.service.creation_slot;
+    service_account.parent_service = account.data.service.parent_service;
+    service_account.storage_offset = account.data.service.deposit_offset;
 
     // Add all preimages
     for (account.data.preimages) |preimage| {
@@ -98,36 +114,23 @@ pub fn convertServiceAccount(allocator: std.mem.Allocator, account: tv_types.Ser
 
     // Add all storage entries
     for (account.data.storage) |storage_entry| {
-        var storage_key: types.StateKey = undefined;
-
-        // Prepare data to hash: service_id (4 bytes little-endian) + key_data
-        var service_id_bytes: [4]u8 = undefined;
-        std.mem.writeInt(u32, &service_id_bytes, account.id, .little);
-
-        // The test vector provides raw key data that needs to be hashed
-        // This matches how PVM host calls work: hash the key data first
-        var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-        hasher.update(&service_id_bytes);
-        hasher.update(storage_entry.key);
-        var key_hash: [32]u8 = undefined;
-        hasher.final(&key_hash);
-
-        // Construct the storage key using service ID and hash
-        storage_key = state_keys.constructStorageKey(account.id, key_hash);
-
-        try service_account.writeStorageFreeOldValue(storage_key, try allocator.dupe(u8, storage_entry.value));
+        try service_account.writeStorageNoFootprint(account.id, storage_entry.key, try allocator.dupe(u8, storage_entry.value));
     }
 
     return service_account;
 }
 
-pub fn convertPrivileges(allocator: std.mem.Allocator, privileges: tv_types.Privileges) !state.Chi {
-    var chi = state.Chi.init(allocator);
+pub fn convertPrivileges(comptime core_count: u16, allocator: std.mem.Allocator, privileges: tv_types.Privileges) !state.Chi(core_count) {
+    // Verify privileges.assign has exactly the right number of cores
+    std.debug.assert(privileges.assign.len == core_count);
+    
+    var chi = try state.Chi(core_count).init(allocator);
     errdefer chi.deinit();
 
     // Map the privileged service identities
     chi.manager = privileges.bless;
-    chi.assign = privileges.assign;
+    // Copy all assign services (should be exactly core_count elements)
+    @memcpy(&chi.assign, privileges.assign);
     chi.designate = privileges.designate;
 
     // Add all always-accumulate mappings
@@ -142,8 +145,8 @@ pub fn convertReadyQueue(
     comptime epoch_size: usize,
     allocator: std.mem.Allocator,
     ready_queue: tv_types.ReadyQueue,
-) !state.Theta(epoch_size) {
-    var theta = state.Theta(epoch_size).init(allocator);
+) !state.VarTheta(epoch_size) {
+    var theta = state.VarTheta(epoch_size).init(allocator);
     errdefer theta.deinit();
 
     // Initialize the ready queue items for each epoch slot

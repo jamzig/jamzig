@@ -7,12 +7,19 @@ const state_delta = @import("../state_delta.zig");
 const jam_params = @import("../jam_params.zig");
 const meta = @import("../meta.zig");
 
+const HashSet = @import("../datastruct/hash_set.zig").HashSet;
+
 const trace = @import("../tracing.zig").scoped(.accumulate);
 
 const AccumulationContext = pvm_accumulate.AccumulationContext;
 const AccumulationOperand = pvm_accumulate.AccumulationOperand;
 const AccumulationResult = pvm_accumulate.AccumulationResult;
 const DeferredTransfer = pvm_accumulate.DeferredTransfer;
+
+pub const ServiceAccumulationOutput = struct {
+    service_id: types.ServiceId,
+    output: types.AccumulateRoot,
+};
 
 const ServiceAccumulationOperandsMap = @import("service_operands_map.zig").ServiceAccumulationOperandsMap;
 
@@ -34,35 +41,23 @@ pub const TransferServiceStats = struct {
     gas_used: u64 = 0,
 };
 
-/// Helper struct to hold service accumulation results
-pub const ServiceAccumulationResult = struct {
-    gas_used: types.Gas,
-    transfers: []DeferredTransfer,
-    accumulation_output: ?types.AccumulateRoot,
-
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.transfers);
-        self.* = undefined;
-    }
-};
-
 /// Result of the outer accumulation function
 pub const OuterAccumulationResult = struct {
     accumulated_count: usize,
-    transfers: []DeferredTransfer,
-    accumulation_outputs: std.AutoHashMap(types.ServiceId, types.AccumulateOutput),
-    service_gas_used: std.AutoHashMap(types.ServiceId, types.Gas), // Gas used per service ID
+    deferred_transfers: []DeferredTransfer,
+    accumulation_outputs: HashSet(ServiceAccumulationOutput),
+    gas_used_per_service: std.AutoHashMap(types.ServiceId, types.Gas), // Gas used per service ID
 
     pub fn takeTransfers(self: *@This()) []DeferredTransfer {
-        const result = self.transfers;
-        self.transfers = &[_]DeferredTransfer{};
+        const result = self.deferred_transfers;
+        self.deferred_transfers = &[_]DeferredTransfer{};
         return result;
     }
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.transfers);
-        self.accumulation_outputs.deinit();
-        self.service_gas_used.deinit(); // Deinit the new map
+        allocator.free(self.deferred_transfers);
+        self.accumulation_outputs.deinit(allocator);
+        self.gas_used_per_service.deinit(); // Deinit the new map
         self.* = undefined;
     }
 };
@@ -92,9 +87,6 @@ pub fn outerAccumulation(
     comptime params: @import("../jam_params.zig").Params,
     allocator: std.mem.Allocator,
     context: *const AccumulationContext(params),
-    tau: types.TimeSlot,
-    entropy: types.Entropy,
-    privileged_services: *const std.AutoHashMap(types.ServiceId, types.Gas),
     work_reports: []const types.WorkReport,
     gas_limit: types.Gas,
 ) !OuterAccumulationResult {
@@ -109,33 +101,29 @@ pub fn outerAccumulation(
     var transfers = std.ArrayList(DeferredTransfer).init(allocator);
     defer transfers.deinit();
 
-    var accumulation_outputs = std.AutoHashMap(types.ServiceId, types.AccumulateRoot).init(allocator);
-    errdefer accumulation_outputs.deinit();
+    var accumulation_outputs = HashSet(ServiceAccumulationOutput).init();
+    errdefer accumulation_outputs.deinit(allocator);
 
     // Map to store gas used per service ID across all batches
-    var total_service_gas_used = std.AutoHashMap(types.ServiceId, types.Gas).init(allocator);
-    errdefer total_service_gas_used.deinit();
+    var gas_used_per_service = std.AutoHashMap(types.ServiceId, types.Gas).init(allocator);
+    errdefer gas_used_per_service.deinit();
 
     // If no work reports, return early
     if (work_reports.len == 0) {
         span.debug("No work reports to process", .{});
         return .{
             .accumulated_count = 0,
-            .transfers = &[_]DeferredTransfer{},
+            .deferred_transfers = &[_]DeferredTransfer{},
             .accumulation_outputs = accumulation_outputs,
-            .service_gas_used = total_service_gas_used,
+            .gas_used_per_service = gas_used_per_service,
         };
     }
-
-    // Empty HashMap, as we need to clear current_privileged_services after the first iteration
-    var empty_privileged_services = std.AutoHashMap(types.ServiceId, types.Gas).init(allocator);
-    defer empty_privileged_services.deinit();
 
     // Initialize loop variables
     var current_gas_limit = gas_limit;
     var current_reports = work_reports;
-    var current_privileged_services = privileged_services;
     var total_accumulated_count: usize = 0;
+    var first_batch = true;
 
     // Process reports in batches until we've processed all or run out of gas
     while (current_reports.len > 0 and current_gas_limit > 0) {
@@ -157,28 +145,50 @@ pub fn outerAccumulation(
             params,
             allocator,
             context,
-            tau,
-            entropy,
-            current_privileged_services,
             current_reports[0..batch.reports_to_process],
+            first_batch,
         );
         defer parallelized_result.deinit(allocator);
-        // Aggregate batch results
-        try aggregateBatchResults(
-            &transfers,
-            &accumulation_outputs,
-            &total_service_gas_used,
-            &parallelized_result,
-            span,
-        );
+
+        // Apply context changes from all service dimensions
+        try parallelized_result.applyContextChanges();
+
+        // Process all service results in a single loop:
+        // - Apply provided preimages
+        // - Collect transfers
+        // - Aggregate gas usage
+        // - Collect accumulation outputs
+        var batch_gas_used: types.Gas = 0;
+        var result_it = parallelized_result.iterator();
+        while (result_it.next()) |entry| {
+            // Apply provided preimages
+            try entry.dimension().applyProvidedPreimages(context.time.current_slot);
+
+            // Append transfers directly
+            try transfers.appendSlice(entry.transfers());
+
+            // Add accumulation output to our output set if present
+            if (entry.output()) |output| {
+                try accumulation_outputs.add(allocator, .{ .service_id = entry.service_id, .output = output });
+            }
+
+            // Aggregate gas used for this service
+            const current_gas = gas_used_per_service.get(entry.service_id) orelse 0;
+            try gas_used_per_service.put(entry.service_id, current_gas + entry.gasUsed());
+
+            // Track total gas for this batch
+            batch_gas_used += entry.gasUsed();
+        }
+
+        span.debug("Applied state changes for all services", .{});
 
         // Update loop variables for next iteration
         total_accumulated_count += batch.reports_to_process;
         // Deduct actual total gas used in this batch, avoid underflow
-        current_gas_limit = current_gas_limit -| parallelized_result.gas_used;
-        span.debug("Batch finished. Accumulated: {d}, Batch Gas Used: {d}, Remaining Gas Limit: {d}", .{ batch.reports_to_process, parallelized_result.gas_used, current_gas_limit });
+        current_gas_limit = current_gas_limit -| batch_gas_used;
+        span.debug("Batch finished. Accumulated: {d}, Batch Gas Used: {d}, Remaining Gas Limit: {d}", .{ batch.reports_to_process, batch_gas_used, current_gas_limit });
         // We only execute our privileged_services once
-        current_privileged_services = &empty_privileged_services;
+        first_batch = false;
 
         // If all reports processed, break early
         if (current_reports.len == batch.reports_to_process) {
@@ -195,44 +205,90 @@ pub fn outerAccumulation(
 
     return .{
         .accumulated_count = total_accumulated_count,
-        .transfers = try transfers.toOwnedSlice(),
+        .deferred_transfers = try transfers.toOwnedSlice(),
         .accumulation_outputs = accumulation_outputs,
-        .service_gas_used = total_service_gas_used,
+        .gas_used_per_service = gas_used_per_service,
     };
 }
 
-pub const ParallelizedAccumulationResult = struct {
-    gas_used: types.Gas,
-    transfers: []DeferredTransfer,
-    service_results: std.AutoHashMap(types.ServiceId, ServiceAccumulationResult),
+pub fn ParallelizedAccumulationResult(params: jam_params.Params) type {
+    return struct {
+        service_results: std.AutoHashMap(types.ServiceId, AccumulationResult(params)),
 
-    /// Takes ownership of the transfers slice, setting internal transfers to empty
-    pub fn takeTransfers(self: *@This()) []DeferredTransfer {
-        const result = self.transfers;
-        self.transfers = &[_]DeferredTransfer{};
-        return result;
-    }
+        /// Custom iterator with clean accessors for service results
+        pub const ServiceResultIterator = struct {
+            inner: std.AutoHashMap(types.ServiceId, AccumulationResult(params)).Iterator,
+            current: ?Entry = null,
 
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        // Free the transfers array
-        allocator.free(self.transfers);
+            pub const Entry = struct {
+                service_id: types.ServiceId,
+                result: *AccumulationResult(params),
 
-        // Clean up service results
-        var it = self.service_results.iterator();
-        while (it.next()) |entry| {
-            // _ = entry;
-            entry.value_ptr.deinit(allocator);
+                // Inline accessors
+                pub inline fn transfers(self: Entry) []DeferredTransfer {
+                    return self.result.transfers;
+                }
+
+                pub inline fn gasUsed(self: Entry) types.Gas {
+                    return self.result.gas_used;
+                }
+
+                pub inline fn output(self: Entry) ?types.AccumulateOutput {
+                    return self.result.accumulation_output;
+                }
+
+                pub inline fn dimension(self: Entry) @TypeOf(self.result.collapsed_dimension) {
+                    return self.result.collapsed_dimension;
+                }
+            };
+
+            pub fn next(self: *@This()) ?Entry {
+                if (self.inner.next()) |entry| {
+                    self.current = Entry{
+                        .service_id = entry.key_ptr.*,
+                        .result = entry.value_ptr,
+                    };
+                    return self.current;
+                }
+                return null;
+            }
+        };
+
+        /// Returns a custom iterator over the service results
+        pub fn iterator(self: *@This()) ServiceResultIterator {
+            return ServiceResultIterator{
+                .inner = self.service_results.iterator(),
+            };
         }
-        self.service_results.deinit();
 
-        // Mark as undefined to prevent use-after-free
-        self.* = undefined;
-    }
-};
+        // Note: collectTransfers and totalGasUsed methods removed
+        // These operations are now performed inline during iteration in outerAccumulation
+
+        /// Apply context changes from all service dimensions
+        pub fn applyContextChanges(self: *@This()) !void {
+            var it = self.iterator();
+            while (it.next()) |entry| {
+                try entry.dimension().commit();
+            }
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            // Clean up service results
+            var it = self.iterator();
+            while (it.next()) |entry| {
+                entry.result.deinit(allocator);
+            }
+            self.service_results.deinit();
+
+            // Mark as undefined to prevent use-after-free
+            self.* = undefined;
+        }
+    };
+}
 
 /// 12.17 Parallelized accumulation function Δ*
-/// Transforms an initial state context, sequence of work reports,
-/// and dictionary of privileged always-accumulate services into a tuple containing:
+/// Transforms an initial state context and sequence of work reports
+/// into a tuple containing:
 /// - Total gas utilized in PVM execution
 /// - Posterior state context
 /// - Resultant deferred transfers
@@ -241,11 +297,9 @@ pub fn parallelizedAccumulation(
     comptime params: jam_params.Params,
     allocator: std.mem.Allocator,
     context: *const AccumulationContext(params),
-    tau: types.TimeSlot,
-    entropy: types.Entropy,
-    privileged_services: *const std.AutoHashMap(types.ServiceId, types.Gas),
     work_reports: []const types.WorkReport,
-) !ParallelizedAccumulationResult {
+    include_privileged: bool, // Whether to include privileged services (first batch only)
+) !ParallelizedAccumulationResult(params) {
     const span = trace.span(.parallelized_accumulation);
     defer span.deinit();
 
@@ -254,7 +308,7 @@ pub fn parallelizedAccumulation(
     span.debug("Starting parallelized accumulation for {d} work reports", .{work_reports.len});
 
     // Collect all unique service IDs
-    var service_ids = try collectServiceIds(allocator, privileged_services, work_reports);
+    var service_ids = try collectServiceIds(allocator, context, work_reports, include_privileged);
     defer service_ids.deinit();
 
     span.debug("Found {d} unique services to accumulate", .{service_ids.count()});
@@ -264,53 +318,34 @@ pub fn parallelizedAccumulation(
     defer service_operands.deinit();
 
     // Store results for each service
-    var service_results = std.AutoHashMap(types.ServiceId, ServiceAccumulationResult).init(allocator);
+    var service_results = std.AutoHashMap(types.ServiceId, AccumulationResult(params)).init(allocator);
     errdefer meta.deinit.deinitHashMapValuesAndMap(allocator, service_results);
 
     // Process each service in parallel (in a real implementation)
     // Here we process them sequentially but could be parallelized
-    var total_gas_used: types.Gas = 0;
-    var all_transfers = std.ArrayList(DeferredTransfer).init(allocator);
-    defer all_transfers.deinit();
-
+    //
     // Process each service, in order of insertion
     for (service_ids.keys()) |service_id| {
         // Get operands if we have them, privileged_services do not have them
         const maybe_operands = service_operands.getOperands(service_id);
+        const context_snapshot = try context.deepClone();
 
         // Process this service
         // TODO: https://github.com/zig-gamedev/zjobs maybe of interest
-        var result = try singleServiceAccumulation(
+        // NOTE: Each service needs its own context copy for parallelization
+        const result = try singleServiceAccumulation(
             params,
             allocator,
-            context,
-            tau,
-            entropy,
-            privileged_services,
+            context_snapshot,
             service_id,
             maybe_operands,
         );
-        defer result.deinit(allocator);
-
-        // Store results - take ownership of transfers
-        const transfers = result.takeTransfers();
-        try service_results.put(service_id, .{
-            .gas_used = result.gas_used,
-            .transfers = transfers,
-            .accumulation_output = result.accumulation_output,
-        });
-
-        // Update total gas used
-        total_gas_used += result.gas_used;
-
-        // Collect all transfers
-        try all_transfers.appendSlice(result.transfers);
+        // Don't defer deinit since we're moving ownership to service_results
+        try service_results.put(service_id, result);
     }
 
     // Return collected results
     return .{
-        .gas_used = total_gas_used,
-        .transfers = try all_transfers.toOwnedSlice(),
         .service_results = service_results,
     };
 }
@@ -322,13 +357,10 @@ pub fn parallelizedAccumulation(
 pub fn singleServiceAccumulation(
     comptime params: jam_params.Params,
     allocator: std.mem.Allocator,
-    context: *const AccumulationContext(params),
-    tau: types.TimeSlot,
-    entropy: types.Entropy,
-    privileged_services: *const std.AutoHashMap(types.ServiceId, types.Gas),
+    context: AccumulationContext(params),
     service_id: types.ServiceId,
     service_operands: ?ServiceAccumulationOperandsMap.Operands,
-) !AccumulationResult {
+) !AccumulationResult(params) {
     const span = trace.span(.single_service_accumulation);
     defer span.deinit();
 
@@ -338,22 +370,20 @@ pub fn singleServiceAccumulation(
         service_id, if (service_operands) |so| so.count() else 0,
     });
 
-    // Either this is a priviledges service and it has a gas limit set, or we have some operands
+    // Either this is a privileged service and it has a gas limit set, or we have some operands
     // and have a gas_limit
-    const gas_limit = privileged_services.get(service_id) orelse
-        if (service_operands) |so| so.calcGasLimit() else return AccumulationResult.Empty;
+    const gas_limit = context.privileges.getReadOnly().always_accumulate.get(service_id) orelse
+        if (service_operands) |so| so.calcGasLimit() else 0;
 
     // Exit early if we have a gas_limit of 0
     if (gas_limit == 0) {
-        return AccumulationResult.Empty;
+        return try pvm_accumulate.AccumulationResult(params).createEmpty(allocator, context, service_id);
     }
 
     return try pvm_accumulate.invoke(
         params,
         allocator,
         context,
-        tau,
-        entropy,
         service_id,
         gas_limit,
         if (service_operands) |so| so.accumulationOperandSlice() else &[_]AccumulationOperand{},
@@ -366,15 +396,11 @@ pub fn executeAccumulation(
     comptime params: jam_params.Params,
     allocator: std.mem.Allocator,
     stx: *state_delta.StateTransition(params),
-    chi: *state.Chi,
     accumulatable: []const types.WorkReport,
     gas_limit: u64,
 ) !OuterAccumulationResult {
     const span = trace.span(.execute_accumulation);
     defer span.deinit();
-
-    // Assertions
-    std.debug.assert(gas_limit > 0);
 
     // Build accumulation context
     var accumulation_context = pvm_accumulate.AccumulationContext(params).build(
@@ -397,9 +423,6 @@ pub fn executeAccumulation(
         params,
         allocator,
         &accumulation_context,
-        stx.time.current_slot,
-        (try stx.ensure(.eta_prime))[0],
-        &chi.always_accumulate,
         accumulatable,
         gas_limit,
     );
@@ -430,48 +453,22 @@ fn calculateBatchSize(
     };
 }
 
-/// Aggregate results from a batch of parallel accumulations
-fn aggregateBatchResults(
-    transfers: *std.ArrayList(DeferredTransfer),
-    accumulation_outputs: *std.AutoHashMap(types.ServiceId, types.AccumulateRoot),
-    total_service_gas_used: *std.AutoHashMap(types.ServiceId, types.Gas),
-    parallelized_result: *ParallelizedAccumulationResult,
-    span: anytype,
-) !void {
-    // Gather all transfers
-    try transfers.appendSlice(parallelized_result.transfers);
-
-    // Add all accumulation outputs and aggregate per-service gas usage
-    var it = parallelized_result.service_results.iterator();
-    while (it.next()) |entry| {
-        const service_id = entry.key_ptr.*;
-        const service_result = entry.value_ptr.*;
-
-        // Add accumulation output if present
-        if (service_result.accumulation_output) |output| {
-            try accumulation_outputs.put(service_id, output);
-        }
-
-        // Aggregate gas used for this service
-        const current_gas = total_service_gas_used.get(service_id) orelse 0;
-        try total_service_gas_used.put(service_id, current_gas + service_result.gas_used);
-        span.trace("Aggregated gas for service {d}: {d} (batch) + {d} (prev) = {d} (total)", .{ service_id, service_result.gas_used, current_gas, current_gas + service_result.gas_used });
-    }
-}
-
 /// Collect all unique service IDs from privileged services and work reports
 fn collectServiceIds(
     allocator: std.mem.Allocator,
-    privileged_services: *const std.AutoHashMap(types.ServiceId, types.Gas),
+    context: anytype, // *const AccumulationContext(params)
     work_reports: []const types.WorkReport,
+    include_privileged: bool,
 ) !std.AutoArrayHashMap(types.ServiceId, void) {
     var service_ids = std.AutoArrayHashMap(types.ServiceId, void).init(allocator);
     errdefer service_ids.deinit();
 
-    // First the always accumulates
-    var it = privileged_services.iterator();
-    while (it.next()) |entry| {
-        try service_ids.put(entry.key_ptr.*, {});
+    // First the always accumulates (only in first batch)
+    if (include_privileged) {
+        var it = context.privileges.getReadOnly().always_accumulate.iterator();
+        while (it.next()) |entry| {
+            try service_ids.put(entry.key_ptr.*, {});
+        }
     }
 
     // Then the work reports

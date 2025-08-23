@@ -43,10 +43,16 @@ pub unsafe extern "C" fn new_ring_vrf_verifier(
     >::padding_point(),
     Err(_) => return std::ptr::null_mut(),
   };
+  // Using deserialize_compressed_unchecked instead of deserialize_compressed
+  // to accept any valid point on the Bandersnatch curve, not just those in the prime subgroup.
+  // This matches davxy and Parity's implementation and is safe because:
+  // 1. Invalid keys should never reach JAM (filtered by PoP verification beforehand)
+  // 2. It's faster and prevents replacement with padding points that would alter VRF outputs
+  // See: JAM conformance test 1754990132 gamma.z difference
   let ring: Vec<Public> = public_keys_slice
     .chunks(PUBLIC_KEY_SIZE)
     .map(|chunk| {
-      Public::deserialize_compressed(chunk)
+      Public::deserialize_compressed_unchecked(chunk)
         .unwrap_or(Public::from(padding_point))
     })
     .collect();
@@ -108,10 +114,16 @@ pub unsafe extern "C" fn new_ring_vrf_prover(
     >::padding_point(),
     Err(_) => return std::ptr::null_mut(),
   };
+  // Using deserialize_compressed_unchecked instead of deserialize_compressed
+  // to accept any valid point on the Bandersnatch curve, not just those in the prime subgroup.
+  // This matches davxy and Parity's implementation and is safe because:
+  // 1. Invalid keys should never reach JAM (filtered by PoP verification beforehand)
+  // 2. It's faster and prevents replacement with padding points that would alter VRF outputs
+  // See: JAM conformance test 1754990132 gamma.z difference
   let ring: Vec<Public> = public_keys_slice
     .chunks(PUBLIC_KEY_SIZE)
     .map(|chunk| {
-      Public::deserialize_compressed(chunk)
+      Public::deserialize_compressed_unchecked(chunk)
         .unwrap_or(Public::from(padding_point))
     })
     .collect();

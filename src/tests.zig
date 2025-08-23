@@ -1,6 +1,7 @@
 comptime {
     _ = @import("itertools.zig");
 
+    _ = @import("jamtestvectors.zig");
     _ = @import("jamtestvectors/loader.zig");
     _ = @import("jamtestvectors/safrole.zig");
     _ = @import("jamtestvectors/codec.zig");
@@ -14,6 +15,7 @@ comptime {
     _ = @import("jamtestvectors/authorizations.zig");
     _ = @import("jamtestvectors/accumulate.zig");
     _ = @import("jamtestvectors/preimages.zig");
+    _ = @import("jamtestvectors/statistics.zig");
 
     _ = @import("codec.zig");
     _ = @import("codec_test.zig");
@@ -80,8 +82,7 @@ comptime {
     _ = @import("assurances_test.zig");
 
     _ = @import("reports.zig");
-    // FIXME: enable when: https://github.com/davxy/jam-test-vectors/issues/34 has been merged https://github.com/davxy/jam-test-vectors/pull/35
-    // _ = @import("reports_test.zig");
+    _ = @import("reports_test.zig");
 
     _ = @import("disputes.zig");
     _ = @import("disputes_test.zig");
@@ -103,13 +104,13 @@ comptime {
     _ = @import("preimages.zig");
     _ = @import("preimages_test.zig");
 
-    _ = @import("jamtestnet.zig");
-    _ = @import("jamtestnet/parsers/jamduna/state_snapshot.zig");
-
     _ = @import("stf_test.zig");
 
     _ = @import("crypto/bandersnatch.zig");
     _ = @import("crypto/bls12_381.zig");
+
+    // Data structures
+    _ = @import("datastruct/hash_set.zig");
 
     // Networking
     _ = @import("net/tests.zig");
@@ -119,4 +120,7 @@ comptime {
 
     // Proof of Concepts
     _ = @import("lab/thread/reactor_pattern.zig");
+
+    // JAM Conformance tests
+    _ = @import("jam_conformance.zig");
 }
