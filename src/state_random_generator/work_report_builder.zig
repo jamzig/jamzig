@@ -79,10 +79,14 @@ pub const WorkReportBuilder = struct {
             .context = context,
             .core_index = random.int(types.CoreIndex),
             .authorizer_hash = generateRandomHash(random),
+            .auth_gas_used = switch (complexity) {
+                .minimal => random.intRangeAtMost(types.Gas, 1000, 10000),
+                .moderate => random.intRangeAtMost(types.Gas, 10000, 100000),
+                .maximal => random.intRangeAtMost(types.Gas, 100000, 1000000),
+            },
             .auth_output = auth_output_slice,
             .segment_root_lookup = segment_root_lookup,
             .results = results_slice,
-            .stats = generateRandomWorkReportStats(random, complexity),
         };
     }
 
@@ -203,19 +207,6 @@ pub const WorkReportBuilder = struct {
         }
 
         return try lookup_items.toOwnedSlice();
-    }
-
-    fn generateRandomWorkReportStats(
-        random: std.Random,
-        complexity: @import("../state_random_generator.zig").StateComplexity,
-    ) types.WorkReportStats {
-        return types.WorkReportStats{
-            .auth_gas_used = switch (complexity) {
-                .minimal => random.intRangeAtMost(types.Gas, 1000, 10000),
-                .moderate => random.intRangeAtMost(types.Gas, 10000, 100000),
-                .maximal => random.intRangeAtMost(types.Gas, 100000, 1000000),
-            },
-        };
     }
 
     fn generateRandomHash(random: std.Random) types.Hash {

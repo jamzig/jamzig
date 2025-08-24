@@ -123,12 +123,12 @@ pub const ValidatorData = struct {
 pub const WorkItem = struct {
     service: ServiceId,
     code_hash: OpaqueHash,
-    payload: []u8,
     refine_gas_limit: Gas,
     accumulate_gas_limit: Gas,
+    export_count: U16,
+    payload: []u8,
     import_segments: []ImportSpec,
     extrinsic: []ExtrinsicSpec,
-    export_count: U16,
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         allocator.free(self.payload);
@@ -139,10 +139,10 @@ pub const WorkItem = struct {
 };
 
 pub const WorkPackage = struct {
-    authorization: []u8,
     auth_code_host: ServiceId,
     authorizer: Authorizer,
     context: RefineContext,
+    authorization: []u8,
     items: []WorkItem, // SIZE(1..4)
 
     /// Validates WorkPackage constraints according to JAM 0.6.6 specification
@@ -167,6 +167,50 @@ pub const WorkPackage = struct {
         }
         allocator.free(self.items);
         self.* = undefined;
+    }
+
+    pub fn encode(self: *const @This(), comptime params: anytype, writer: anytype) !void {
+        const codec = @import("codec.zig");
+        
+        // Encode auth_code_host
+        try codec.serialize(ServiceId, params, writer, self.auth_code_host);
+        // Encode auth-code-hash (from authorizer)
+        try codec.serialize(OpaqueHash, params, writer, self.authorizer.code_hash);
+        // Encode context
+        try codec.serialize(RefineContext, params, writer, self.context);
+        // Encode authorization
+        try codec.serialize(@TypeOf(self.authorization), params, writer, self.authorization);
+        // Encode authorizer-config (from authorizer.params)
+        try codec.serialize(@TypeOf(self.authorizer.params), params, writer, self.authorizer.params);
+        // Encode items
+        try codec.serialize(@TypeOf(self.items), params, writer, self.items);
+    }
+
+    pub fn decode(comptime params: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
+        const codec = @import("codec.zig");
+        
+        var self: @This() = undefined;
+        
+        // Decode auth_code_host
+        self.auth_code_host = try codec.deserializeAlloc(ServiceId, params, allocator, reader);
+        // Decode auth-code-hash and authorizer-config into authorizer
+        const auth_code_hash = try codec.deserializeAlloc(OpaqueHash, params, allocator, reader);
+        // Decode context first (before authorization)
+        self.context = try codec.deserializeAlloc(RefineContext, params, allocator, reader);
+        // Decode authorization
+        self.authorization = try codec.deserializeAlloc(@TypeOf(self.authorization), params, allocator, reader);
+        // Decode authorizer-config
+        const authorizer_params = try codec.deserializeAlloc([]u8, params, allocator, reader);
+        
+        self.authorizer = .{
+            .code_hash = auth_code_hash,
+            .params = authorizer_params,
+        };
+        
+        // Decode items
+        self.items = try codec.deserializeAlloc([]WorkItem, params, allocator, reader);
+        
+        return self;
     }
 };
 
@@ -427,10 +471,10 @@ pub const WorkReport = struct {
     context: RefineContext,
     core_index: CoreIndex,
     authorizer_hash: OpaqueHash,
+    auth_gas_used: Gas,
     auth_output: []u8,
     segment_root_lookup: SegmentRootLookup,
     results: []WorkResult, // SIZE(1..4)
-    stats: WorkReportStats,
 
     pub fn totalAccumulateGas(self: *const @This()) types.Gas {
         var total: types.Gas = 0;
@@ -446,6 +490,7 @@ pub const WorkReport = struct {
             .context = try self.context.deepClone(allocator),
             .core_index = self.core_index,
             .authorizer_hash = self.authorizer_hash,
+            .auth_gas_used = self.auth_gas_used,
             .auth_output = try allocator.dupe(u8, self.auth_output),
             .segment_root_lookup = try allocator.dupe(SegmentRootLookupItem, self.segment_root_lookup),
             .results = blk: {
@@ -455,7 +500,6 @@ pub const WorkReport = struct {
                 }
                 break :blk cloned_results;
             },
-            .stats = self.stats,
         };
     }
 
@@ -482,10 +526,10 @@ pub const WorkReport = struct {
         try codec.writeInteger(self.core_index, writer);
 
         try codec.serialize(@TypeOf(self.authorizer_hash), params, writer, self.authorizer_hash);
+        try codec.writeInteger(self.auth_gas_used, writer);
         try codec.serialize(@TypeOf(self.auth_output), params, writer, self.auth_output);
         try codec.serialize(@TypeOf(self.segment_root_lookup), params, writer, self.segment_root_lookup);
         try codec.serialize(@TypeOf(self.results), params, writer, self.results);
-        try codec.serialize(@TypeOf(self.stats), params, writer, self.stats);
     }
 
     pub fn decode(comptime params: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
@@ -501,10 +545,10 @@ pub const WorkReport = struct {
         self.core_index = @as(CoreIndex, @truncate(try codec.readInteger(reader)));
 
         self.authorizer_hash = try codec.deserializeAlloc(@TypeOf(self.authorizer_hash), params, allocator, reader);
+        self.auth_gas_used = try codec.readInteger(reader);
         self.auth_output = try codec.deserializeAlloc(@TypeOf(self.auth_output), params, allocator, reader);
         self.segment_root_lookup = try codec.deserializeAlloc(@TypeOf(self.segment_root_lookup), params, allocator, reader);
         self.results = try codec.deserializeAlloc(@TypeOf(self.results), params, allocator, reader);
-        self.stats = try codec.deserializeAlloc(@TypeOf(self.stats), params, allocator, reader);
 
         return self;
     }
@@ -814,9 +858,9 @@ pub const Header = struct {
     slot: TimeSlot,
     epoch_mark: ?EpochMark = null,
     tickets_mark: ?TicketsMark = null,
-    offenders_mark: []Ed25519Public,
     author_index: ValidatorIndex,
     entropy_source: BandersnatchVrfSignature,
+    offenders_mark: []Ed25519Public,
     seal: BandersnatchVrfSignature,
 
     // TODO: this should be cached on next call

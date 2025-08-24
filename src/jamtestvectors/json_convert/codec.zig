@@ -188,11 +188,9 @@ fn convertWorkReport(allocator: Allocator, from: tv_lib_codec.WorkReport) !lib_c
         ),
         .core_index = from.core_index,
         .authorizer_hash = from.authorizer_hash.bytes,
+        .auth_gas_used = from.auth_gas_used,
         .auth_output = try allocator.dupe(u8, from.auth_output.bytes),
         .segment_root_lookup = try convert(tv_lib_codec.SegmentRootLookup, lib_codec.SegmentRootLookup, allocator, from.segment_root_lookup),
         .results = try convert([]tv_lib_codec.WorkResult, []lib_codec.WorkResult, allocator, from.results),
-        .stats = .{
-            .auth_gas_used = from.auth_gas_used,
-        },
     };
 }
