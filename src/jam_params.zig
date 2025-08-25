@@ -219,6 +219,10 @@ pub const TINY_PARAMS = Params{
     // Erasure coding
     .erasure_coded_pieces_per_segment = 1026,
 
+    // GT: Total gas allocated across all cores for Accumulation
+    // https://github.com/davxy/jam-test-vectors/pull/90#issuecomment-3217905803
+    .total_gas_alloc_accumulation = 20_000_000,
+
     // All other fields use default values
 };
 

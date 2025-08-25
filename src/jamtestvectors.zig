@@ -41,7 +41,7 @@ test "w3f:traces:safrole" {
     defer result.deinit(allocator);
 }
 
-test "w3f:traces:preimages" {
+test "w3f:traces:preimages_normal" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
     var result = try runTracesInDir(
