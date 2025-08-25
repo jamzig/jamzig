@@ -77,13 +77,13 @@ pub const WorkReportBuilder = struct {
         return types.WorkReport{
             .package_spec = generateRandomWorkPackageSpec(random, complexity),
             .context = context,
-            .core_index = random.int(types.CoreIndex),
+            .core_index = types.VarInt(types.CoreIndex).init(random.int(types.CoreIndex)),
             .authorizer_hash = generateRandomHash(random),
-            .auth_gas_used = switch (complexity) {
+            .auth_gas_used = types.VarInt(types.Gas).init(switch (complexity) {
                 .minimal => random.intRangeAtMost(types.Gas, 1000, 10000),
                 .moderate => random.intRangeAtMost(types.Gas, 10000, 100000),
                 .maximal => random.intRangeAtMost(types.Gas, 100000, 1000000),
-            },
+            }),
             .auth_output = auth_output_slice,
             .segment_root_lookup = segment_root_lookup,
             .results = results_slice,

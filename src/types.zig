@@ -25,6 +25,29 @@ pub const ValidatorIndex = U16;
 pub const CoreIndex = U16;
 pub const TicketAttempt = u8;
 
+/// Wrapper type for variable-length encoded integers in codec operations
+/// This type ensures proper variable-length encoding/decoding as per JAM specification
+pub fn VarInt(comptime T: type) type {
+    return struct {
+        value: T,
+        
+        pub fn init(val: T) @This() {
+            return .{ .value = val };
+        }
+        
+        pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
+            const codec = @import("codec.zig");
+            try codec.writeInteger(self.value, writer);
+        }
+        
+        pub fn decode(_: anytype, reader: anytype, _: std.mem.Allocator) !@This() {
+            const codec = @import("codec.zig");
+            const val = try codec.readInteger(reader);
+            return .{ .value = @as(T, @intCast(val)) };
+        }
+    };
+}
+
 // Specific hash types
 pub const HeaderHash = OpaqueHash;
 pub const StateRoot = OpaqueHash;
@@ -469,15 +492,15 @@ pub const WorkReportStats = struct {
 pub const WorkReport = struct {
     package_spec: WorkPackageSpec,
     context: RefineContext,
-    core_index: CoreIndex,
+    core_index: VarInt(CoreIndex),
     authorizer_hash: OpaqueHash,
-    auth_gas_used: Gas,
+    auth_gas_used: VarInt(Gas),
     auth_output: []u8,
     segment_root_lookup: SegmentRootLookup,
     results: []WorkResult, // SIZE(1..4)
 
-    pub fn totalAccumulateGas(self: *const @This()) types.Gas {
-        var total: types.Gas = 0;
+    pub fn totalAccumulateGas(self: *const @This()) Gas {
+        var total: Gas = 0;
         for (self.results) |result| {
             total += result.accumulate_gas;
         }
@@ -488,9 +511,9 @@ pub const WorkReport = struct {
         return @This(){
             .package_spec = self.package_spec,
             .context = try self.context.deepClone(allocator),
-            .core_index = self.core_index,
+            .core_index = self.core_index,  // VarInt is value type, simple copy
             .authorizer_hash = self.authorizer_hash,
-            .auth_gas_used = self.auth_gas_used,
+            .auth_gas_used = self.auth_gas_used,  // VarInt is value type, simple copy
             .auth_output = try allocator.dupe(u8, self.auth_output),
             .segment_root_lookup = try allocator.dupe(SegmentRootLookupItem, self.segment_root_lookup),
             .results = blk: {
@@ -521,12 +544,9 @@ pub const WorkReport = struct {
         // Encode each field in order
         try codec.serialize(@TypeOf(self.package_spec), params, writer, self.package_spec);
         try codec.serialize(@TypeOf(self.context), params, writer, self.context);
-
-        // Variable encode the core_index
-        try codec.writeInteger(self.core_index, writer);
-
+        try codec.serialize(@TypeOf(self.core_index), params, writer, self.core_index);  // VarInt handles variable encoding
         try codec.serialize(@TypeOf(self.authorizer_hash), params, writer, self.authorizer_hash);
-        try codec.writeInteger(self.auth_gas_used, writer);
+        try codec.serialize(@TypeOf(self.auth_gas_used), params, writer, self.auth_gas_used);  // VarInt handles variable encoding
         try codec.serialize(@TypeOf(self.auth_output), params, writer, self.auth_output);
         try codec.serialize(@TypeOf(self.segment_root_lookup), params, writer, self.segment_root_lookup);
         try codec.serialize(@TypeOf(self.results), params, writer, self.results);
@@ -540,12 +560,9 @@ pub const WorkReport = struct {
         // Decode each field in order
         self.package_spec = try codec.deserializeAlloc(WorkPackageSpec, params, allocator, reader);
         self.context = try codec.deserializeAlloc(RefineContext, params, allocator, reader);
-
-        // Variable decode the core_index
-        self.core_index = @as(CoreIndex, @truncate(try codec.readInteger(reader)));
-
+        self.core_index = try codec.deserializeAlloc(@TypeOf(self.core_index), params, allocator, reader);  // VarInt handles variable decoding
         self.authorizer_hash = try codec.deserializeAlloc(@TypeOf(self.authorizer_hash), params, allocator, reader);
-        self.auth_gas_used = try codec.readInteger(reader);
+        self.auth_gas_used = try codec.deserializeAlloc(@TypeOf(self.auth_gas_used), params, allocator, reader);  // VarInt handles variable decoding
         self.auth_output = try codec.deserializeAlloc(@TypeOf(self.auth_output), params, allocator, reader);
         self.segment_root_lookup = try codec.deserializeAlloc(@TypeOf(self.segment_root_lookup), params, allocator, reader);
         self.results = try codec.deserializeAlloc(@TypeOf(self.results), params, allocator, reader);

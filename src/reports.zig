@@ -82,7 +82,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             const core_span = span.child(.validate_core);
             defer core_span.deinit();
             core_span.debug("Validating core index {d} for report hash {s}", .{
-                guarantee.report.core_index,
+                guarantee.report.core_index.value,
                 std.fmt.fmtSliceHexLower(&guarantee.report.package_spec.hash),
             });
             core_span.trace("Report context - anchor: {s}, lookup_anchor: {s}", .{
@@ -91,17 +91,17 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             });
 
             // Check core index
-            if (guarantee.report.core_index >= params.core_count) {
-                core_span.err("Invalid core index {d} >= {d}", .{ guarantee.report.core_index, params.core_count });
+            if (guarantee.report.core_index.value >= params.core_count) {
+                core_span.err("Invalid core index {d} >= {d}", .{ guarantee.report.core_index.value, params.core_count });
                 return Error.BadCoreIndex;
             }
 
             // Check for out-of-order guarantees
-            if (prev_guarantee_core != null and guarantee.report.core_index <= prev_guarantee_core.?) {
-                core_span.err("Out-of-order guarantee: {d} <= {d}", .{ guarantee.report.core_index, prev_guarantee_core.? });
+            if (prev_guarantee_core != null and guarantee.report.core_index.value <= prev_guarantee_core.?) {
+                core_span.err("Out-of-order guarantee: {d} <= {d}", .{ guarantee.report.core_index.value, prev_guarantee_core.? });
                 return Error.OutOfOrderGuarantee;
             }
-            prev_guarantee_core = guarantee.report.core_index;
+            prev_guarantee_core = guarantee.report.core_index.value;
 
             // Validate output size limits
             output.validateOutputSize(params, guarantee) catch |err| switch (err) {
@@ -304,7 +304,7 @@ pub fn processGuaranteeExtrinsic(
         const process_span = span.child(.process_guarantee);
         defer process_span.deinit();
 
-        const core_index = guarantee.report.core_index;
+        const core_index = guarantee.report.core_index.value;
         process_span.debug("Processing guarantee for core {d}", .{core_index});
 
         // Core can be reused, this is checked when validating the guarantee

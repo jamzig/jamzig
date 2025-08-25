@@ -102,14 +102,14 @@ pub fn validateGuarantors(
             allocator,
             stx,
             sig.validator_index,
-            guarantee.report.core_index,
+            guarantee.report.core_index.value,
             guarantee.slot,
         );
 
         if (!is_valid) {
             span.err("Invalid guarantor assignment for validator {d} on core {d}", .{
                 sig.validator_index,
-                guarantee.report.core_index,
+                guarantee.report.core_index.value,
             });
             return Error.InvalidGuarantorAssignment;
         }

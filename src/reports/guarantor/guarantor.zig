@@ -72,7 +72,7 @@ pub fn validateGuarantorAssignmentsWithPrebuilt(
     defer span.deinit();
     span.debug("Validating guarantor assignments for {d} signatures using pre-built assignments", .{guarantee.signatures.len});
 
-    const expected_core = guarantee.report.core_index;
+    const expected_core = guarantee.report.core_index.value;
 
     for (guarantee.signatures) |sig| {
         const assigned_core = assignments.assignments[sig.validator_index];

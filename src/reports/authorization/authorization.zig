@@ -21,7 +21,7 @@ pub fn validateCoreAuthorization(
     defer span.deinit();
 
     span.debug("Checking authorization for core {d} with hash {s}", .{
-        guarantee.report.core_index,
+        guarantee.report.core_index.value,
         std.fmt.fmtSliceHexLower(&guarantee.report.authorizer_hash),
     });
 
@@ -29,12 +29,12 @@ pub fn validateCoreAuthorization(
         params.core_count,
         params.max_authorizations_pool_items,
     ) = try stx.ensure(.alpha);
-    if (!alpha.isAuthorized(guarantee.report.core_index, guarantee.report.authorizer_hash)) {
+    if (!alpha.isAuthorized(guarantee.report.core_index.value, guarantee.report.authorizer_hash)) {
         span.err("Core {d} not authorized for hash {s}", .{
-            guarantee.report.core_index,
+            guarantee.report.core_index.value,
             std.fmt.fmtSliceHexLower(&guarantee.report.authorizer_hash),
         });
         return Error.CoreUnauthorized;
     }
-    span.debug("Authorization validated for core {d}", .{guarantee.report.core_index});
+    span.debug("Authorization validated for core {d}", .{guarantee.report.core_index.value});
 }

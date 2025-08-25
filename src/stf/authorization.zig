@@ -30,7 +30,7 @@ pub fn transition(
     // Extract authorizer information from each guarantee's work report
     for (xtguarantees.data) |guarantee| {
         try authorizers.append(auth.CoreAuthorizer{
-            .core = guarantee.report.core_index,
+            .core = guarantee.report.core_index.value,
             .auth_hash = guarantee.report.authorizer_hash,
         });
     }

@@ -27,7 +27,7 @@ pub fn validateReportSlot(
     span.debug("Validating report slot {d} against current slot {d} for core {d}", .{
         guarantee.slot,
         stx.time.current_slot,
-        guarantee.report.core_index,
+        guarantee.report.core_index.value,
     });
 
     if (guarantee.slot > stx.time.current_slot) {
@@ -100,9 +100,9 @@ pub fn validateCoreTimeout(
     defer span.deinit();
 
     const rho: *const state.Rho(params.core_count) = try stx.ensure(.rho_prime);
-    if (rho.getReport(guarantee.report.core_index)) |entry| {
+    if (rho.getReport(guarantee.report.core_index.value)) |entry| {
         span.debug("Checking core {d} timeout - last: {d}, current: {d}, period: {d}", .{
-            guarantee.report.core_index,
+            guarantee.report.core_index.value,
             entry.assignment.timeout,
             guarantee.slot,
             params.work_replacement_period,
@@ -110,13 +110,13 @@ pub fn validateCoreTimeout(
 
         if (!entry.assignment.isTimedOut(params.work_replacement_period, guarantee.slot)) {
             span.err("Core {d} still engaged - needs {d} more slots", .{
-                guarantee.report.core_index,
+                guarantee.report.core_index.value,
                 (entry.assignment.timeout + params.work_replacement_period) - guarantee.slot,
             });
             return Error.CoreEngaged;
         }
-        span.debug("Core {d} timeout validated", .{guarantee.report.core_index});
+        span.debug("Core {d} timeout validated", .{guarantee.report.core_index.value});
     } else {
-        span.debug("Core {d} is free", .{guarantee.report.core_index});
+        span.debug("Core {d} is free", .{guarantee.report.core_index.value});
     }
 }

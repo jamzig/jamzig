@@ -88,7 +88,7 @@ pub fn transitionWithInput(
     // Since we have validated guarantees here lets run through them
     // and update appropiate core statistics.
     for (input.guarantees) |guarantee| {
-        const core_stats = try pi.getCoreStats(guarantee.report.core_index);
+        const core_stats = try pi.getCoreStats(guarantee.report.core_index.value);
 
         const report = guarantee.report;
 
@@ -116,7 +116,7 @@ pub fn transitionWithInput(
 
     // Process any ready reports to calculate their data availability load
     for (ready_reports) |report| {
-        const core_stats = try pi.getCoreStats(report.core_index);
+        const core_stats = try pi.getCoreStats(report.core_index.value);
         core_stats.da_load += report.package_spec.length +
             (params.segmentSizeInOctets() *
                 try std.math.divCeil(u32, report.package_spec.exports_count * 65, 64));
