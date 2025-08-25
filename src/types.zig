@@ -809,9 +809,9 @@ pub const HeaderUnsigned = struct {
     slot: TimeSlot,
     epoch_mark: ?EpochMark = null,
     tickets_mark: ?TicketsMark = null,
-    offenders_mark: []Ed25519Public,
     author_index: ValidatorIndex,
     entropy_source: BandersnatchVrfSignature,
+    offenders_mark: []Ed25519Public,
 
     /// Creates HeaderUnsigned from Header, excluding the seal.
     /// Used for encoding to bytes without allocations. Shares
