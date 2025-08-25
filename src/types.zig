@@ -30,16 +30,16 @@ pub const TicketAttempt = u8;
 pub fn VarInt(comptime T: type) type {
     return struct {
         value: T,
-        
+
         pub fn init(val: T) @This() {
             return .{ .value = val };
         }
-        
+
         pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
             const codec = @import("codec.zig");
             try codec.writeInteger(self.value, writer);
         }
-        
+
         pub fn decode(_: anytype, reader: anytype, _: std.mem.Allocator) !@This() {
             const codec = @import("codec.zig");
             const val = try codec.readInteger(reader);
@@ -194,7 +194,7 @@ pub const WorkPackage = struct {
 
     pub fn encode(self: *const @This(), comptime params: anytype, writer: anytype) !void {
         const codec = @import("codec.zig");
-        
+
         // Encode auth_code_host
         try codec.serialize(ServiceId, params, writer, self.auth_code_host);
         // Encode auth-code-hash (from authorizer)
@@ -211,9 +211,9 @@ pub const WorkPackage = struct {
 
     pub fn decode(comptime params: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
         const codec = @import("codec.zig");
-        
+
         var self: @This() = undefined;
-        
+
         // Decode auth_code_host
         self.auth_code_host = try codec.deserializeAlloc(ServiceId, params, allocator, reader);
         // Decode auth-code-hash and authorizer-config into authorizer
@@ -224,15 +224,15 @@ pub const WorkPackage = struct {
         self.authorization = try codec.deserializeAlloc(@TypeOf(self.authorization), params, allocator, reader);
         // Decode authorizer-config
         const authorizer_params = try codec.deserializeAlloc([]u8, params, allocator, reader);
-        
+
         self.authorizer = .{
             .code_hash = auth_code_hash,
             .params = authorizer_params,
         };
-        
+
         // Decode items
         self.items = try codec.deserializeAlloc([]WorkItem, params, allocator, reader);
-        
+
         return self;
     }
 };
@@ -511,9 +511,9 @@ pub const WorkReport = struct {
         return @This(){
             .package_spec = self.package_spec,
             .context = try self.context.deepClone(allocator),
-            .core_index = self.core_index,  // VarInt is value type, simple copy
+            .core_index = self.core_index, // VarInt is value type, simple copy
             .authorizer_hash = self.authorizer_hash,
-            .auth_gas_used = self.auth_gas_used,  // VarInt is value type, simple copy
+            .auth_gas_used = self.auth_gas_used, // VarInt is value type, simple copy
             .auth_output = try allocator.dupe(u8, self.auth_output),
             .segment_root_lookup = try allocator.dupe(SegmentRootLookupItem, self.segment_root_lookup),
             .results = blk: {
@@ -536,38 +536,6 @@ pub const WorkReport = struct {
         }
         allocator.free(self.results);
         self.* = undefined;
-    }
-
-    pub fn encode(self: *const @This(), comptime params: anytype, writer: anytype) !void {
-        const codec = @import("codec.zig");
-
-        // Encode each field in order
-        try codec.serialize(@TypeOf(self.package_spec), params, writer, self.package_spec);
-        try codec.serialize(@TypeOf(self.context), params, writer, self.context);
-        try codec.serialize(@TypeOf(self.core_index), params, writer, self.core_index);  // VarInt handles variable encoding
-        try codec.serialize(@TypeOf(self.authorizer_hash), params, writer, self.authorizer_hash);
-        try codec.serialize(@TypeOf(self.auth_gas_used), params, writer, self.auth_gas_used);  // VarInt handles variable encoding
-        try codec.serialize(@TypeOf(self.auth_output), params, writer, self.auth_output);
-        try codec.serialize(@TypeOf(self.segment_root_lookup), params, writer, self.segment_root_lookup);
-        try codec.serialize(@TypeOf(self.results), params, writer, self.results);
-    }
-
-    pub fn decode(comptime params: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
-        const codec = @import("codec.zig");
-
-        var self: @This() = undefined;
-
-        // Decode each field in order
-        self.package_spec = try codec.deserializeAlloc(WorkPackageSpec, params, allocator, reader);
-        self.context = try codec.deserializeAlloc(RefineContext, params, allocator, reader);
-        self.core_index = try codec.deserializeAlloc(@TypeOf(self.core_index), params, allocator, reader);  // VarInt handles variable decoding
-        self.authorizer_hash = try codec.deserializeAlloc(@TypeOf(self.authorizer_hash), params, allocator, reader);
-        self.auth_gas_used = try codec.deserializeAlloc(@TypeOf(self.auth_gas_used), params, allocator, reader);  // VarInt handles variable decoding
-        self.auth_output = try codec.deserializeAlloc(@TypeOf(self.auth_output), params, allocator, reader);
-        self.segment_root_lookup = try codec.deserializeAlloc(@TypeOf(self.segment_root_lookup), params, allocator, reader);
-        self.results = try codec.deserializeAlloc(@TypeOf(self.results), params, allocator, reader);
-
-        return self;
     }
 };
 
@@ -699,18 +667,18 @@ pub const ValidatorSet = struct {
         }
         return error.ValidatorNotFound;
     }
-    
+
     /// Find indices of multiple validators by their public keys
     /// Returns an allocated slice of validator indices
     /// Caller must free the returned slice
     pub fn findValidatorIndices(self: ValidatorSet, allocator: std.mem.Allocator, comptime key_type: KeyType, keys: anytype) ![]ValidatorIndex {
         var indices = try allocator.alloc(ValidatorIndex, keys.len);
         errdefer allocator.free(indices);
-        
+
         for (keys, 0..) |key, i| {
             indices[i] = try self.findValidatorIndex(key_type, key);
         }
-        
+
         return indices;
     }
 
