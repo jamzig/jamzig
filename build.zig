@@ -45,6 +45,14 @@ pub fn build(b: *std.Build) !void {
         .conformance_params = base_config.conformance_params,
     };
 
+    // Create target-specific optimized configuration with disabled tracing
+    const target_config = BuildConfig{
+        .tracing_scopes = &[_][]const u8{}, // Empty - no tracing scopes
+        .tracing_level = "",                 // No default level  
+        .tracing_mode = .disabled,           // Compile out all tracing
+        .conformance_params = base_config.conformance_params,
+    };
+
     // Create conformance configuration with runtime tracing
     const testing_config = BuildConfig{
         .tracing_scopes = base_config.tracing_scopes,
@@ -59,6 +67,9 @@ pub fn build(b: *std.Build) !void {
 
     const conformance_build_options = b.addOptions();
     applyBuildConfig(conformance_build_options, conformance_config);
+
+    const target_build_options = b.addOptions();
+    applyBuildConfig(target_build_options, target_config);
 
     const testing_build_options = b.addOptions();
     applyBuildConfig(testing_build_options, testing_config);
@@ -145,7 +156,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    jam_conformance_target.root_module.addOptions("build_options", conformance_build_options);
+    jam_conformance_target.root_module.addOptions("build_options", target_build_options);
     jam_conformance_target.root_module.addImport("clap", clap_module);
     jam_conformance_target.linkLibCpp();
     rust_deps.staticallyLinkTo(jam_conformance_target);
