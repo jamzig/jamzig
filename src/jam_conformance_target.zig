@@ -108,17 +108,20 @@ pub fn main() !void {
     std.debug.print("\n", .{});
 
     const restart_behavior: RestartBehavior = if (exit_on_disconnect) .exit_on_disconnect else .restart_on_disconnect;
-    
-    var executor = try io.ThreadPoolExecutor.init(allocator, null);
+
+    const ExecutorType = io.SequentialExecutor;
+    // const ExecutorType = io.ThreadPoolExecutor;
+
+    var executor = ExecutorType.init(allocator);
     defer executor.deinit();
-    
-    var server = try TargetServer(io.ThreadPoolExecutor).init(allocator, socket_path, restart_behavior, &executor);
+
+    var server = try TargetServer(ExecutorType).init(&executor, allocator, socket_path, restart_behavior);
     defer server.deinit();
 
     // Setup signal handler for graceful shutdown
     // Note: Signal handlers must use global state as they can't capture context
     const shutdown_requested = struct {
-        var server_ref: ?*TargetServer(io.ThreadPoolExecutor) = null;
+        var server_ref: ?*TargetServer(ExecutorType) = null;
     };
     shutdown_requested.server_ref = &server;
 

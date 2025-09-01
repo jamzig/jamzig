@@ -46,7 +46,6 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         server_state: ServerState = .initial,
 
         // Block importer
-        executor: IOExecutor,
         block_importer: block_import.BlockImporter(IOExecutor, messages.FUZZ_PARAMS),
 
         // Server management
@@ -60,7 +59,6 @@ pub fn TargetServer(comptime IOExecutor: type) type {
             return Self{
                 .allocator = allocator,
                 .socket_path = socket_path,
-                .executor = executor.*,
                 .block_importer = block_importer,
                 .restart_behavior = restart_behavior,
             };

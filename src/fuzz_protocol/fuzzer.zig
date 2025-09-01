@@ -49,7 +49,6 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         // JAM components
         block_builder: sequoia.BlockBuilder(messages.FUZZ_PARAMS),
-        executor: IOExecutor,
         block_importer: block_import.BlockImporter(IOExecutor, messages.FUZZ_PARAMS),
         current_jam_state: *const JamState(messages.FUZZ_PARAMS),
         latest_block: ?types.Block = null,
@@ -63,7 +62,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
         state: FuzzerState = .initial,
 
         /// Initialize fuzzer with deterministic seed and target socket path
-        pub fn create(allocator: std.mem.Allocator, seed: u64, socket_path: []const u8) !*Self {
+        pub fn create(executor: *IOExecutor, allocator: std.mem.Allocator, seed: u64, socket_path: []const u8) !*Self {
             const span = trace.span(.fuzzer_init);
             defer span.deinit();
 
@@ -81,7 +80,6 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
                 .rng = undefined,
                 .seed = seed,
                 .block_builder = undefined,
-                .executor = undefined,
                 .block_importer = undefined,
                 .current_jam_state = undefined,
                 .latest_block = null,
@@ -99,8 +97,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             fuzzer.block_builder = try sequoia.BlockBuilder(messages.FUZZ_PARAMS).init(allocator, config, &fuzzer.rng);
             errdefer fuzzer.block_builder.deinit();
 
-            fuzzer.executor = try IOExecutor.init(allocator, null);
-            fuzzer.block_importer = block_import.BlockImporter(IOExecutor, messages.FUZZ_PARAMS).init(&fuzzer.executor, allocator);
+            fuzzer.block_importer = block_import.BlockImporter(IOExecutor, messages.FUZZ_PARAMS).init(executor, allocator);
             fuzzer.current_jam_state = &fuzzer.block_builder.state;
 
             // Process the first (genesis) block to get proper state
@@ -133,7 +130,6 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
             // Clean up JAM components
             self.block_builder.deinit();
-            self.executor.deinit();
 
             if (self.latest_block) |*b| b.deinit(self.allocator);
 

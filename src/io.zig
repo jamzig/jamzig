@@ -61,7 +61,11 @@ pub const ThreadPoolExecutor = struct {
     pool: *std.Thread.Pool,
     allocator: Allocator,
 
-    pub fn init(allocator: Allocator, thread_count: ?usize) !ThreadPoolExecutor {
+    pub fn init(allocator: Allocator) !ThreadPoolExecutor {
+        return try ThreadPoolExecutor.initWithThreadCount(allocator);
+    }
+
+    pub fn initWithThreadCount(allocator: Allocator, thread_count: ?usize) !ThreadPoolExecutor {
         const pool = try allocator.create(std.Thread.Pool);
         errdefer allocator.destroy(pool);
 

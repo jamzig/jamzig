@@ -121,15 +121,17 @@ pub fn main() !void {
     const shutdown_requested = struct {
         var atomic: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
     };
-    
+
     var sigaction = std.posix.Sigaction{
-        .handler = .{ .handler = struct {
-            fn handler(_: c_int) callconv(.C) void {
-                // Signal handlers must be async-signal-safe
-                // Only set atomic flag, don't do I/O or complex operations
-                shutdown_requested.atomic.store(true, .monotonic);
-            }
-        }.handler },
+        .handler = .{
+            .handler = struct {
+                fn handler(_: c_int) callconv(.C) void {
+                    // Signal handlers must be async-signal-safe
+                    // Only set atomic flag, don't do I/O or complex operations
+                    shutdown_requested.atomic.store(true, .monotonic);
+                }
+            }.handler,
+        },
         .mask = std.posix.empty_sigset,
         .flags = 0,
     };
@@ -137,8 +139,10 @@ pub fn main() !void {
     std.posix.sigaction(std.posix.SIG.INT, &sigaction, null);
     std.posix.sigaction(std.posix.SIG.TERM, &sigaction, null);
 
+    var executor = io.SequentialExecutor.init(allocator);
+
     // Create and run fuzzer
-    var fuzzer = try Fuzzer(io.ThreadPoolExecutor).create(allocator, seed, socket_path);
+    var fuzzer = try Fuzzer(io.SequentialExecutor).create(&executor, allocator, seed, socket_path);
     defer fuzzer.destroy();
 
     std.debug.print("Connecting to target at {s}...\n", .{socket_path});
@@ -168,7 +172,7 @@ pub fn main() !void {
         break :blk try fuzzer.runFuzzCycleWithShutdown(num_blocks, check_shutdown);
     };
     defer result.deinit(allocator);
-    
+
     // Check if we were interrupted
     if (shutdown_requested.atomic.load(.monotonic)) {
         std.debug.print("\nReceived signal, shutting down gracefully...\n", .{});
