@@ -253,7 +253,10 @@ pub fn HostCalls(comptime params: Params) type {
             if (exec_ctx.registers[7] > std.math.maxInt(u32) or
                 exec_ctx.registers[9] > std.math.maxInt(u32))
             {
-                span.debug("Manager or validator service ID exceeds u32 domain", .{});
+                span.err(
+                    "Manager or validator service ID exceeds u32 domain. M={d} V={d}",
+                    .{ exec_ctx.registers[7], exec_ctx.registers[9] },
+                );
                 return HostCallError.WHO;
             }
 

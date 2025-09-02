@@ -23,6 +23,10 @@ const SKIPPED_TESTS = [_]SkippedTest{
         .id = "1754982087",
         .reason = "Invalid test: service ID generation used LE instead of varint (B.10)",
     },
+    .{
+        .id = "1756548459",
+        .reason = "PolkaJam error: accepts service ID 2^32 which exceeds ℕ₃₂ domain [0, 2^32-1] per GP B.37. JamZig correctly returns WHO error.",
+    },
     // .{
     //     .id = "1755530728",
     //     .reason = "PolkaJam error: expects less gas than actually consumed (13048 vs 13063)",
