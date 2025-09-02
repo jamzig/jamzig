@@ -837,8 +837,26 @@ pub fn HostCalls(comptime params: Params) type {
                 return .{ .terminal = .panic };
             };
 
-            if (!std.mem.eql(u8, &current_service.code_hash, &target_service.code_hash)) {
-                span.debug("Target service code hash doesn't match current code hah, returning WHO error", .{});
+            // FIX for conformance test 1756548706:
+            // Graypaper B.7 specifies that ejection is allowed if:
+            // 1. Current service's code hash matches target service's code hash, OR
+            // 2. The provided hash equals E_32(x_s) where x_s is the current service ID
+            // E_32 means 32-byte fixed-length encoding of the service ID (little-endian)
+
+            // Create E_32(x_s) - 32-byte fixed-length encoding of current service ID
+            var e32_service_id = std.mem.zeroes([32]u8);
+            // Encode the 4-byte service ID into the first 4 bytes (little-endian)
+            std.mem.writeInt(u32, e32_service_id[0..4], @intCast(ctx_regular.service_id), .little);
+
+            // provided hash must equal E_32(x_s) (special authorization)
+            const hash_is_e32_service = std.mem.eql(u8, &target_service.code_hash, &e32_service_id);
+
+            if (!hash_is_e32_service) {
+                span.debug("Ejection not authorized, returning WHO error", .{});
+                span.debug("Current service code hash: {s}", .{std.fmt.fmtSliceHexLower(&current_service.code_hash)});
+                span.debug("Target service code hash: {s}", .{std.fmt.fmtSliceHexLower(&target_service.code_hash)});
+                span.debug("Provided hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
+                span.debug("E_32(service_id={d}): {s}", .{ ctx_regular.service_id, std.fmt.fmtSliceHexLower(&e32_service_id) });
                 return HostCallError.WHO;
             }
 
