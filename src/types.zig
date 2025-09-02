@@ -25,6 +25,29 @@ pub const ValidatorIndex = U16;
 pub const CoreIndex = U16;
 pub const TicketAttempt = u8;
 
+/// Wrapper type for variable-length encoded integers in codec operations
+/// This type ensures proper variable-length encoding/decoding as per JAM specification
+pub fn VarInt(comptime T: type) type {
+    return struct {
+        value: T,
+
+        pub fn init(val: T) @This() {
+            return .{ .value = val };
+        }
+
+        pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
+            const codec = @import("codec.zig");
+            try codec.writeInteger(self.value, writer);
+        }
+
+        pub fn decode(_: anytype, reader: anytype, _: std.mem.Allocator) !@This() {
+            const codec = @import("codec.zig");
+            const val = try codec.readInteger(reader);
+            return .{ .value = @as(T, @intCast(val)) };
+        }
+    };
+}
+
 // Specific hash types
 pub const HeaderHash = OpaqueHash;
 pub const StateRoot = OpaqueHash;
@@ -123,12 +146,12 @@ pub const ValidatorData = struct {
 pub const WorkItem = struct {
     service: ServiceId,
     code_hash: OpaqueHash,
-    payload: []u8,
     refine_gas_limit: Gas,
     accumulate_gas_limit: Gas,
+    export_count: U16,
+    payload: []u8,
     import_segments: []ImportSpec,
     extrinsic: []ExtrinsicSpec,
-    export_count: U16,
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         allocator.free(self.payload);
@@ -139,11 +162,12 @@ pub const WorkItem = struct {
 };
 
 pub const WorkPackage = struct {
-    authorization: []u8,
     auth_code_host: ServiceId,
-    authorizer: Authorizer,
+    auth_code_hash: OpaqueHash,
     context: RefineContext,
-    items: []WorkItem, // SIZE(1..4)
+    authorization: []u8,
+    authorizer_config: []u8,
+    items: []WorkItem, // SIZE(1..16)
 
     /// Validates WorkPackage constraints according to JAM 0.6.6 specification
     pub fn validate(self: *const @This(), comptime params: @import("jam_params.zig").Params) !void {
@@ -160,7 +184,7 @@ pub const WorkPackage = struct {
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         allocator.free(self.authorization);
-        self.authorizer.deinit(allocator);
+        allocator.free(self.authorizer_config);
         self.context.deinit(allocator);
         for (self.items) |*item| {
             item.deinit(allocator);
@@ -283,42 +307,11 @@ pub const WorkExecResult = union(enum(u8)) {
 };
 
 pub const RefineLoad = struct {
-    gas_used: U64,
-    imports: U16,
-    extrinsic_count: U16,
-    extrinsic_size: U32,
-    exports: U16,
-
-    pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
-        const codec = @import("codec.zig");
-
-        // Encode each field using variable-length integer encoding
-        try codec.writeInteger(self.gas_used, writer);
-        try codec.writeInteger(self.imports, writer);
-        try codec.writeInteger(self.extrinsic_count, writer);
-        try codec.writeInteger(self.extrinsic_size, writer);
-        try codec.writeInteger(self.exports, writer);
-    }
-
-    pub fn decode(_: anytype, reader: anytype, _: std.mem.Allocator) !@This() {
-        const codec = @import("codec.zig");
-
-        // Read each field using variable-length integer decoding
-        // and truncate to the appropriate size
-        const gas_used = try codec.readInteger(reader);
-        const imports = @as(U16, @truncate(try codec.readInteger(reader)));
-        const extrinsic_count = @as(U16, @truncate(try codec.readInteger(reader)));
-        const extrinsic_size = @as(U32, @truncate(try codec.readInteger(reader)));
-        const exports = @as(U16, @truncate(try codec.readInteger(reader)));
-
-        return @This(){
-            .gas_used = gas_used,
-            .imports = imports,
-            .extrinsic_count = extrinsic_count,
-            .extrinsic_size = extrinsic_size,
-            .exports = exports,
-        };
-    }
+    gas_used: VarInt(U64),
+    imports: VarInt(U16),
+    extrinsic_count: VarInt(U16),
+    extrinsic_size: VarInt(U32),
+    exports: VarInt(U16),
 };
 
 pub const WorkResult = struct {
@@ -400,40 +393,18 @@ pub const SegmentRootLookupItem = struct {
 
 pub const SegmentRootLookup = []SegmentRootLookupItem;
 
-// TODO: since these are varint encoded, I wrapped them, maybe adapt codec
-// to create a special type indicating they are varint
-pub const WorkReportStats = struct {
-    auth_gas_used: Gas,
-
-    pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
-        const codec = @import("codec.zig");
-
-        try codec.writeInteger(self.auth_gas_used, writer);
-    }
-
-    pub fn decode(_: anytype, reader: anytype, _: std.mem.Allocator) !@This() {
-        const codec = @import("codec.zig");
-
-        const auth_gas_used = try codec.readInteger(reader);
-
-        return .{
-            .auth_gas_used = auth_gas_used,
-        };
-    }
-};
-
 pub const WorkReport = struct {
     package_spec: WorkPackageSpec,
     context: RefineContext,
-    core_index: CoreIndex,
+    core_index: VarInt(CoreIndex),
     authorizer_hash: OpaqueHash,
+    auth_gas_used: VarInt(Gas),
     auth_output: []u8,
     segment_root_lookup: SegmentRootLookup,
     results: []WorkResult, // SIZE(1..4)
-    stats: WorkReportStats,
 
-    pub fn totalAccumulateGas(self: *const @This()) types.Gas {
-        var total: types.Gas = 0;
+    pub fn totalAccumulateGas(self: *const @This()) Gas {
+        var total: Gas = 0;
         for (self.results) |result| {
             total += result.accumulate_gas;
         }
@@ -444,8 +415,9 @@ pub const WorkReport = struct {
         return @This(){
             .package_spec = self.package_spec,
             .context = try self.context.deepClone(allocator),
-            .core_index = self.core_index,
+            .core_index = self.core_index, // VarInt is value type, simple copy
             .authorizer_hash = self.authorizer_hash,
+            .auth_gas_used = self.auth_gas_used, // VarInt is value type, simple copy
             .auth_output = try allocator.dupe(u8, self.auth_output),
             .segment_root_lookup = try allocator.dupe(SegmentRootLookupItem, self.segment_root_lookup),
             .results = blk: {
@@ -455,7 +427,6 @@ pub const WorkReport = struct {
                 }
                 break :blk cloned_results;
             },
-            .stats = self.stats,
         };
     }
 
@@ -469,44 +440,6 @@ pub const WorkReport = struct {
         }
         allocator.free(self.results);
         self.* = undefined;
-    }
-
-    pub fn encode(self: *const @This(), comptime params: anytype, writer: anytype) !void {
-        const codec = @import("codec.zig");
-
-        // Encode each field in order
-        try codec.serialize(@TypeOf(self.package_spec), params, writer, self.package_spec);
-        try codec.serialize(@TypeOf(self.context), params, writer, self.context);
-
-        // Variable encode the core_index
-        try codec.writeInteger(self.core_index, writer);
-
-        try codec.serialize(@TypeOf(self.authorizer_hash), params, writer, self.authorizer_hash);
-        try codec.serialize(@TypeOf(self.auth_output), params, writer, self.auth_output);
-        try codec.serialize(@TypeOf(self.segment_root_lookup), params, writer, self.segment_root_lookup);
-        try codec.serialize(@TypeOf(self.results), params, writer, self.results);
-        try codec.serialize(@TypeOf(self.stats), params, writer, self.stats);
-    }
-
-    pub fn decode(comptime params: anytype, reader: anytype, allocator: std.mem.Allocator) !@This() {
-        const codec = @import("codec.zig");
-
-        var self: @This() = undefined;
-
-        // Decode each field in order
-        self.package_spec = try codec.deserializeAlloc(WorkPackageSpec, params, allocator, reader);
-        self.context = try codec.deserializeAlloc(RefineContext, params, allocator, reader);
-
-        // Variable decode the core_index
-        self.core_index = @as(CoreIndex, @truncate(try codec.readInteger(reader)));
-
-        self.authorizer_hash = try codec.deserializeAlloc(@TypeOf(self.authorizer_hash), params, allocator, reader);
-        self.auth_output = try codec.deserializeAlloc(@TypeOf(self.auth_output), params, allocator, reader);
-        self.segment_root_lookup = try codec.deserializeAlloc(@TypeOf(self.segment_root_lookup), params, allocator, reader);
-        self.results = try codec.deserializeAlloc(@TypeOf(self.results), params, allocator, reader);
-        self.stats = try codec.deserializeAlloc(@TypeOf(self.stats), params, allocator, reader);
-
-        return self;
     }
 };
 
@@ -638,18 +571,18 @@ pub const ValidatorSet = struct {
         }
         return error.ValidatorNotFound;
     }
-    
+
     /// Find indices of multiple validators by their public keys
     /// Returns an allocated slice of validator indices
     /// Caller must free the returned slice
     pub fn findValidatorIndices(self: ValidatorSet, allocator: std.mem.Allocator, comptime key_type: KeyType, keys: anytype) ![]ValidatorIndex {
         var indices = try allocator.alloc(ValidatorIndex, keys.len);
         errdefer allocator.free(indices);
-        
+
         for (keys, 0..) |key, i| {
             indices[i] = try self.findValidatorIndex(key_type, key);
         }
-        
+
         return indices;
     }
 
@@ -785,9 +718,9 @@ pub const HeaderUnsigned = struct {
     slot: TimeSlot,
     epoch_mark: ?EpochMark = null,
     tickets_mark: ?TicketsMark = null,
-    offenders_mark: []Ed25519Public,
     author_index: ValidatorIndex,
     entropy_source: BandersnatchVrfSignature,
+    offenders_mark: []Ed25519Public,
 
     /// Creates HeaderUnsigned from Header, excluding the seal.
     /// Used for encoding to bytes without allocations. Shares
@@ -814,9 +747,9 @@ pub const Header = struct {
     slot: TimeSlot,
     epoch_mark: ?EpochMark = null,
     tickets_mark: ?TicketsMark = null,
-    offenders_mark: []Ed25519Public,
     author_index: ValidatorIndex,
     entropy_source: BandersnatchVrfSignature,
+    offenders_mark: []Ed25519Public,
     seal: BandersnatchVrfSignature,
 
     // TODO: this should be cached on next call

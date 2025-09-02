@@ -6,6 +6,7 @@ const trace_runner = @import("trace_runner/runner.zig");
 const parsers = @import("trace_runner/parsers.zig");
 const messages = @import("fuzz_protocol/messages.zig");
 const version = @import("version.zig");
+const io = @import("io.zig");
 
 // Use FUZZ_PARAMS for consistency with fuzz protocol testing
 const FUZZ_PARAMS = jam_params.TINY_PARAMS;
@@ -22,6 +23,10 @@ const SKIPPED_TESTS = [_]SkippedTest{
         .id = "1754982087",
         .reason = "Invalid test: service ID generation used LE instead of varint (B.10)",
     },
+    // .{
+    //     .id = "1756548459",
+    //     .reason = "PolkaJam error: accepts service ID 2^32 which exceeds ℕ₃₂ domain [0, 2^32-1] per GP B.37. JamZig correctly returns WHO error.",
+    // },
     // .{
     //     .id = "1755530728",
     //     .reason = "PolkaJam error: expects less gas than actually consumed (13048 vs 13063)",
@@ -51,6 +56,7 @@ const TraceDir = struct {
             allocator.free(timestamp);
         }
         self.timestamps.deinit();
+        self.* = undefined;
     }
 };
 
@@ -76,6 +82,7 @@ const TraceCollection = struct {
             dir.deinit(self.allocator);
         }
         self.dirs.deinit();
+        self.* = undefined;
     }
 
     pub fn discover(self: *TraceCollection, paths: []const PathConfig) !void {
@@ -208,7 +215,11 @@ test "jam-conformance:traces" {
         const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
         const loader = w3f_loader.loader();
 
+        var sequential_executor = try io.SequentialExecutor.init(allocator);
+        defer sequential_executor.deinit();
         var run_result = try trace_runner.runTracesInDir(
+            io.SequentialExecutor,
+            &sequential_executor,
             FUZZ_PARAMS,
             loader,
             allocator,
@@ -308,6 +319,12 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
     const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
     const loader = w3f_loader.loader();
 
+    // Create executor for summary trace running
+    // const ExecutorType = io.ThreadPoolExecutor;
+    const ExecutorType = io.SequentialExecutor;
+    var executor = try ExecutorType.init(allocator);
+    defer executor.deinit();
+
     // Track results by source
     var source_stats = std.StringHashMap(struct {
         passed: usize,
@@ -387,6 +404,8 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
 
         // Try to run traces, catch and record any errors
         var run_result = trace_runner.runTracesInDir(
+            ExecutorType,
+            &executor,
             FUZZ_PARAMS,
             loader,
             allocator,

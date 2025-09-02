@@ -7,6 +7,6 @@ pub const Version = struct {
 
 pub const GRAYPAPER_VERSION = Version{
     .major = 0,
-    .minor = 6,
-    .patch = 7,
+    .minor = 7,
+    .patch = 0,
 };

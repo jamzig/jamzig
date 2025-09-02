@@ -249,14 +249,6 @@ pub fn HostCalls(comptime params: Params) type {
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
-            // Check if manager and validator service IDs are in the u32 domain
-            if (exec_ctx.registers[7] > std.math.maxInt(u32) or
-                exec_ctx.registers[9] > std.math.maxInt(u32))
-            {
-                span.debug("Manager or validator service ID exceeds u32 domain", .{});
-                return HostCallError.WHO;
-            }
-
             // Get registers per graypaper B.7: [m, a, v, o, n] = registers[7..+5]
             const manager_service_id: u32 = @truncate(exec_ctx.registers[7]); // m: Manager service ID
             const assign_ptr: u32 = @truncate(exec_ctx.registers[8]); // a: Pointer to assign service IDs array
@@ -274,14 +266,28 @@ pub fn HostCalls(comptime params: Params) type {
                 return HostCallError.FULL;
             };
 
+            // NOTE: that the order of these checks follows the graypaper
+            // specification exactly, to ensure we return the correct error
+            // codes.
+
             // Only the current manager service can call bless
             // Graypaper: returns HUH when x_s ≠ (x_u)_m
             if (ctx_regular.service_id != current_privileges.manager) {
                 span.debug("Unauthorized bless call from service {d}, current manager is {d}", .{
                     ctx_regular.service_id, current_privileges.manager,
                 });
-                exec_ctx.registers[7] = @intFromEnum(ReturnCode.HUH);
-                return .play;
+                return HostCallError.HUH;
+            }
+
+            // Check if manager and validator service IDs are in the u32 domain
+            if (exec_ctx.registers[7] > std.math.maxInt(u32) or
+                exec_ctx.registers[9] > std.math.maxInt(u32))
+            {
+                span.err(
+                    "Manager or validator service ID exceeds u32 domain. M={d} V={d}",
+                    .{ exec_ctx.registers[7], exec_ctx.registers[9] },
+                );
+                return HostCallError.WHO;
             }
 
             // Read assign service IDs from memory
@@ -565,7 +571,24 @@ pub fn HostCalls(comptime params: Params) type {
             const output_ptr = exec_ctx.registers[8]; // o: Pointer to authorizer queue data
             const new_assign_service = exec_ctx.registers[9]; // a: New assign service ID
 
-            // Check if core index is valid: c < C
+            // IMPORTANT: Check memory accessibility FIRST before validating core index
+            // This fixes conformance test 1756548741 where memory check must precede core validation
+
+            // Read authorizer hashes from memory - each hash is 32 bytes, and we need to read params.max_authorizations_queue_items of them
+            span.debug("Reading authorizer hashes from memory at 0x{x}", .{output_ptr});
+
+            // Calculate the total size of all authorizer hashes
+            const total_size: u32 = 32 * @as(u32, params.max_authorizations_queue_items);
+
+            // Read all hashes at once (this will panic if memory is invalid)
+            var hashes_data = exec_ctx.memory.readSlice(@truncate(output_ptr), total_size) catch {
+                span.err("Memory access failed while reading authorizer hashes", .{});
+                return .{ .terminal = .panic };
+            };
+            defer hashes_data.deinit();
+
+            // NOW check if core index is valid: c < C
+            // This check happens AFTER memory validation
             if (core_index >= params.core_count) {
                 span.debug("Invalid core index {d}, returning CORE error", .{core_index});
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.CORE);
@@ -585,19 +608,6 @@ pub fn HostCalls(comptime params: Params) type {
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.HUH);
                 return .play;
             }
-
-            // Read authorizer hashes from memory - each hash is 32 bytes, and we need to read params.max_authorizations_queue_items of them
-            span.debug("Reading authorizer hashes from memory at 0x{x}", .{output_ptr});
-
-            // Calculate the total size of all authorizer hashes
-            const total_size: u32 = 32 * @as(u32, params.max_authorizations_queue_items);
-
-            // Read all hashes at once
-            var hashes_data = exec_ctx.memory.readSlice(@truncate(output_ptr), total_size) catch {
-                span.err("Memory access failed while reading authorizer hashes", .{});
-                return .{ .terminal = .panic };
-            };
-            defer hashes_data.deinit();
 
             // Create a sequence of authorizer hashes
             const authorizer_hashes = std.mem.bytesAsSlice(types.AuthorizerHash, hashes_data.buffer);
@@ -833,8 +843,26 @@ pub fn HostCalls(comptime params: Params) type {
                 return .{ .terminal = .panic };
             };
 
-            if (!std.mem.eql(u8, &current_service.code_hash, &target_service.code_hash)) {
-                span.debug("Target service code hash doesn't match current code hah, returning WHO error", .{});
+            // FIX for conformance test 1756548706:
+            // Graypaper B.7 specifies that ejection is allowed if:
+            // 1. Current service's code hash matches target service's code hash, OR
+            // 2. The provided hash equals E_32(x_s) where x_s is the current service ID
+            // E_32 means 32-byte fixed-length encoding of the service ID (little-endian)
+
+            // Create E_32(x_s) - 32-byte fixed-length encoding of current service ID
+            var e32_service_id = std.mem.zeroes([32]u8);
+            // Encode the 4-byte service ID into the first 4 bytes (little-endian)
+            std.mem.writeInt(u32, e32_service_id[0..4], @intCast(ctx_regular.service_id), .little);
+
+            // provided hash must equal E_32(x_s) (special authorization)
+            const hash_is_e32_service = std.mem.eql(u8, &target_service.code_hash, &e32_service_id);
+
+            if (!hash_is_e32_service) {
+                span.debug("Ejection not authorized, returning WHO error", .{});
+                span.debug("Current service code hash: {s}", .{std.fmt.fmtSliceHexLower(&current_service.code_hash)});
+                span.debug("Target service code hash: {s}", .{std.fmt.fmtSliceHexLower(&target_service.code_hash)});
+                span.debug("Provided hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
+                span.debug("E_32(service_id={d}): {s}", .{ ctx_regular.service_id, std.fmt.fmtSliceHexLower(&e32_service_id) });
                 return HostCallError.WHO;
             }
 
@@ -1403,6 +1431,7 @@ pub fn HostCalls(comptime params: Params) type {
                         span.err("Failed to encode JAM chain constants", .{});
                         return HostCallError.NONE;
                     };
+                    span.trace("Constants encoded: {s}", .{std.fmt.fmtSliceHexLower(encoded_constants)});
                     data_to_fetch = encoded_constants;
                     needs_cleanup = true;
                 },

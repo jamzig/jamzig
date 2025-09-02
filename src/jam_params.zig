@@ -75,7 +75,7 @@ pub const Params = struct {
     // WR: Maximum size of an encoded work-report in octets
     max_work_report_size: u32 = 48 * (1 << 10), // 48 KB
     // WB: Maximum size of encoded work-package with extrinsic data and import implications
-    max_work_package_size_with_extrinsics: u32 = 12 * (1 << 20), // 12 MB
+    max_work_package_size_with_extrinsics: u32 = 13_794_305, // ~13.15 MB (graypaper v0.7.0)
 
     // ===== Authorization and Queue Parameters =====
 
@@ -105,10 +105,12 @@ pub const Params = struct {
     // ===== Erasure Coding Parameters =====
 
     // WE: Basic size of erasure-coded pieces in octets
+    // DERIVED: WE = W_G / W_P where W_G = 4104 (constant)
     erasure_coded_piece_size: u32 = 684,
     // WP: Number of erasure-coded pieces in a segment
     erasure_coded_pieces_per_segment: u32 = 6,
-    // WG: Size of a segment in octets (computed as WP * WE)
+    // WG: Size of a segment in octets - MUST always be 4104 (JAM protocol constant)
+    // INVARIANT: W_P * W_E = 4104 (enforced at compile time)
     segment_size: u16 = 4104,
 
     // ===== PVM (Polka Virtual Machine) Parameters =====
@@ -138,12 +140,6 @@ pub const Params = struct {
         return (self.core_count + 7) / 8;
     }
 
-    /// Calculate segment size in octets (WG = WP * WE)
-    pub fn segmentSizeInOctets(self: anytype) u32 {
-        // Works with both comptime and runtime params
-        return self.erasure_coded_pieces_per_segment * self.erasure_coded_piece_size;
-    }
-
     /// Get the Time type configured with this parameter set
     pub fn Time(comptime self: *const Params) type {
         return time.Time(self.epoch_length, self.slot_period, self.ticket_submission_end_epoch_slot);
@@ -162,15 +158,9 @@ pub const Params = struct {
             return error.InvalidBitfieldSize;
         }
 
-        // Ensure segment_size is correctly calculated
-        if (self.segment_size != self.segmentSizeInOctets()) {
-            std.debug.print("Segment size mismatch: expected {}, got {}\n", .{
-                self.segmentSizeInOctets(),
-                self.segment_size,
-            });
-            // TODO: assert that this is a calculated value and then remove
-            // self.segment_size for self.segmentSizeInOctets()
-            // return error.InvalidSegmentSize;
+        // Ensure segment size equals the protocol constant 4104
+        if (self.segment_size != self.erasure_coded_pieces_per_segment * self.erasure_coded_piece_size) {
+            return error.InvalidErasureCodingParams;
         }
     }
 
@@ -217,13 +207,47 @@ pub const TINY_PARAMS = Params{
     .preimage_expungement_period = 32, // Override from default 19,200
 
     // Erasure coding
+    .erasure_coded_piece_size = 4, // WE = W_G / W_P = 4104 / 1026 = 4
     .erasure_coded_pieces_per_segment = 1026,
+
+    // GT: Total gas allocated across all cores for Accumulation
+    // https://github.com/davxy/jam-test-vectors/pull/90#issuecomment-3217905803
+    .total_gas_alloc_accumulation = 20_000_000,
+    .gas_alloc_refine = 1_000_000_000, // Found by decoding the fetch value
 
     // All other fields use default values
 };
 
+// Compile-time validation for TINY_PARAMS
+comptime {
+    const tiny_product = TINY_PARAMS.erasure_coded_pieces_per_segment * TINY_PARAMS.erasure_coded_piece_size;
+    if (tiny_product != 4104) {
+        @compileError(std.fmt.comptimePrint(
+            "TINY_PARAMS: Invalid erasure coding parameters. W_P * W_E = {} * {} = {}, must equal 4104",
+            .{ TINY_PARAMS.erasure_coded_pieces_per_segment, TINY_PARAMS.erasure_coded_piece_size, tiny_product },
+        ));
+    }
+    if (TINY_PARAMS.segment_size != 4104) {
+        @compileError("TINY_PARAMS.segment_size must be 4104");
+    }
+}
+
 /// Full parameter set with default values for production use
 pub const FULL_PARAMS = Params{};
+
+// Compile-time validation for FULL_PARAMS (default)
+comptime {
+    const full_product = FULL_PARAMS.erasure_coded_pieces_per_segment * FULL_PARAMS.erasure_coded_piece_size;
+    if (full_product != 4104) {
+        @compileError(std.fmt.comptimePrint(
+            "FULL_PARAMS: Invalid erasure coding parameters. W_P * W_E = {} * {} = {}, must equal 4104",
+            .{ FULL_PARAMS.erasure_coded_pieces_per_segment, FULL_PARAMS.erasure_coded_piece_size, full_product },
+        ));
+    }
+    if (FULL_PARAMS.segment_size != 4104) {
+        @compileError("FULL_PARAMS.segment_size must be 4104");
+    }
+}
 
 test "format JamParams" {
     std.debug.print("\n{s}\n", .{TINY_PARAMS});

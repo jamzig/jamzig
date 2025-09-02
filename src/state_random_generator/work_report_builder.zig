@@ -17,7 +17,7 @@ pub const WorkReportBuilder = struct {
             .moderate => 128,
             .maximal => 512,
         };
-        
+
         try auth_output.resize(auth_output_size);
         random.bytes(auth_output.items);
 
@@ -65,7 +65,7 @@ pub const WorkReportBuilder = struct {
 
         const auth_output_slice = try auth_output.toOwnedSlice();
         errdefer allocator.free(auth_output_slice);
-        
+
         const results_slice = try results.toOwnedSlice();
         errdefer {
             for (results_slice) |*result| {
@@ -77,12 +77,16 @@ pub const WorkReportBuilder = struct {
         return types.WorkReport{
             .package_spec = generateRandomWorkPackageSpec(random, complexity),
             .context = context,
-            .core_index = random.int(types.CoreIndex),
+            .core_index = types.VarInt(types.CoreIndex).init(random.int(types.CoreIndex)),
             .authorizer_hash = generateRandomHash(random),
+            .auth_gas_used = types.VarInt(types.Gas).init(switch (complexity) {
+                .minimal => random.intRangeAtMost(types.Gas, 1000, 10000),
+                .moderate => random.intRangeAtMost(types.Gas, 10000, 100000),
+                .maximal => random.intRangeAtMost(types.Gas, 100000, 1000000),
+            }),
             .auth_output = auth_output_slice,
             .segment_root_lookup = segment_root_lookup,
             .results = results_slice,
-            .stats = generateRandomWorkReportStats(random, complexity),
         };
     }
 
@@ -100,7 +104,7 @@ pub const WorkReportBuilder = struct {
             .moderate => random.intRangeAtMost(u16, 64, 512),
             .maximal => random.intRangeAtMost(u16, 512, 2048),
         };
-        
+
         try payload.resize(payload_size);
         random.bytes(payload.items);
 
@@ -118,6 +122,8 @@ pub const WorkReportBuilder = struct {
             else => unreachable,
         };
 
+        const VarInt = types.VarInt;
+
         return types.WorkResult{
             .service_id = random.int(types.ServiceId),
             .code_hash = generateRandomHash(random),
@@ -125,11 +131,11 @@ pub const WorkReportBuilder = struct {
             .accumulate_gas = random.intRangeAtMost(types.Gas, 1000, 100000),
             .result = exec_result,
             .refine_load = types.RefineLoad{
-                .gas_used = random.intRangeAtMost(types.Gas, 100, 50000),
-                .imports = random.intRangeAtMost(u16, 0, 8),
-                .extrinsic_count = random.intRangeAtMost(u16, 0, 4),
-                .extrinsic_size = random.intRangeAtMost(u32, 0, 1024),
-                .exports = random.intRangeAtMost(u16, 0, 8),
+                .gas_used = VarInt(types.Gas).init(random.intRangeAtMost(types.Gas, 100, 50000)),
+                .imports = VarInt(u16).init(random.intRangeAtMost(u16, 0, 8)),
+                .extrinsic_count = VarInt(u16).init(random.intRangeAtMost(u16, 0, 4)),
+                .extrinsic_size = VarInt(u32).init(random.intRangeAtMost(u32, 0, 1024)),
+                .exports = VarInt(u16).init(random.intRangeAtMost(u16, 0, 8)),
             },
         };
     }
@@ -205,22 +211,10 @@ pub const WorkReportBuilder = struct {
         return try lookup_items.toOwnedSlice();
     }
 
-    fn generateRandomWorkReportStats(
-        random: std.Random,
-        complexity: @import("../state_random_generator.zig").StateComplexity,
-    ) types.WorkReportStats {
-        return types.WorkReportStats{
-            .auth_gas_used = switch (complexity) {
-                .minimal => random.intRangeAtMost(types.Gas, 1000, 10000),
-                .moderate => random.intRangeAtMost(types.Gas, 10000, 100000),
-                .maximal => random.intRangeAtMost(types.Gas, 100000, 1000000),
-            },
-        };
-    }
-
     fn generateRandomHash(random: std.Random) types.Hash {
         var hash: types.Hash = undefined;
         random.bytes(&hash);
         return hash;
     }
 };
+

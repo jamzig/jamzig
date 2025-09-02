@@ -8,6 +8,8 @@ const Params = @import("jam_params.zig").Params;
 
 const Allocator = std.mem.Allocator;
 
+const trace = @import("tracing.zig").scoped(.service_state_keys);
+
 pub const Transfer = struct {
     from: ServiceId,
     to: ServiceId,
@@ -177,26 +179,77 @@ pub const ServiceAccount = struct {
     // Functionality to read and write storage, reflecting access patterns in Section 4.9.2 on Service State.
     pub fn readStorage(self: *const ServiceAccount, service_id: u32, key: []const u8) ?[]const u8 {
         const storage_key = state_keys.constructStorageKey(service_id, key);
-        return self.data.get(storage_key);
+        const value = self.data.get(storage_key);
+
+        const span = trace.span(.storage_read);
+        defer span.deinit();
+        span.debug("Storage READ - Service: {d}, Key: {s} ({d} bytes), StateKey: {s}, Found: {}", .{
+            service_id,
+            std.fmt.fmtSliceHexLower(key),
+            key.len,
+            &formatStateKey(storage_key),
+            value != null,
+        });
+
+        if (value) |v| {
+            span.trace("  Value: {}", .{formatValue(v)});
+        }
+
+        return value;
     }
 
     pub fn resetStorage(self: *ServiceAccount, service_id: u32, key: []const u8) void {
         const storage_key = state_keys.constructStorageKey(service_id, key);
+
+        const span = trace.span(.storage_reset);
+        defer span.deinit();
+
         if (self.data.getPtr(storage_key)) |old_value_ptr| {
+            span.debug("Storage RESET - Service: {d}, Key: {s} ({d} bytes), StateKey: {s}, Prior: {d} bytes", .{
+                service_id,
+                std.fmt.fmtSliceHexLower(key),
+                key.len,
+                &formatStateKey(storage_key),
+                old_value_ptr.len,
+            });
+
             // Update a_o - reduce bytes by old value length (key overhead stays)
             self.footprint_bytes = self.footprint_bytes - old_value_ptr.len;
 
             self.data.allocator.free(old_value_ptr.*);
             self.data.put(storage_key, &[_]u8{}) catch unreachable;
             // Empty value doesn't add bytes
+        } else {
+            span.debug("Storage RESET - Service: {d}, Key: {s} ({d} bytes), StateKey: {s}, Not found", .{
+                service_id,
+                std.fmt.fmtSliceHexLower(key),
+                key.len,
+                &formatStateKey(storage_key),
+            });
         }
     }
 
     // Returns the length of the removed value
     pub fn removeStorage(self: *ServiceAccount, service_id: u32, key: []const u8) ?usize {
         const storage_key = state_keys.constructStorageKey(service_id, key);
+
+        const span = trace.span(.storage_remove);
+        defer span.deinit();
+
         if (self.data.fetchRemove(storage_key)) |entry| {
             const value_length = entry.value.len;
+
+            span.debug("Storage REMOVE - Service: {d}, Key: {s} ({d} bytes), StateKey: {s}, Removed: {d} bytes", .{
+                service_id,
+                std.fmt.fmtSliceHexLower(key),
+                key.len,
+                &formatStateKey(storage_key),
+                value_length,
+            });
+
+            // In trace mode, show what was removed
+            span.trace("  Removed value: {}", .{formatValue(entry.value)});
+
             // Update a_i and a_o for storage removal
             self.footprint_items -= 1; // One storage item removed
             self.footprint_bytes -= 34 + key.len + value_length; // 34 + key length + value length
@@ -204,6 +257,14 @@ pub const ServiceAccount = struct {
             self.data.allocator.free(entry.value);
             return value_length;
         }
+
+        span.debug("Storage REMOVE - Service: {d}, Key: {s} ({d} bytes), StateKey: {s}, Not found", .{
+            service_id,
+            std.fmt.fmtSliceHexLower(key),
+            key.len,
+            &formatStateKey(storage_key),
+        });
+
         return null; // Key not found
     }
 
@@ -211,6 +272,23 @@ pub const ServiceAccount = struct {
         const storage_key = state_keys.constructStorageKey(service_id, key);
         // Clear the old, otherwise we are leaking
         const old_value = self.data.get(storage_key);
+
+        const span = trace.span(.storage_write);
+        defer span.deinit();
+        span.debug("Storage WRITE - Service: {d}, Key: {s} ({d} bytes), StateKey: {s}, Value: {d} bytes, Prior: {d} bytes", .{
+            service_id,
+            std.fmt.fmtSliceHexLower(key),
+            key.len,
+            &formatStateKey(storage_key),
+            value.len,
+            if (old_value) |old| old.len else 0,
+        });
+
+        // In trace mode, show the full value being written (up to 512 bytes)
+        span.trace("  Value: {}", .{formatValue(value)});
+        if (old_value) |old| {
+            span.trace("  Prior: {}", .{formatValue(old)});
+        }
 
         // Update a_i and a_o based on whether this is new or update
         if (old_value) |old| {
@@ -242,6 +320,16 @@ pub const ServiceAccount = struct {
     pub fn dupeAndAddPreimage(self: *ServiceAccount, key: types.StateKey, preimage: []const u8) !void {
         const new_preimage = try self.data.allocator.dupe(u8, preimage);
 
+        const span = trace.span(.preimage_add);
+        defer span.deinit();
+        span.debug("Preimage ADD - StateKey: {s}, Size: {d} bytes", .{
+            &formatStateKey(key),
+            preimage.len,
+        });
+
+        // In trace mode, show the preimage (up to 512 bytes)
+        span.trace("  Preimage: {}", .{formatValue(preimage)});
+
         // Preimages do NOT affect a_i or a_o according to the graypaper
         // They are stored separately and don't contribute to storage footprint
 
@@ -249,35 +337,20 @@ pub const ServiceAccount = struct {
     }
 
     pub fn getPreimage(self: *const ServiceAccount, key: types.StateKey) ?[]const u8 {
-        return self.data.get(key);
-    }
+        const value = self.data.get(key);
 
-    /// Legacy compatibility method for hash-based preimage access
-    /// TEMPORARY: Will be removed when all callers use structured keys
-    pub fn getPreimageByHash(self: *const ServiceAccount, hash: Hash) ?[]const u8 {
-        // Iterate through all data to find a preimage that matches the hash
-        // This is inefficient but needed for compatibility during transition
-        var iter = self.data.iterator();
-        while (iter.next()) |entry| {
-            const key = entry.key_ptr.*;
+        const span = trace.span(.preimage_get);
+        defer span.deinit();
+        span.debug("Preimage GET - StateKey: {s}, Found: {}", .{
+            &formatStateKey(key),
+            value != null,
+        });
 
-            // Extract hash portion from structured preimage key
-            // C_variant3 format: [n₀, h₀, n₁, h₁, n₂, h₂, n₃, h₃, h₄, h₅, ..., h₂₆]
-            // For preimage keys, data = [254, 255, 255, 255, h₁, h₂, ..., h₂₈]
-            // Result: [n₀, 254, n₁, 255, n₂, 255, n₃, 255, h₁, h₂, ..., h₂₈]
-
-            // Check if this is actually a preimage key by verifying the marker pattern
-            if (key[1] != 254 or key[3] != 255 or key[5] != 255 or key[7] != 255) {
-                continue; // Not a preimage key
-            }
-
-            // Hash bytes h₁...h₂₈ are at positions 8-30 in the key
-            // Compare with hash[1..29] (we skip h₀ since it's not stored in the key)
-            if (std.mem.eql(u8, key[8..31], hash[1..29])) {
-                return entry.value_ptr.*;
-            }
+        if (value) |v| {
+            span.trace("  Preimage: {}", .{formatValue(v)});
         }
-        return null;
+
+        return value;
     }
 
     pub fn hasPreimage(self: *const ServiceAccount, key: types.StateKey) bool {
@@ -328,8 +401,20 @@ pub const ServiceAccount = struct {
     //  preimage. It should not be available already.
     pub fn getPreimageLookup(self: *const ServiceAccount, service_id: u32, hash: Hash, length: u32) ?PreimageLookup {
         const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
-        const data = self.data.get(key) orelse return null;
-        return decodePreimageLookup(data) catch null;
+        const data = self.data.get(key);
+
+        const span = trace.span(.preimage_lookup);
+        defer span.deinit();
+        span.debug("Preimage LOOKUP - Service: {d}, Hash: {s}, Length: {d}, StateKey: {s}, Found: {}", .{
+            service_id,
+            std.fmt.fmtSliceHexLower(&hash),
+            length,
+            &formatStateKey(key),
+            data != null,
+        });
+
+        if (data == null) return null;
+        return decodePreimageLookup(data.?) catch null;
     }
 
     /// Created an entry in preimages_lookups indicating we need a preimage
@@ -343,6 +428,16 @@ pub const ServiceAccount = struct {
 
         // TODO: refactor this and make this state keys usage toward storage consistent.
         const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
+
+        const span = trace.span(.preimage_solicit);
+        defer span.deinit();
+        span.debug("Preimage SOLICIT - Service: {d}, Hash: {s}, Length: {d}, StateKey: {s}, Slot: {d}", .{
+            service_id,
+            std.fmt.fmtSliceHexLower(&hash),
+            length,
+            &formatStateKey(key),
+            current_timeslot,
+        });
 
         // Check if we already have an entry for this hash/length
         if (self.data.get(key)) |existing_data| {
@@ -402,28 +497,43 @@ pub const ServiceAccount = struct {
     ) !void {
         // we can remove the entries when timeout occurred
         const lookup_key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
+
+        const span = trace.span(.preimage_forget);
+        defer span.deinit();
+        span.debug("Preimage FORGET - Service: {d}, Hash: {s}, Length: {d}, StateKey: {s}, Slot: {d}", .{
+            service_id,
+            std.fmt.fmtSliceHexLower(&hash),
+            length,
+            &formatStateKey(lookup_key),
+            current_slot,
+        });
+
         if (self.data.get(lookup_key)) |existing_data| {
             var preimage_lookup = try decodePreimageLookup(existing_data);
             var pi = preimage_lookup.asSliceMut();
             if (pi.len == 0) {
+                span.trace("  Action: Removing empty lookup and preimage", .{});
                 self.data.allocator.free(existing_data);
                 _ = self.data.remove(lookup_key);
                 self.footprint_items -= 2; // Each lookup removal subtracts 2 from a_i
                 self.footprint_bytes -= 81 + length; // Subtract from a_o
                 self.removePreimageByHash(service_id, hash);
             } else if (pi.len == 1) {
+                span.trace("  Action: Marking preimage as unavailable [{?}] -> [{?}, {?}]", .{ pi[0], pi[0], current_slot });
                 preimage_lookup.status[1] = current_slot; // [x, t]
                 // Re-encode and store
                 const encoded = try encodePreimageLookup(self.data.allocator, preimage_lookup);
                 self.data.allocator.free(existing_data);
                 try self.data.put(lookup_key, encoded);
             } else if (pi.len == 2 and pi[1].? < current_slot -| preimage_expungement_period) {
+                span.trace("  Action: Expunging expired preimage [{?}, {?}]", .{ pi[0], pi[1] });
                 self.data.allocator.free(existing_data);
                 _ = self.data.remove(lookup_key);
                 self.footprint_items -= 2; // Each lookup removal subtracts 2 from a_i
                 self.footprint_bytes -= 81 + length; // Subtract from a_o
                 self.removePreimageByHash(service_id, hash);
             } else if (pi.len == 3 and pi[1].? < current_slot -| preimage_expungement_period) {
+                span.trace("  Action: Re-marking as unavailable [{?}, {?}, {?}] -> [{?}, {?}]", .{ pi[0], pi[1], pi[2], pi[2], current_slot });
                 // [x,y,w]
                 pi[0] = pi[2];
                 pi[1] = current_slot;
@@ -433,10 +543,12 @@ pub const ServiceAccount = struct {
                 self.data.allocator.free(existing_data);
                 try self.data.put(lookup_key, encoded);
             } else {
+                span.trace("  Action: No action taken - incorrect state or not expired", .{});
                 // TODO: check this against GP
                 return error.IncorrectPreimageLookupState;
             }
         } else {
+            span.debug("  Lookup not found", .{});
             return error.PreimageLookupKeyMissing;
         }
     }
@@ -496,8 +608,19 @@ pub const ServiceAccount = struct {
     ) !void {
         const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
 
+        const span = trace.span(.preimage_register);
+        defer span.deinit();
+        span.debug("Preimage REGISTER - Service: {d}, Hash: {s}, Length: {d}, StateKey: {s}, Slot: {?}", .{
+            service_id,
+            std.fmt.fmtSliceHexLower(&hash),
+            length,
+            &formatStateKey(key),
+            timeslot,
+        });
+
         // If we do not have one, easy just set first on and ready
         const existing_data = self.data.get(key) orelse {
+            span.trace("  Action: Creating new lookup with slot [{?}]", .{timeslot});
             // If no lookup exists yet, create a new one with timeslot as the first entry
             const new_lookup = PreimageLookup{
                 .status = .{ timeslot, null, null },
@@ -520,8 +643,10 @@ pub const ServiceAccount = struct {
         // - If first slot is set but second is and third null, set update te first slot
         // - If first and second slots are set, set the third slot (marking available again)
         if (status.len <= 1) {
+            span.trace("  Action: Updating lookup [{?}] -> [{?}]", .{ if (status.len > 0) status[0] else null, timeslot });
             updated_lookup.status[0] = timeslot;
         } else if (status.len >= 2) {
+            span.trace("  Action: Marking available again [{?}, {?}] -> [{?}, {?}, {?}]", .{ status[0], status[1], status[0], status[1], timeslot });
             updated_lookup.status[2] = timeslot;
         }
 
@@ -808,3 +933,52 @@ pub const Delta = struct {
         self.* = undefined;
     }
 };
+
+// == Trace helpers
+
+fn formatStateKey(key: types.StateKey) [19]u8 {
+    var buf: [19]u8 = undefined;
+    _ = std.fmt.bufPrint(&buf, "{x:0>2}{x:0>2}{x:0>2}{x:0>2}..{x:0>2}{x:0>2}{x:0>2}{x:0>2}", .{
+        key[0],  key[1],  key[2],  key[3],
+        key[27], key[28], key[29], key[30],
+    }) catch unreachable;
+    return buf;
+}
+
+const FormattedValue = struct {
+    data: []const u8,
+    truncated: bool,
+
+    pub fn format(
+        self: FormattedValue,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        // Write the hex data
+        try writer.print("{s}", .{std.fmt.fmtSliceHexLower(self.data)});
+
+        // If truncated, add indicator
+        if (self.truncated) {
+            try writer.writeAll("... (truncated)");
+        }
+    }
+};
+
+fn formatValue(value: []const u8) FormattedValue {
+    const max_bytes = 512;
+    if (value.len <= max_bytes) {
+        return FormattedValue{
+            .data = value,
+            .truncated = false,
+        };
+    } else {
+        return FormattedValue{
+            .data = value[0..max_bytes],
+            .truncated = true,
+        };
+    }
+}

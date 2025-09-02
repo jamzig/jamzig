@@ -21,11 +21,11 @@ pub fn createEmptyWorkReport(id: [32]u8) WorkReport {
             .lookup_anchor_slot = 0,
             .prerequisites = &[_]types.OpaqueHash{},
         },
-        .core_index = 0,
+        .core_index = types.VarInt(types.CoreIndex).init(0),
         .authorizer_hash = [_]u8{0} ** 32,
+        .auth_gas_used = types.VarInt(types.Gas).init(0),
         .segment_root_lookup = &[_]types.SegmentRootLookupItem{},
         .auth_output = &[_]u8{},
         .results = &[_]types.WorkResult{},
-        .stats = .{ .auth_gas_used = 0 },
     };
 }

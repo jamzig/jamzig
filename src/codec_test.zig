@@ -19,31 +19,65 @@ const TestCase = struct {
     domain_type: []const u8,
 };
 
-const test_cases = [_]TestCase{
-    .{ .name = "header_0", .domain_type = "Header" },
-    .{ .name = "header_1", .domain_type = "Header" },
-    .{ .name = "extrinsic", .domain_type = "Extrinsic" },
-    .{ .name = "block", .domain_type = "Block" },
-    .{ .name = "assurances_extrinsic", .domain_type = "AssurancesExtrinsic" },
-    .{ .name = "disputes_extrinsic", .domain_type = "DisputesExtrinsic" },
-    .{ .name = "guarantees_extrinsic", .domain_type = "GuaranteesExtrinsic" },
-    .{ .name = "preimages_extrinsic", .domain_type = "PreimagesExtrinsic" },
-    .{ .name = "refine_context", .domain_type = "RefineContext" },
-    .{ .name = "tickets_extrinsic", .domain_type = "TicketsExtrinsic" },
-    .{ .name = "work_item", .domain_type = "WorkItem" },
-    .{ .name = "work_package", .domain_type = "WorkPackage" },
-    .{ .name = "work_report", .domain_type = "WorkReport" },
-    .{ .name = "work_result_0", .domain_type = "WorkResult" },
-    .{ .name = "work_result_1", .domain_type = "WorkResult" },
-};
+test "codec: decode header_0" {
+    try testDecodeAndCompare(.{ .name = "header_0", .domain_type = "Header" });
+}
 
-test "codec: decode" {
-    inline for (test_cases) |test_case| {
-        const test_name = "codec: decode " ++ test_case.name;
-        std.debug.print("{s}\n", .{test_name});
+test "codec: decode header_1" {
+    try testDecodeAndCompare(.{ .name = "header_1", .domain_type = "Header" });
+}
 
-        try testDecodeAndCompare(test_case);
-    }
+test "codec: decode extrinsic" {
+    try testDecodeAndCompare(.{ .name = "extrinsic", .domain_type = "Extrinsic" });
+}
+
+test "codec: decode block" {
+    try testDecodeAndCompare(.{ .name = "block", .domain_type = "Block" });
+}
+
+test "codec: decode assurances_extrinsic" {
+    try testDecodeAndCompare(.{ .name = "assurances_extrinsic", .domain_type = "AssurancesExtrinsic" });
+}
+
+test "codec: decode disputes_extrinsic" {
+    try testDecodeAndCompare(.{ .name = "disputes_extrinsic", .domain_type = "DisputesExtrinsic" });
+}
+
+test "codec: decode guarantees_extrinsic" {
+    try testDecodeAndCompare(.{ .name = "guarantees_extrinsic", .domain_type = "GuaranteesExtrinsic" });
+}
+
+test "codec: decode preimages_extrinsic" {
+    try testDecodeAndCompare(.{ .name = "preimages_extrinsic", .domain_type = "PreimagesExtrinsic" });
+}
+
+test "codec: decode refine_context" {
+    try testDecodeAndCompare(.{ .name = "refine_context", .domain_type = "RefineContext" });
+}
+
+test "codec: decode tickets_extrinsic" {
+    try testDecodeAndCompare(.{ .name = "tickets_extrinsic", .domain_type = "TicketsExtrinsic" });
+}
+
+test "codec: decode work_item" {
+    try testDecodeAndCompare(.{ .name = "work_item", .domain_type = "WorkItem" });
+}
+
+// TODO: Fix work_package codec test - field order/encoding issue
+test "codec: decode work_package" {
+    try testDecodeAndCompare(.{ .name = "work_package", .domain_type = "WorkPackage" });
+}
+
+test "codec: decode work_report" {
+    try testDecodeAndCompare(.{ .name = "work_report", .domain_type = "WorkReport" });
+}
+
+test "codec: decode work_result_0" {
+    try testDecodeAndCompare(.{ .name = "work_result_0", .domain_type = "WorkResult" });
+}
+
+test "codec: decode work_result_1" {
+    try testDecodeAndCompare(.{ .name = "work_result_1", .domain_type = "WorkResult" });
 }
 
 /// Helper function to decode and compare test vectors

@@ -1,6 +1,7 @@
 const std = @import("std");
 const clap = @import("clap");
 const tracing = @import("tracing.zig");
+const io = @import("io.zig");
 
 const target = @import("fuzz_protocol/target.zig");
 const TargetServer = target.TargetServer;
@@ -107,13 +108,20 @@ pub fn main() !void {
     std.debug.print("\n", .{});
 
     const restart_behavior: RestartBehavior = if (exit_on_disconnect) .exit_on_disconnect else .restart_on_disconnect;
-    var server = try TargetServer.init(allocator, socket_path, restart_behavior);
+
+    // const ExecutorType = io.SequentialExecutor;
+    const ExecutorType = io.ThreadPoolExecutor;
+
+    var executor = try ExecutorType.init(allocator);
+    defer executor.deinit();
+
+    var server = try TargetServer(ExecutorType).init(&executor, allocator, socket_path, restart_behavior);
     defer server.deinit();
 
     // Setup signal handler for graceful shutdown
     // Note: Signal handlers must use global state as they can't capture context
     const shutdown_requested = struct {
-        var server_ref: ?*TargetServer = null;
+        var server_ref: ?*TargetServer(ExecutorType) = null;
     };
     shutdown_requested.server_ref = &server;
 

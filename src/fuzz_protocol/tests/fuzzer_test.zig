@@ -4,12 +4,16 @@ const net = std.net;
 
 const jam_params = @import("../../jam_params.zig");
 
-const FuzzTargetInThread = @import("../target_manager.zig").FuzzTargetInThread;
+const target_manager = @import("../target_manager.zig");
+const FuzzTargetInThread = target_manager.FuzzTargetInThread;
 const RestartBehavior = @import("../target.zig").RestartBehavior;
 
-const Fuzzer = @import("../fuzzer.zig").Fuzzer;
+const io = @import("../../io.zig");
+const fuzzer_mod = @import("../fuzzer.zig");
 const messages = @import("../messages.zig");
 const report = @import("../report.zig");
+
+const Fuzzer = fuzzer_mod.Fuzzer;
 
 const trace = @import("../../tracing.zig").scoped(.fuzz_protocol);
 
@@ -23,7 +27,9 @@ test "fuzzer_initialization" {
     const socket_path = "/tmp/test_fuzzer_init.sock";
     const seed: u64 = 12345;
 
-    var fuzzer = try Fuzzer.create(allocator, seed, socket_path);
+    var executor = try io.SequentialExecutor.init(allocator);
+
+    var fuzzer = try Fuzzer(io.SequentialExecutor).create(&executor, allocator, seed, socket_path);
     defer fuzzer.destroy();
 
     // Verify initialization
@@ -41,13 +47,17 @@ test "fuzzer_basic_cycle" {
     const seed: u64 = 54321;
 
     // Start the target server in the background
-    var target_manager = FuzzTargetInThread.init(allocator, socket_path, .exit_on_disconnect);
-    defer target_manager.join();
+    // Create executor for the target manager
+    var executor = try io.SequentialExecutor.init(allocator);
+    defer executor.deinit();
+
+    var target_mgr = FuzzTargetInThread(io.SequentialExecutor).init(&executor, allocator, socket_path, .exit_on_disconnect);
+    defer target_mgr.join();
 
     // Start the fuzz target
-    try target_manager.start();
+    try target_mgr.start();
 
-    var fuzzer = try Fuzzer.create(allocator, seed, socket_path);
+    var fuzzer = try Fuzzer(io.SequentialExecutor).create(&executor, allocator, seed, socket_path);
     defer fuzzer.destroy();
 
     // std.time.sleep(std.time.ns_per_s * 1); // Give some time for the target to start

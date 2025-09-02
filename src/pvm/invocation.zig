@@ -21,7 +21,7 @@ const MachineInvocationResult = struct {
 
 /// Machine invocation function implementing the Y function from the JAM specification.
 /// Y: (Y, Y_{:Z_I}) → (Y, regs, ram)?
-/// 
+///
 /// The function takes a program blob (p) and argument data (a) as separate parameters,
 /// where the program blob may optionally contain metadata prefix followed by the standard format:
 /// [optional: E(|metadata|) ∥ metadata] ∥ E_3(|o|) ∥ E_3(|w|) ∥ E_2(z) ∥ E_3(s) ∥ o ∥ w ∥ E_4(|c|) ∥ c
@@ -65,6 +65,8 @@ pub fn machineInvocation(
     // Run the machine invocation
     return .{
         .result = result,
-        .gas_used = @intCast(@as(i64, gas) - exec_ctx.gas),
+        // since gas could be negative on a host_call executed at the end of an execution
+        // we will round any negative gas to 0
+        .gas_used = @intCast(@as(i64, gas) - @max(exec_ctx.gas, 0)),
     };
 }

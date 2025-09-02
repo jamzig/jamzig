@@ -8,7 +8,7 @@ edition = "2021"
 
 [dependencies]
 ark-serialize = "0.5.0"
-ark-vrf = { git = "https://github.com/davxy/ark-vrf", rev = "bf2d1cf", features = ["bandersnatch", "ring", "parallel"] }
+ark-vrf = { git = "https://github.com/davxy/ark-vrf", rev = "bf2d1cf", features = ["bandersnatch", "ring", "parallel"] } # Parallel, spawns cpu threads
 
 hex = "0.4.3"
 libc = "0.2.167"

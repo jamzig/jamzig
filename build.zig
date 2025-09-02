@@ -45,11 +45,27 @@ pub fn build(b: *std.Build) !void {
         .conformance_params = base_config.conformance_params,
     };
 
+    // Create target-specific optimized configuration with disabled tracing
+    const target_config = BuildConfig{
+        .tracing_scopes = &[_][]const u8{}, // Empty - no tracing scopes
+        .tracing_level = "", // No default level
+        .tracing_mode = .disabled, // Compile out all tracing
+        .conformance_params = base_config.conformance_params,
+    };
+
     // Create conformance configuration with runtime tracing
     const testing_config = BuildConfig{
         .tracing_scopes = base_config.tracing_scopes,
         .tracing_level = base_config.tracing_level,
         .tracing_mode = .runtime, // Force runtime tracing for conformance tools
+        .conformance_params = base_config.conformance_params,
+    };
+
+    // Create benchmark configuration optimized for performance - no debugging
+    const bench_config = BuildConfig{
+        .tracing_scopes = &[_][]const u8{}, // No tracing scopes
+        .tracing_level = "", // No tracing level
+        .tracing_mode = .disabled, // Compile out all tracing
         .conformance_params = base_config.conformance_params,
     };
 
@@ -60,8 +76,14 @@ pub fn build(b: *std.Build) !void {
     const conformance_build_options = b.addOptions();
     applyBuildConfig(conformance_build_options, conformance_config);
 
+    const target_build_options = b.addOptions();
+    applyBuildConfig(target_build_options, target_config);
+
     const testing_build_options = b.addOptions();
     applyBuildConfig(testing_build_options, testing_config);
+
+    const bench_build_options = b.addOptions();
+    applyBuildConfig(bench_build_options, bench_config);
 
     // Dependencies
     const dep_opts = .{ .target = target, .optimize = optimize };
@@ -145,7 +167,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    jam_conformance_target.root_module.addOptions("build_options", conformance_build_options);
+    jam_conformance_target.root_module.addOptions("build_options", target_build_options);
     jam_conformance_target.root_module.addImport("clap", clap_module);
     jam_conformance_target.linkLibCpp();
     rust_deps.staticallyLinkTo(jam_conformance_target);
@@ -239,6 +261,42 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
+    // Add test vectors step - focused testing of JAM specification compliance
+    const test_vectors = b.addTest(.{
+        .root_source_file = b.path("src/jamtestvectors_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .test_runner = .{
+            .path = b.path("src/tests/runner.zig"),
+            .mode = .simple,
+        },
+        .filters = test_filters,
+    });
+
+    test_vectors.root_module.addOptions("build_options", testing_build_options);
+    test_vectors.root_module.addImport("pretty", pretty_module);
+    test_vectors.root_module.addImport("diffz", diffz_module);
+    test_vectors.root_module.addImport("tmpfile", tmpfile_module);
+
+    test_vectors.root_module.addImport("uuid", uuid_module);
+    test_vectors.root_module.addImport("xev", xev_mod);
+    test_vectors.root_module.addImport("network", zig_network_mod);
+    test_vectors.root_module.addImport("lsquic", lsquic_mod);
+    test_vectors.root_module.addImport("ssl", ssl_mod);
+    test_vectors.root_module.addImport("base32", base32_mod);
+    test_vectors.linkLibCpp();
+
+    // Statically link our rust_deps to the test vectors
+    rust_deps.staticallyLinkTo(test_vectors);
+
+    const run_test_vectors = b.addRunArtifact(test_vectors);
+    if (b.args) |args| {
+        run_test_vectors.addArgs(args);
+    }
+
+    const test_vectors_step = b.step("test-vectors", "Run JAM test vector compliance tests");
+    test_vectors_step.dependOn(&run_test_vectors.step);
+
     // Add FFI test step
     const test_ffi_step = b.step("test-ffi", "Run FFI unit tests");
 
@@ -250,6 +308,24 @@ pub fn build(b: *std.Build) !void {
     test_ffi_step.dependOn(crypto_tests);
     test_ffi_step.dependOn(reed_solomon_tests);
     test_ffi_step.dependOn(polkavm_tests);
+
+    // Add block import benchmark step
+    const bench_block_import = b.addExecutable(.{
+        .name = "bench-block-import",
+        .root_source_file = b.path("src/bench_block_import.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    bench_block_import.root_module.addOptions("build_options", bench_build_options);
+    bench_block_import.root_module.addImport("pretty", pretty_module);
+    bench_block_import.root_module.addImport("diffz", diffz_module);
+    bench_block_import.linkLibCpp();
+    rust_deps.staticallyLinkTo(bench_block_import);
+
+    const run_bench_block_import = b.addRunArtifact(bench_block_import);
+    const bench_block_import_step = b.step("bench-block-import", "Run block import benchmarks");
+    bench_block_import_step.dependOn(&run_bench_block_import.step);
 }
 
 const RustDeps = struct {

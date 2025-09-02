@@ -98,7 +98,7 @@ pub fn checkDuplicatePackageInRecentHistory(
 
     // Also check against other guarantees in the current batch
     for (guarantees.data) |g| {
-        if (g.report.core_index != guarantee.report.core_index and
+        if (g.report.core_index.value != guarantee.report.core_index.value and
             std.mem.eql(u8, &g.report.package_spec.hash, &package_hash))
         {
             span.err("Found duplicate package in current guarantees batch", .{});
