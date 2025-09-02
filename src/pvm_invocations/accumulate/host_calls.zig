@@ -249,17 +249,6 @@ pub fn HostCalls(comptime params: Params) type {
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
-            // Check if manager and validator service IDs are in the u32 domain
-            if (exec_ctx.registers[7] > std.math.maxInt(u32) or
-                exec_ctx.registers[9] > std.math.maxInt(u32))
-            {
-                span.err(
-                    "Manager or validator service ID exceeds u32 domain. M={d} V={d}",
-                    .{ exec_ctx.registers[7], exec_ctx.registers[9] },
-                );
-                return HostCallError.WHO;
-            }
-
             // Get registers per graypaper B.7: [m, a, v, o, n] = registers[7..+5]
             const manager_service_id: u32 = @truncate(exec_ctx.registers[7]); // m: Manager service ID
             const assign_ptr: u32 = @truncate(exec_ctx.registers[8]); // a: Pointer to assign service IDs array
@@ -277,14 +266,28 @@ pub fn HostCalls(comptime params: Params) type {
                 return HostCallError.FULL;
             };
 
+            // NOTE: that the order of these checks follows the graypaper
+            // specification exactly, to ensure we return the correct error
+            // codes.
+
             // Only the current manager service can call bless
             // Graypaper: returns HUH when x_s ≠ (x_u)_m
             if (ctx_regular.service_id != current_privileges.manager) {
                 span.debug("Unauthorized bless call from service {d}, current manager is {d}", .{
                     ctx_regular.service_id, current_privileges.manager,
                 });
-                exec_ctx.registers[7] = @intFromEnum(ReturnCode.HUH);
-                return .play;
+                return HostCallError.HUH;
+            }
+
+            // Check if manager and validator service IDs are in the u32 domain
+            if (exec_ctx.registers[7] > std.math.maxInt(u32) or
+                exec_ctx.registers[9] > std.math.maxInt(u32))
+            {
+                span.err(
+                    "Manager or validator service ID exceeds u32 domain. M={d} V={d}",
+                    .{ exec_ctx.registers[7], exec_ctx.registers[9] },
+                );
+                return HostCallError.WHO;
             }
 
             // Read assign service IDs from memory
