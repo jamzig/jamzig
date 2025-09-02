@@ -139,7 +139,8 @@ pub fn main() !void {
     std.posix.sigaction(std.posix.SIG.INT, &sigaction, null);
     std.posix.sigaction(std.posix.SIG.TERM, &sigaction, null);
 
-    var executor = io.SequentialExecutor.init(allocator);
+    // For our fuzzer we use a simple sequential executor
+    var executor = try io.SequentialExecutor.init(allocator);
 
     // Create and run fuzzer
     var fuzzer = try Fuzzer(io.SequentialExecutor).create(&executor, allocator, seed, socket_path);

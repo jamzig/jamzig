@@ -209,7 +209,7 @@ test "jam-conformance:traces" {
         const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
         const loader = w3f_loader.loader();
 
-        var sequential_executor = io.SequentialExecutor.init(allocator);
+        var sequential_executor = try io.SequentialExecutor.init(allocator);
         defer sequential_executor.deinit();
         var run_result = try trace_runner.runTracesInDir(
             io.SequentialExecutor,
@@ -313,9 +313,11 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
     const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
     const loader = w3f_loader.loader();
 
-    // Create executor for trace running
-    var sequential_executor = io.SequentialExecutor.init(allocator);
-    defer sequential_executor.deinit();
+    // Create executor for summary trace running
+    // const ExecutorType = io.ThreadPoolExecutor;
+    const ExecutorType = io.SequentialExecutor;
+    var executor = try ExecutorType.init(allocator);
+    defer executor.deinit();
 
     // Track results by source
     var source_stats = std.StringHashMap(struct {
@@ -396,8 +398,8 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
 
         // Try to run traces, catch and record any errors
         var run_result = trace_runner.runTracesInDir(
-            io.SequentialExecutor,
-            &sequential_executor,
+            ExecutorType,
+            &executor,
             FUZZ_PARAMS,
             loader,
             allocator,

@@ -38,12 +38,9 @@ test "sequoia: State transition with sequoia-generated blocks" {
 
     // Use sequential executor for compatibility with existing test
     const io = @import("io.zig");
-    var sequential_executor = io.SequentialExecutor.init(testing.allocator);
+    var sequential_executor = try io.SequentialExecutor.init(testing.allocator);
     defer sequential_executor.deinit();
-    var block_importer = block_import.BlockImporter(io.SequentialExecutor, jam_params.TINY_PARAMS).init(
-        &sequential_executor,
-        allocator
-    );
+    var block_importer = block_import.BlockImporter(io.SequentialExecutor, jam_params.TINY_PARAMS).init(&sequential_executor, allocator);
 
     // Keep a copy of the previous state for comparison
     var previous_state = try current_state.deepClone(allocator);
@@ -84,61 +81,55 @@ test "sequoia: State transition with sequoia-generated blocks" {
 test "IO executor integration: sequential vs parallel execution" {
     const allocator = testing.allocator;
     const io = @import("io.zig");
-    
+
     // Setup test state similar to sequoia test
     const seed: [32]u8 = [_]u8{42} ** 32;
     var prng = std.Random.ChaCha.init(seed);
     var rng = prng.random();
-    
+
     const config = try sequoia.GenesisConfig(jam_params.TINY_PARAMS).buildWithRng(allocator, &rng);
     var builder = try sequoia.BlockBuilder(jam_params.TINY_PARAMS).init(allocator, config, &rng);
     defer builder.deinit();
-    
+
     // Test with sequential executor
     {
-        var sequential_executor = io.SequentialExecutor.init(testing.allocator);
-    defer sequential_executor.deinit();
-        var seq_importer = block_import.BlockImporter(io.SequentialExecutor, jam_params.TINY_PARAMS).init(
-            &sequential_executor,
-            allocator
-        );
-        
+        var sequential_executor = try io.SequentialExecutor.init(testing.allocator);
+        defer sequential_executor.deinit();
+        var seq_importer = block_import.BlockImporter(io.SequentialExecutor, jam_params.TINY_PARAMS).init(&sequential_executor, allocator);
+
         // Build a test block
         var block = try builder.buildNextBlock();
         defer block.deinit(allocator);
-        
+
         // Test sequential execution
         var seq_result = try seq_importer.importBlock(&builder.state, &block);
         defer seq_result.deinit();
-        
+
         // Commit the sequential result to advance the state
         try seq_result.commit();
-        
+
         // Verify it succeeded (state_transition is a valid pointer)
         try testing.expect(@intFromPtr(seq_result.state_transition) != 0);
     }
-    
-    // Test with parallel executor  
+
+    // Test with parallel executor
     {
-        var parallel_executor = try io.ThreadPoolExecutor.init(allocator, 2);
+        var parallel_executor = try io.ThreadPoolExecutor.initWithThreadCount(allocator, 2);
         defer parallel_executor.deinit();
-        
-        var par_importer = block_import.BlockImporter(io.ThreadPoolExecutor, jam_params.TINY_PARAMS).init(
-            &parallel_executor,
-            allocator
-        );
-        
+
+        var par_importer = block_import.BlockImporter(io.ThreadPoolExecutor, jam_params.TINY_PARAMS).init(&parallel_executor, allocator);
+
         // Build another test block (state has advanced from the sequential test)
         var block = try builder.buildNextBlock();
         defer block.deinit(allocator);
-        
+
         // Test parallel execution
         var par_result = try par_importer.importBlock(&builder.state, &block);
         defer par_result.deinit();
-        
+
         // Commit the parallel result
         try par_result.commit();
-        
+
         // Verify it succeeded (state_transition is a valid pointer)
         try testing.expect(@intFromPtr(par_result.state_transition) != 0);
     }

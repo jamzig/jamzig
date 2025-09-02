@@ -31,7 +31,7 @@ const trace = @import("tracing.zig").scoped(.accumulate);
 /// Coordinates the full accumulation pipeline through specialized modules
 pub fn processAccumulationReports(
     comptime IOExecutor: type,
-    io_executor: *IOExecutor,
+    executor: *IOExecutor,
     comptime params: Params,
     allocator: std.mem.Allocator,
     stx: *state_delta.StateTransition(params),
@@ -69,7 +69,7 @@ pub fn processAccumulationReports(
     const accumulatable = prepared.accumulatable_buffer.items;
     var execution_result = try @import("accumulate/execution.zig").executeAccumulation(
         IOExecutor,
-        io_executor,
+        executor,
         params,
         allocator,
         stx,

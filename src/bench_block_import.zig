@@ -110,13 +110,13 @@ fn BenchmarkContext(comptime IOExecutor: type) type {
         allocator: std.mem.Allocator,
         config: BenchmarkConfig,
         timestamp: i64,
-        executor: IOExecutor,
+        executor: *IOExecutor,
         loader: parsers.w3f.Loader(jamtestvectors.W3F_PARAMS),
         params: jam_params.Params,
 
         const Self = @This();
 
-        fn init(allocator: std.mem.Allocator, config: BenchmarkConfig, executor: IOExecutor) Self {
+        fn init(allocator: std.mem.Allocator, config: BenchmarkConfig, executor: *IOExecutor) Self {
             return Self{
                 .allocator = allocator,
                 .config = config,
@@ -177,7 +177,7 @@ fn loadTransitions(context: anytype, arena: std.mem.Allocator, trace_files: []co
     return transitions.items;
 }
 
-fn executeBenchmarkBatch(comptime IOExecutor: type, context: anytype, arena: std.mem.Allocator, transitions: []const parsers.StateTransition, times_buffer: []u64) !usize {
+fn executeBenchmarkBatch(comptime IOExecutor: type, context: BenchmarkContext(IOExecutor), arena: std.mem.Allocator, transitions: []const parsers.StateTransition, times_buffer: []u64) !usize {
     std.debug.assert(times_buffer.len >= context.config.iterations);
     const times = times_buffer[0..context.config.iterations];
 
@@ -288,7 +288,13 @@ fn getCurrentGitCommit(allocator: std.mem.Allocator) ![]const u8 {
     return allocator.dupe(u8, commit_short);
 }
 
-pub fn benchmarkBlockImportWithBufferAndConfig(comptime IOExecutor: type, allocator: std.mem.Allocator, times_buffer: []u64, config: BenchmarkConfig, executor: IOExecutor) !void {
+pub fn benchmarkBlockImportWithBufferAndConfig(
+    comptime IOExecutor: type,
+    executor: *IOExecutor,
+    allocator: std.mem.Allocator,
+    times_buffer: []u64,
+    config: BenchmarkConfig,
+) !void {
     var context = BenchmarkContext(IOExecutor).init(allocator, config, executor);
     defer context.deinit();
 

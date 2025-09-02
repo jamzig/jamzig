@@ -20,7 +20,7 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
     return struct {
         allocator: std.mem.Allocator,
         header_validator: HeaderValidator(params),
-        io_executor: *IOExecutor,
+        executor: *IOExecutor,
 
         const Self = @This();
 
@@ -44,19 +44,19 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             }
         };
 
-        pub fn init(io_executor: *IOExecutor, allocator: std.mem.Allocator) Self {
+        pub fn init(executor: *IOExecutor, allocator: std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
                 .header_validator = HeaderValidator(params).init(allocator),
-                .io_executor = io_executor,
+                .executor = executor,
             };
         }
 
-        pub fn initWithConfig(io_executor: *IOExecutor, allocator: std.mem.Allocator, config: ValidationConfig) Self {
+        pub fn initWithConfig(executor: *IOExecutor, allocator: std.mem.Allocator, config: ValidationConfig) Self {
             return .{
                 .allocator = allocator,
                 .header_validator = HeaderValidator(params).initWithConfig(allocator, config),
-                .io_executor = io_executor,
+                .executor = executor,
             };
         }
 
@@ -85,7 +85,7 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             // Step 2: Apply state transition
             const state_transition = try stf.stateTransition(
                 IOExecutor,
-                self.io_executor,
+                self.executor,
                 params,
                 self.allocator,
                 current_state,

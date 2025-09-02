@@ -109,10 +109,10 @@ pub fn main() !void {
 
     const restart_behavior: RestartBehavior = if (exit_on_disconnect) .exit_on_disconnect else .restart_on_disconnect;
 
-    const ExecutorType = io.SequentialExecutor;
-    // const ExecutorType = io.ThreadPoolExecutor;
+    // const ExecutorType = io.SequentialExecutor;
+    const ExecutorType = io.ThreadPoolExecutor;
 
-    var executor = ExecutorType.init(allocator);
+    var executor = try ExecutorType.init(allocator);
     defer executor.deinit();
 
     var server = try TargetServer(ExecutorType).init(&executor, allocator, socket_path, restart_behavior);

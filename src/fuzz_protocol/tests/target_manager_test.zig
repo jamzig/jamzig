@@ -15,7 +15,7 @@ test "target_manager_initialization" {
     const socket_path = "/tmp/test_target_manager_init.sock";
 
     // Create executor for the target manager
-    var executor = io.SequentialExecutor.init(allocator);
+    var executor = try io.SequentialExecutor.init(allocator);
     defer executor.deinit();
     var manager = FuzzTargetServerInThread.init(&executor, allocator, socket_path, .exit_on_disconnect);
     defer manager.join();

@@ -19,7 +19,7 @@ pub const W3F_PARAMS = jam_params.TINY_PARAMS;
 test "w3f:traces:fallback" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    var sequential_executor = io.SequentialExecutor.init(allocator);
+    var sequential_executor = try io.SequentialExecutor.init(allocator);
     defer sequential_executor.deinit();
     var result = try runTracesInDir(
         io.SequentialExecutor,
@@ -36,7 +36,7 @@ test "w3f:traces:fallback" {
 test "w3f:traces:safrole" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    var sequential_executor = io.SequentialExecutor.init(allocator);
+    var sequential_executor = try io.SequentialExecutor.init(allocator);
     defer sequential_executor.deinit();
     var result = try runTracesInDir(
         io.SequentialExecutor,
@@ -53,7 +53,7 @@ test "w3f:traces:safrole" {
 test "w3f:traces:preimages_normal" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    var sequential_executor = io.SequentialExecutor.init(allocator);
+    var sequential_executor = try io.SequentialExecutor.init(allocator);
     defer sequential_executor.deinit();
     var result = try runTracesInDir(
         io.SequentialExecutor,
@@ -70,7 +70,7 @@ test "w3f:traces:preimages_normal" {
 test "w3f:traces:preimages_light" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    var sequential_executor = io.SequentialExecutor.init(allocator);
+    var sequential_executor = try io.SequentialExecutor.init(allocator);
     defer sequential_executor.deinit();
     var result = try runTracesInDir(
         io.SequentialExecutor,
@@ -87,7 +87,7 @@ test "w3f:traces:preimages_light" {
 test "w3f:traces:storage" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    var sequential_executor = io.SequentialExecutor.init(allocator);
+    var sequential_executor = try io.SequentialExecutor.init(allocator);
     defer sequential_executor.deinit();
     var result = try runTracesInDir(
         io.SequentialExecutor,
@@ -104,7 +104,7 @@ test "w3f:traces:storage" {
 test "w3f:traces:storage_light" {
     const allocator = std.testing.allocator;
     const loader = W3fLoader(W3F_PARAMS){};
-    var sequential_executor = io.SequentialExecutor.init(allocator);
+    var sequential_executor = try io.SequentialExecutor.init(allocator);
     defer sequential_executor.deinit();
     var result = try runTracesInDir(
         io.SequentialExecutor,

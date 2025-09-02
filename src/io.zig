@@ -62,7 +62,7 @@ pub const ThreadPoolExecutor = struct {
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) !ThreadPoolExecutor {
-        return try ThreadPoolExecutor.initWithThreadCount(allocator);
+        return try ThreadPoolExecutor.initWithThreadCount(allocator, null);
     }
 
     pub fn initWithThreadCount(allocator: Allocator, thread_count: ?usize) !ThreadPoolExecutor {
@@ -134,7 +134,7 @@ pub const SequentialTaskGroup = struct {
 pub const SequentialExecutor = struct {
     allocator: Allocator,
 
-    pub fn init(allocator: Allocator) SequentialExecutor {
+    pub fn init(allocator: Allocator) !SequentialExecutor {
         return .{ .allocator = allocator };
     }
 
@@ -153,7 +153,7 @@ pub const SequentialExecutor = struct {
 test "thread_pool_executor" {
     const allocator = std.testing.allocator;
 
-    var executor = try ThreadPoolExecutor.init(allocator, 2);
+    var executor = try ThreadPoolExecutor.initWithThreadCount(allocator, 2);
     defer executor.deinit();
 
     var counter = std.atomic.Value(i32).init(0);
@@ -179,7 +179,7 @@ test "thread_pool_executor" {
 test "sequential_executor" {
     const allocator = std.testing.allocator;
 
-    var executor = SequentialExecutor.init(allocator);
+    var executor = try SequentialExecutor.init(allocator);
     defer executor.deinit();
 
     var counter: i32 = 0;
@@ -205,7 +205,7 @@ test "sequential_executor" {
 test "multiple_task_groups" {
     const allocator = std.testing.allocator;
 
-    var executor = try ThreadPoolExecutor.init(allocator, 4);
+    var executor = try ThreadPoolExecutor.initWithThreadCount(allocator, 4);
     defer executor.deinit();
 
     var counter1 = std.atomic.Value(i32).init(0);
@@ -252,7 +252,7 @@ test "error_handling" {
 
     // Test ThreadPoolExecutor error collection
     {
-        var executor = try ThreadPoolExecutor.init(allocator, 2);
+        var executor = try ThreadPoolExecutor.initWithThreadCount(allocator, 2);
         defer executor.deinit();
 
         var group = executor.createGroup();
@@ -267,7 +267,7 @@ test "error_handling" {
 
     // Test SequentialExecutor error collection
     {
-        var executor = SequentialExecutor.init(allocator);
+        var executor = try SequentialExecutor.init(allocator);
         defer executor.deinit();
 
         var group = executor.createGroup();
