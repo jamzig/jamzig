@@ -55,7 +55,7 @@ fn getParamMetadata(field_name: []const u8) ParamMetadata {
         .{ "pvm_program_init_page_size", ParamMetadata{ .symbol = "ZP", .description = "The standard pvm program initialization page size" } },
         .{ "pvm_program_init_segment_size", ParamMetadata{ .symbol = "ZQ", .description = "The standard pvm program initialization segment size" } },
     });
-    
+
     return metadata_map.get(field_name) orelse ParamMetadata{ .symbol = "?", .description = "Unknown parameter" };
 }
 
@@ -64,7 +64,7 @@ pub fn formatParamsText(params: jam_params.Params, params_type: []const u8, writ
     try writer.print("JAM Protocol Parameters ({s})\n", .{params_type});
     try writer.writeAll("=" ** 50);
     try writer.writeAll("\n\n");
-    
+
     const typeInfo = @typeInfo(jam_params.Params);
     inline for (typeInfo.@"struct".fields) |field| {
         // Skip non-parameter fields
@@ -73,10 +73,10 @@ pub fn formatParamsText(params: jam_params.Params, params_type: []const u8, writ
         } else {
             const metadata = getParamMetadata(field.name);
             const value = @field(params, field.name);
-            
+
             // Print symbol and name
             try writer.print("{s:<4} - ", .{metadata.symbol});
-            
+
             // Convert snake_case to Title Case
             var first_word = true;
             var after_underscore = false;
@@ -92,7 +92,7 @@ pub fn formatParamsText(params: jam_params.Params, params_type: []const u8, writ
                     try writer.writeByte(c);
                 }
             }
-            
+
             try writer.print(": {d}\n", .{value});
             try writer.print("      {s}\n\n", .{metadata.description});
         }
@@ -104,7 +104,7 @@ pub fn formatParamsJson(params: jam_params.Params, params_type: []const u8, writ
     try writer.writeAll("{\n");
     try writer.print("  \"params_type\": \"{s}\",\n", .{params_type});
     try writer.writeAll("  \"parameters\": {\n");
-    
+
     const typeInfo = @typeInfo(jam_params.Params);
     var first = true;
     inline for (typeInfo.@"struct".fields) |field| {
@@ -116,10 +116,10 @@ pub fn formatParamsJson(params: jam_params.Params, params_type: []const u8, writ
                 try writer.writeAll(",\n");
             }
             first = false;
-            
+
             const metadata = getParamMetadata(field.name);
             const value = @field(params, field.name);
-            
+
             try writer.print("    \"{s}\": {{\n", .{metadata.symbol});
             try writer.print("      \"name\": \"{s}\",\n", .{field.name});
             try writer.print("      \"value\": {d},\n", .{value});
@@ -128,7 +128,8 @@ pub fn formatParamsJson(params: jam_params.Params, params_type: []const u8, writ
             try writer.writeAll("    }");
         }
     }
-    
+
     try writer.writeAll("\n  }\n");
     try writer.writeAll("}\n");
 }
+

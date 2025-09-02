@@ -118,7 +118,7 @@ pub fn transitionWithInput(
     for (ready_reports) |report| {
         const core_stats = try pi.getCoreStats(report.core_index.value);
         core_stats.da_load += report.package_spec.length +
-            (params.segmentSizeInOctets() *
+            (params.segment_size *
                 try std.math.divCeil(u32, report.package_spec.exports_count * 65, 64));
     }
 

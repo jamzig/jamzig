@@ -1425,6 +1425,7 @@ pub fn HostCalls(comptime params: Params) type {
                         span.err("Failed to encode JAM chain constants", .{});
                         return HostCallError.NONE;
                     };
+                    span.trace("Constants encoded: {s}", .{std.fmt.fmtSliceHexLower(encoded_constants)});
                     data_to_fetch = encoded_constants;
                     needs_cleanup = true;
                 },
