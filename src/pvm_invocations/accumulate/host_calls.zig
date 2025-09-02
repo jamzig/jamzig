@@ -565,7 +565,24 @@ pub fn HostCalls(comptime params: Params) type {
             const output_ptr = exec_ctx.registers[8]; // o: Pointer to authorizer queue data
             const new_assign_service = exec_ctx.registers[9]; // a: New assign service ID
 
-            // Check if core index is valid: c < C
+            // IMPORTANT: Check memory accessibility FIRST before validating core index
+            // This fixes conformance test 1756548741 where memory check must precede core validation
+
+            // Read authorizer hashes from memory - each hash is 32 bytes, and we need to read params.max_authorizations_queue_items of them
+            span.debug("Reading authorizer hashes from memory at 0x{x}", .{output_ptr});
+
+            // Calculate the total size of all authorizer hashes
+            const total_size: u32 = 32 * @as(u32, params.max_authorizations_queue_items);
+
+            // Read all hashes at once (this will panic if memory is invalid)
+            var hashes_data = exec_ctx.memory.readSlice(@truncate(output_ptr), total_size) catch {
+                span.err("Memory access failed while reading authorizer hashes", .{});
+                return .{ .terminal = .panic };
+            };
+            defer hashes_data.deinit();
+
+            // NOW check if core index is valid: c < C
+            // This check happens AFTER memory validation
             if (core_index >= params.core_count) {
                 span.debug("Invalid core index {d}, returning CORE error", .{core_index});
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.CORE);
@@ -585,19 +602,6 @@ pub fn HostCalls(comptime params: Params) type {
                 exec_ctx.registers[7] = @intFromEnum(ReturnCode.HUH);
                 return .play;
             }
-
-            // Read authorizer hashes from memory - each hash is 32 bytes, and we need to read params.max_authorizations_queue_items of them
-            span.debug("Reading authorizer hashes from memory at 0x{x}", .{output_ptr});
-
-            // Calculate the total size of all authorizer hashes
-            const total_size: u32 = 32 * @as(u32, params.max_authorizations_queue_items);
-
-            // Read all hashes at once
-            var hashes_data = exec_ctx.memory.readSlice(@truncate(output_ptr), total_size) catch {
-                span.err("Memory access failed while reading authorizer hashes", .{});
-                return .{ .terminal = .panic };
-            };
-            defer hashes_data.deinit();
 
             // Create a sequence of authorizer hashes
             const authorizer_hashes = std.mem.bytesAsSlice(types.AuthorizerHash, hashes_data.buffer);
