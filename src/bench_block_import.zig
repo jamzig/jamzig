@@ -212,7 +212,7 @@ fn executeBenchmarkBatch(comptime IOExecutor: type, context: BenchmarkContext(IO
             jam_state = try state_dict.reconstruct.reconstructState(jamtestvectors.W3F_PARAMS, context.allocator, &dict);
         }
 
-        var importer = block_import.BlockImporter(IOExecutor, jamtestvectors.W3F_PARAMS).init(&context.executor, context.allocator);
+        var importer = block_import.BlockImporter(IOExecutor, jamtestvectors.W3F_PARAMS).init(context.executor, context.allocator);
 
         const start = std.time.nanoTimestamp();
 
@@ -354,7 +354,7 @@ pub fn benchmarkBlockImportWithBufferAndConfig(
             continue;
         }
 
-        const successful_runs = executeBenchmarkBatch(IOExecutor, &context, arena, transitions, times_buffer) catch |err| {
+        const successful_runs = executeBenchmarkBatch(IOExecutor, context, arena, transitions, times_buffer) catch |err| {
             std.debug.print("  Benchmark execution failed: {}\n", .{err});
             continue;
         };
@@ -384,18 +384,18 @@ pub fn benchmarkBlockImportWithBufferAndConfig(
     try generateBenchmarkReport(&context, arena, results.items, git_commit);
 }
 
-pub fn benchmarkBlockImportWithBuffer(comptime IOExecutor: type, allocator: std.mem.Allocator, times_buffer: []u64, iterations: u32, executor: IOExecutor) !void {
+pub fn benchmarkBlockImportWithBuffer(comptime IOExecutor: type, allocator: std.mem.Allocator, times_buffer: []u64, iterations: u32, executor: *IOExecutor) !void {
     const config = BenchmarkConfig{ .iterations = iterations };
-    return benchmarkBlockImportWithBufferAndConfig(IOExecutor, allocator, times_buffer, config, executor);
+    return benchmarkBlockImportWithBufferAndConfig(IOExecutor, executor, allocator, times_buffer, config);
 }
 
-pub fn benchmarkBlockImportWithConfig(comptime IOExecutor: type, allocator: std.mem.Allocator, config: BenchmarkConfig, executor: IOExecutor) !void {
+pub fn benchmarkBlockImportWithConfig(comptime IOExecutor: type, allocator: std.mem.Allocator, config: BenchmarkConfig, executor: *IOExecutor) !void {
     const times_buffer = try allocator.alloc(u64, config.iterations);
     defer allocator.free(times_buffer);
-    return benchmarkBlockImportWithBufferAndConfig(IOExecutor, allocator, times_buffer, config, executor);
+    return benchmarkBlockImportWithBufferAndConfig(IOExecutor, executor, allocator, times_buffer, config);
 }
 
-pub fn benchmarkBlockImport(comptime IOExecutor: type, allocator: std.mem.Allocator, iterations: u32, executor: IOExecutor) !void {
+pub fn benchmarkBlockImport(comptime IOExecutor: type, allocator: std.mem.Allocator, iterations: u32, executor: *IOExecutor) !void {
     const config = BenchmarkConfig{ .iterations = iterations };
     return benchmarkBlockImportWithConfig(IOExecutor, allocator, config, executor);
 }
@@ -405,8 +405,18 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var executor = try io.ThreadPoolExecutor.init(allocator, null);
+    var executor = try io.ThreadPoolExecutor.init(allocator);
     defer executor.deinit();
 
-    try benchmarkBlockImport(io.ThreadPoolExecutor, allocator, 100, executor);
+    // Parse command line arguments for iteration count
+    var args = std.process.args();
+    _ = args.skip(); // Skip program name
+
+    const iterations = if (args.next()) |arg|
+        std.fmt.parseInt(u32, arg, 10) catch 100
+    else
+        100;
+
+    std.debug.print("Running {} iterations per trace...\n", .{iterations});
+    try benchmarkBlockImport(io.ThreadPoolExecutor, allocator, iterations, &executor);
 }
