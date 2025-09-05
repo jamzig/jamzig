@@ -12,6 +12,7 @@ pub const Error = error{
     VerificationFailed,
     GetCommitmentFailed,
     SignatureVerificationFailed,
+    OutOfMemory,
 };
 
 //  ____
@@ -272,6 +273,19 @@ extern fn vrf_verify_ring_signature_against_commitment(
     vrf_output: [*c]u8,
 ) callconv(.C) bool;
 
+extern fn vrf_batch_verify_ring_signatures_against_commitment(
+    commitment: [*c]const u8,
+    ring_size: usize,
+    batch_size: usize,
+    vrf_inputs: [*c]const [*c]const u8,
+    vrf_input_lens: [*c]const usize,
+    aux_datas: [*c]const [*c]const u8,
+    aux_data_lens: [*c]const usize,
+    signatures: [*c]const [*c]const u8,
+    vrf_outputs: [*c][*c]u8,
+    results: [*c]bool,
+) callconv(.C) bool;
+
 pub fn verifyRingSignatureAgainstCommitment(
     commitment: *const types.BandersnatchVrfRoot,
     ring_size: usize,
@@ -297,6 +311,104 @@ pub fn verifyRingSignatureAgainstCommitment(
     }
 
     return vrf_output;
+}
+
+pub const BatchVerificationResult = struct {
+    outputs: []types.BandersnatchVrfOutput,
+    results: []bool,
+
+    pub fn deinit(self: *BatchVerificationResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.outputs);
+        allocator.free(self.results);
+    }
+};
+
+pub fn batchVerifyRingSignaturesAgainstCommitment(
+    allocator: std.mem.Allocator,
+    commitment: *const types.BandersnatchVrfRoot,
+    ring_size: usize,
+    vrf_inputs: []const []const u8,
+    aux_data: []const []const u8,
+    signatures: []const *const types.BandersnatchRingVrfSignature,
+) Error!BatchVerificationResult {
+    const batch_size = vrf_inputs.len;
+    if (batch_size != aux_data.len or batch_size != signatures.len) {
+        return Error.VerificationFailed;
+    }
+
+    if (batch_size == 0) {
+        return BatchVerificationResult{
+            .outputs = &[_]types.BandersnatchVrfOutput{},
+            .results = &[_]bool{},
+        };
+    }
+
+    // Allocate arrays for FFI call
+    var vrf_input_ptrs = try allocator.alloc([*c]const u8, batch_size);
+    defer allocator.free(vrf_input_ptrs);
+    
+    var vrf_input_lens = try allocator.alloc(usize, batch_size);
+    defer allocator.free(vrf_input_lens);
+    
+    var aux_data_ptrs = try allocator.alloc([*c]const u8, batch_size);
+    defer allocator.free(aux_data_ptrs);
+    
+    var aux_data_lens = try allocator.alloc(usize, batch_size);
+    defer allocator.free(aux_data_lens);
+    
+    var signature_ptrs = try allocator.alloc([*c]const u8, batch_size);
+    defer allocator.free(signature_ptrs);
+    
+    var output_buffers = try allocator.alloc([32]u8, batch_size);
+    defer allocator.free(output_buffers);
+    
+    var output_ptrs = try allocator.alloc([*c]u8, batch_size);
+    defer allocator.free(output_ptrs);
+    
+    const results = try allocator.alloc(bool, batch_size);
+    errdefer allocator.free(results);
+    
+    var outputs = try allocator.alloc(types.BandersnatchVrfOutput, batch_size);
+    errdefer allocator.free(outputs);
+
+    // Setup input arrays
+    for (0..batch_size) |i| {
+        vrf_input_ptrs[i] = @ptrCast(vrf_inputs[i].ptr);
+        vrf_input_lens[i] = vrf_inputs[i].len;
+        aux_data_ptrs[i] = @ptrCast(aux_data[i].ptr);
+        aux_data_lens[i] = aux_data[i].len;
+        signature_ptrs[i] = @ptrCast(signatures[i]);
+        output_ptrs[i] = @ptrCast(&output_buffers[i]);
+    }
+
+    const success = vrf_batch_verify_ring_signatures_against_commitment(
+        @ptrCast(commitment),
+        ring_size,
+        batch_size,
+        @ptrCast(vrf_input_ptrs.ptr),
+        @ptrCast(vrf_input_lens.ptr),
+        @ptrCast(aux_data_ptrs.ptr),
+        @ptrCast(aux_data_lens.ptr),
+        @ptrCast(signature_ptrs.ptr),
+        @ptrCast(output_ptrs.ptr),
+        @ptrCast(results.ptr),
+    );
+
+    if (!success) {
+        allocator.free(results);
+        allocator.free(outputs);
+        return Error.SignatureVerificationFailed;
+    }
+
+    // Copy outputs from temporary buffers
+    for (0..batch_size) |i| {
+        outputs[i] = output_buffers[i];
+    }
+
+    return BatchVerificationResult{
+        .outputs = outputs,
+        .results = results,
+    };
 }
 
 //  ____           _     _ _             ____       _       _
