@@ -323,7 +323,33 @@ pub fn benchmarkBlockImportWithBufferAndConfig(
         "storage_light",
     };
 
+    // Validate trace filter if provided
+    if (context.config.trace_filter) |filter| {
+        var valid_filter = false;
+        for (trace_dirs) |trace_name| {
+            if (std.mem.eql(u8, trace_name, filter)) {
+                valid_filter = true;
+                break;
+            }
+        }
+        if (!valid_filter) {
+            std.debug.print("Error: Unknown trace '{s}'. Available traces: ", .{filter});
+            for (trace_dirs, 0..) |trace_name, i| {
+                std.debug.print("{s}", .{trace_name});
+                if (i < trace_dirs.len - 1) std.debug.print("{s}", .{", "});
+            }
+            std.debug.print("{s}", .{"\n"});
+            return;
+        }
+    }
+
     for (trace_dirs) |trace_name| {
+        // Skip traces that don't match the filter
+        if (context.config.trace_filter) |filter| {
+            if (!std.mem.eql(u8, trace_name, filter)) {
+                continue;
+            }
+        }
         // Clear arena between trace directories
         _ = arena_allocator.reset(.retain_capacity);
 
@@ -408,15 +434,33 @@ pub fn main() !void {
     var executor = try io.ThreadPoolExecutor.init(allocator);
     defer executor.deinit();
 
-    // Parse command line arguments for iteration count
+    // Parse command line arguments for iteration count and optional trace filter
     var args = std.process.args();
     _ = args.skip(); // Skip program name
 
     const iterations = if (args.next()) |arg|
-        std.fmt.parseInt(u32, arg, 10) catch 100
+        std.fmt.parseInt(u32, arg, 10) catch {
+            std.debug.print("{s}", .{"Usage: bench-block-import [iterations] [trace_name]\n"});
+            std.debug.print("{s}", .{"Available traces: fallback, safrole, preimages, preimages_light, storage, storage_light\n"});
+            return;
+        }
     else
         100;
 
-    std.debug.print("Running {} iterations per trace...\n", .{iterations});
-    try benchmarkBlockImport(io.ThreadPoolExecutor, allocator, iterations, &executor);
+    const trace_filter = if (args.next()) |filter_arg| 
+        if (filter_arg.len > 0) filter_arg else null
+    else null;
+
+    if (trace_filter) |filter| {
+        std.debug.print("Running {} iterations for trace: {s}\n", .{ iterations, filter });
+    } else {
+        std.debug.print("Running {} iterations per trace...\n", .{iterations});
+    }
+
+    const config = BenchmarkConfig{
+        .iterations = iterations,
+        .trace_filter = trace_filter,
+    };
+    
+    try benchmarkBlockImportWithConfig(io.ThreadPoolExecutor, allocator, config, &executor);
 }
