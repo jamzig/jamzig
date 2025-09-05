@@ -13,6 +13,7 @@ ark-vrf = { git = "https://github.com/davxy/ark-vrf", rev = "bf2d1cf", features 
 hex = "0.4.3"
 libc = "0.2.167"
 lru = "0.12.4"
+rayon = "1.8"
 thiserror = "1.0.64"
 
 [lib]

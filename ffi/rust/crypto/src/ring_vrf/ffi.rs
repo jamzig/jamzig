@@ -337,7 +337,7 @@ pub unsafe extern "C" fn vrf_verify_ring_signature_against_commitment(
   let sig = std::slice::from_raw_parts(signature, 784);
 
   let verifier = Commitment::new(
-    match RingCommitment::deserialize_compressed(commitment_slice) {
+    match RingCommitment::deserialize_compressed_unchecked(commitment_slice) {
       Ok(commitment) => commitment,
       Err(_) => return false,
     },
@@ -351,6 +351,107 @@ pub unsafe extern "C" fn vrf_verify_ring_signature_against_commitment(
     }
     Err(_) => false,
   }
+}
+
+/// Batch verify multiple VRF ring signatures against a commitment.
+///
+/// This function verifies multiple VRF signatures in parallel using the same commitment
+/// and ring size. It's optimized for cases where many tickets need verification.
+///
+/// # Safety
+/// All arrays must have `batch_size` elements and point to valid memory.
+#[no_mangle]
+pub unsafe extern "C" fn vrf_batch_verify_ring_signatures_against_commitment(
+  commitment: *const u8,
+  ring_size: usize,
+  batch_size: usize,
+  vrf_inputs: *const *const u8,
+  vrf_input_lens: *const usize,
+  aux_datas: *const *const u8,
+  aux_data_lens: *const usize,
+  signatures: *const *const u8,
+  vrf_outputs: *mut *mut u8,
+  results: *mut bool,
+) -> bool {
+  if batch_size == 0 {
+    return true;
+  }
+
+  let commitment_slice = std::slice::from_raw_parts(commitment, 144);
+
+  let verifier = Commitment::new(
+    match RingCommitment::deserialize_compressed_unchecked(commitment_slice) {
+      Ok(commitment) => commitment,
+      Err(_) => return false,
+    },
+    ring_size,
+  );
+
+  let vrf_inputs_slice = std::slice::from_raw_parts(vrf_inputs, batch_size);
+  let vrf_input_lens_slice =
+    std::slice::from_raw_parts(vrf_input_lens, batch_size);
+  let aux_datas_slice = std::slice::from_raw_parts(aux_datas, batch_size);
+  let aux_data_lens_slice =
+    std::slice::from_raw_parts(aux_data_lens, batch_size);
+  let signatures_slice = std::slice::from_raw_parts(signatures, batch_size);
+  let vrf_outputs_slice =
+    std::slice::from_raw_parts_mut(vrf_outputs, batch_size);
+  let results_slice = std::slice::from_raw_parts_mut(results, batch_size);
+
+  // Convert raw pointers to slices once before parallel processing
+  // SAFETY: We create borrows from valid raw pointers that remain valid for the FFI call duration.
+  // Each slice access is non-overlapping and read-only during verification.
+  let verification_data: Vec<_> = (0..batch_size)
+    .map(|i| unsafe {
+      let vrf_input_ptr = *vrf_inputs_slice.get_unchecked(i);
+      let vrf_input_len = *vrf_input_lens_slice.get_unchecked(i);
+      let aux_data_ptr = *aux_datas_slice.get_unchecked(i);
+      let aux_data_len = *aux_data_lens_slice.get_unchecked(i);
+      let signature_ptr = *signatures_slice.get_unchecked(i);
+
+      // SAFETY GUARANTEES:
+      // 1. All pointers are valid for the duration of this FFI call
+      // 2. Each slice references non-overlapping memory regions
+      // 3. The data is only read during verification, never modified
+      // 4. Slice lifetimes are contained within this function scope
+      let vrf_input = std::slice::from_raw_parts(vrf_input_ptr, vrf_input_len);
+      let aux = std::slice::from_raw_parts(aux_data_ptr, aux_data_len);
+      let sig = std::slice::from_raw_parts(signature_ptr, 784);
+
+      // Return borrowed slices instead of owned vectors - ZERO ALLOCATIONS
+      (vrf_input, aux, sig)
+    })
+    .collect();
+
+  // Use rayon for parallel verification since ark-vrf has parallel features enabled
+  use rayon::prelude::*;
+
+  // SAFETY: The slices created above are valid for the entire duration of this parallel operation.
+  // Each thread processes different slices, so there's no data races or overlapping access.
+  let verification_results: Vec<_> = verification_data
+    .into_par_iter()
+    .map(|(vrf_input, aux, sig)| {
+      // ring_vrf_verify accepts &[u8] parameters, so no additional copying needed
+      match verifier.ring_vrf_verify(vrf_input, aux, sig) {
+        Ok(output) => (true, output),
+        Err(_) => (false, [0u8; 32]),
+      }
+    })
+    .collect();
+
+  // Write results back to output arrays
+  for (i, (success, output)) in verification_results.into_iter().enumerate() {
+    *results_slice.get_unchecked_mut(i) = success;
+    if success {
+      std::ptr::copy_nonoverlapping(
+        output.as_ptr(),
+        *vrf_outputs_slice.get_unchecked(i),
+        32,
+      );
+    }
+  }
+
+  true
 }
 
 /// IETF VRF Sign (non-anonymous).

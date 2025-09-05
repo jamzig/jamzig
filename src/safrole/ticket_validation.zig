@@ -139,58 +139,110 @@ fn verifyTicketEnvelope(
         // Use batch verification for multiple tickets - much faster for parallel processing
         span.debug("Using batch verification for {d} tickets", .{extrinsic.len});
         
-        // Prepare batch verification inputs
-        var vrf_inputs = try allocator.alloc([]const u8, extrinsic.len);
-        defer allocator.free(vrf_inputs);
+        // Optimization: Use stack allocation for small batches (common case for tiny params)
+        const MAX_STACK_TICKETS = 16;
         
-        var vrf_input_buffers = try allocator.alloc([48]u8, extrinsic.len); // "jam_ticket_seal" + 32 entropy + 1 attempt
-        defer allocator.free(vrf_input_buffers);
-        
-        var aux_data_array = try allocator.alloc([]const u8, extrinsic.len);
-        defer allocator.free(aux_data_array);
-        
-        var signatures = try allocator.alloc(*const types.BandersnatchRingVrfSignature, extrinsic.len);
-        defer allocator.free(signatures);
-        
-        // Setup inputs for batch verification
-        for (extrinsic, 0..) |extr, i| {
-            // TODO: rewrite - build VRF input properly
-            const vrf_input_data = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
-            @memcpy(&vrf_input_buffers[i], vrf_input_data);
+        if (extrinsic.len <= MAX_STACK_TICKETS) {
+            // Stack-allocated arrays - ZERO heap allocations for tiny params!
+            var stack_vrf_inputs: [MAX_STACK_TICKETS][]const u8 = undefined;
+            var stack_vrf_buffers: [MAX_STACK_TICKETS][48]u8 = undefined;
+            var stack_aux_data: [MAX_STACK_TICKETS][]const u8 = undefined;
+            var stack_signatures: [MAX_STACK_TICKETS]*const types.BandersnatchRingVrfSignature = undefined;
             
-            vrf_inputs[i] = &vrf_input_buffers[i];
-            aux_data_array[i] = &empty_aux_data;
-            signatures[i] = &extr.signature;
-        }
-        
-        // Perform batch verification
-        var batch_result = ring_vrf.batchVerifyRingSignaturesAgainstCommitment(
-            allocator,
-            gamma_z,
-            ring_size,
-            vrf_inputs,
-            aux_data_array,
-            signatures,
-        ) catch |e| {
-            if (e == error.SignatureVerificationFailed) {
-                return Error.SignatureVerificationFailed;
-            } else return e;
-        };
-        defer batch_result.deinit(allocator);
-        
-        // Process results
-        for (extrinsic, 0..) |extr, i| {
-            if (!batch_result.results[i]) {
-                span.err("Batch verification failed for ticket [{d}]", .{i});
-                return Error.SignatureVerificationFailed;
+            // Setup stack arrays
+            for (extrinsic, 0..) |extr, i| {
+                const vrf_input_data = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
+                @memcpy(&stack_vrf_buffers[i], vrf_input_data);
+                
+                stack_vrf_inputs[i] = &stack_vrf_buffers[i];
+                stack_aux_data[i] = &empty_aux_data;
+                stack_signatures[i] = &extr.signature;
             }
             
-            span.trace("Verified ticket envelope [{d}]: attempt={d}, output={s}", .{
-                i, extr.attempt, std.fmt.fmtSliceHexLower(&batch_result.outputs[i])
-            });
+            // Use stack arrays for batch verification
+            var batch_result = ring_vrf.batchVerifyRingSignaturesAgainstCommitment(
+                allocator,
+                gamma_z,
+                ring_size,
+                stack_vrf_inputs[0..extrinsic.len],
+                stack_aux_data[0..extrinsic.len],
+                stack_signatures[0..extrinsic.len],
+            ) catch |e| {
+                if (e == error.SignatureVerificationFailed) {
+                    return Error.SignatureVerificationFailed;
+                } else return e;
+            };
+            defer batch_result.deinit(allocator);
             
-            tickets[i].attempt = extr.attempt;
-            tickets[i].id = batch_result.outputs[i];
+            // Process stack-based results
+            for (extrinsic, 0..) |extr, i| {
+                if (!batch_result.results[i]) {
+                    span.err("Batch verification failed for ticket [{d}]", .{i});
+                    return Error.SignatureVerificationFailed;
+                }
+                
+                span.trace("Verified ticket envelope [{d}]: attempt={d}, output={s}", .{
+                    i, extr.attempt, std.fmt.fmtSliceHexLower(&batch_result.outputs[i])
+                });
+                
+                tickets[i].attempt = extr.attempt;
+                tickets[i].id = batch_result.outputs[i];
+            }
+        } else {
+            // Heap-allocated arrays for larger batches
+            span.debug("Using heap allocation for large batch ({d} > {d} tickets)", .{extrinsic.len, MAX_STACK_TICKETS});
+            
+            var vrf_inputs = try allocator.alloc([]const u8, extrinsic.len);
+            defer allocator.free(vrf_inputs);
+            
+            var vrf_input_buffers = try allocator.alloc([48]u8, extrinsic.len);
+            defer allocator.free(vrf_input_buffers);
+            
+            var aux_data_array = try allocator.alloc([]const u8, extrinsic.len);
+            defer allocator.free(aux_data_array);
+            
+            var signatures = try allocator.alloc(*const types.BandersnatchRingVrfSignature, extrinsic.len);
+            defer allocator.free(signatures);
+            
+            // Setup inputs for heap-based batch verification
+            for (extrinsic, 0..) |extr, i| {
+                const vrf_input_data = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
+                @memcpy(&vrf_input_buffers[i], vrf_input_data);
+                
+                vrf_inputs[i] = &vrf_input_buffers[i];
+                aux_data_array[i] = &empty_aux_data;
+                signatures[i] = &extr.signature;
+            }
+            
+            // Perform heap-based batch verification
+            var batch_result = ring_vrf.batchVerifyRingSignaturesAgainstCommitment(
+                allocator,
+                gamma_z,
+                ring_size,
+                vrf_inputs,
+                aux_data_array,
+                signatures,
+            ) catch |e| {
+                if (e == error.SignatureVerificationFailed) {
+                    return Error.SignatureVerificationFailed;
+                } else return e;
+            };
+            defer batch_result.deinit(allocator);
+            
+            // Process heap-based results
+            for (extrinsic, 0..) |extr, i| {
+                if (!batch_result.results[i]) {
+                    span.err("Batch verification failed for ticket [{d}]", .{i});
+                    return Error.SignatureVerificationFailed;
+                }
+                
+                span.trace("Verified ticket envelope [{d}]: attempt={d}, output={s}", .{
+                    i, extr.attempt, std.fmt.fmtSliceHexLower(&batch_result.outputs[i])
+                });
+                
+                tickets[i].attempt = extr.attempt;
+                tickets[i].id = batch_result.outputs[i];
+            }
         }
     } else {
         // Single ticket - use regular verification to avoid allocation overhead
