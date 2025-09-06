@@ -135,85 +135,25 @@ fn verifyTicketEnvelope(
 
     const empty_aux_data = [_]u8{};
 
-    if (extrinsic.len > 1) {
-        // Use batch verification for multiple tickets - much faster for parallel processing
-        span.debug("Using batch verification for {d} tickets", .{extrinsic.len});
-        
-        // Prepare batch verification inputs
-        var vrf_inputs = try allocator.alloc([]const u8, extrinsic.len);
-        defer allocator.free(vrf_inputs);
-        
-        var vrf_input_buffers = try allocator.alloc([48]u8, extrinsic.len); // "jam_ticket_seal" + 32 entropy + 1 attempt
-        defer allocator.free(vrf_input_buffers);
-        
-        var aux_data_array = try allocator.alloc([]const u8, extrinsic.len);
-        defer allocator.free(aux_data_array);
-        
-        var signatures = try allocator.alloc(*const types.BandersnatchRingVrfSignature, extrinsic.len);
-        defer allocator.free(signatures);
-        
-        // Setup inputs for batch verification
-        for (extrinsic, 0..) |extr, i| {
-            // TODO: rewrite - build VRF input properly
-            const vrf_input_data = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
-            @memcpy(&vrf_input_buffers[i], vrf_input_data);
-            
-            vrf_inputs[i] = &vrf_input_buffers[i];
-            aux_data_array[i] = &empty_aux_data;
-            signatures[i] = &extr.signature;
-        }
-        
-        // Perform batch verification
-        var batch_result = ring_vrf.batchVerifyRingSignaturesAgainstCommitment(
-            allocator,
+    for (extrinsic, 0..) |extr, i| {
+        span.trace("Verifying ticket envelope [{d}]:", .{i});
+        span.trace("  Attempt: {d}", .{extr.attempt});
+        span.trace("  Signature: {s}", .{std.fmt.fmtSliceHexLower(&extr.signature)});
+
+        // TODO: rewrite
+        const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
+
+        const output = try ring_vrf.verifyRingSignatureAgainstCommitment(
             gamma_z,
             ring_size,
-            vrf_inputs,
-            aux_data_array,
-            signatures,
-        ) catch |e| {
-            if (e == error.SignatureVerificationFailed) {
-                return Error.SignatureVerificationFailed;
-            } else return e;
-        };
-        defer batch_result.deinit(allocator);
-        
-        // Process results
-        for (extrinsic, 0..) |extr, i| {
-            if (!batch_result.results[i]) {
-                span.err("Batch verification failed for ticket [{d}]", .{i});
-                return Error.SignatureVerificationFailed;
-            }
-            
-            span.trace("Verified ticket envelope [{d}]: attempt={d}, output={s}", .{
-                i, extr.attempt, std.fmt.fmtSliceHexLower(&batch_result.outputs[i])
-            });
-            
-            tickets[i].attempt = extr.attempt;
-            tickets[i].id = batch_result.outputs[i];
-        }
-    } else {
-        // Single ticket - use regular verification to avoid allocation overhead
-        for (extrinsic, 0..) |extr, i| {
-            span.trace("Verifying ticket envelope [{d}]:", .{i});
-            span.trace("  Attempt: {d}", .{extr.attempt});
-            span.trace("  Signature: {s}", .{std.fmt.fmtSliceHexLower(&extr.signature)});
+            vrf_input,
+            &empty_aux_data,
+            &extr.signature,
+        );
+        span.trace("  VRF output (ticket ID): {s}", .{std.fmt.fmtSliceHexLower(&output)});
 
-            // TODO: rewrite
-            const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
-
-            const output = try ring_vrf.verifyRingSignatureAgainstCommitment(
-                gamma_z,
-                ring_size,
-                vrf_input,
-                &empty_aux_data,
-                &extr.signature,
-            );
-            span.trace("  VRF output (ticket ID): {s}", .{std.fmt.fmtSliceHexLower(&output)});
-
-            tickets[i].attempt = extr.attempt;
-            tickets[i].id = output;
-        }
+        tickets[i].attempt = extr.attempt;
+        tickets[i].id = output;
     }
 
     return tickets;
