@@ -400,7 +400,6 @@ dependencies = [
  "hex",
  "libc",
  "lru",
- "rayon",
  "thiserror",
 ]
 
