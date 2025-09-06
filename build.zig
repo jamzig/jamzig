@@ -327,6 +327,25 @@ pub fn build(b: *std.Build) !void {
     const run_bench_block_import = b.addRunArtifact(bench_block_import);
     const bench_block_import_step = b.step("bench-block-import", "Run block import benchmarks");
     bench_block_import_step.dependOn(&run_bench_block_import.step);
+
+    // Add target trace benchmark step
+    const bench_target_trace = b.addExecutable(.{
+        .name = "bench-target-trace",
+        .root_source_file = b.path("src/bench_target_trace.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    bench_target_trace.root_module.addOptions("build_options", bench_build_options);
+    bench_target_trace.root_module.addImport("pretty", pretty_module);
+    bench_target_trace.root_module.addImport("diffz", diffz_module);
+    bench_target_trace.linkLibCpp();
+    rust_deps.staticallyLinkTo(bench_target_trace);
+    b.installArtifact(bench_target_trace);
+
+    const run_bench_target_trace = b.addRunArtifact(bench_target_trace);
+    const bench_target_trace_step = b.step("bench-target-trace", "Benchmark target processing traces (for profiling)");
+    bench_target_trace_step.dependOn(&run_bench_target_trace.step);
 }
 
 const RustDeps = struct {
