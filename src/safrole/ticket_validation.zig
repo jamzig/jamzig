@@ -10,6 +10,7 @@ const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
 const trace = @import("../tracing.zig").scoped(.safrole);
+const tracy = @import("tracy");
 
 const Error = @import("../safrole.zig").Error;
 
@@ -19,8 +20,11 @@ pub fn processTicketExtrinsic(
     stx: *StateTransition(params),
     ticket_extrinsic: types.TicketsExtrinsic,
 ) Error![]types.TicketBody {
+    const function_zone = tracy.ZoneN(@src(), "process_ticket_extrinsic");
+    defer function_zone.End();
     const span = trace.span(.process_ticket_extrinsic);
     defer span.deinit();
+
     span.debug("Processing ticket extrinsic", .{});
 
     // in case we have no tickets leave early
@@ -66,44 +70,52 @@ pub fn processTicketExtrinsic(
     errdefer stx.allocator.free(verified_extrinsic);
 
     // Chapter 6.7: The tickets should be in order of their implied identifier
-    var index: usize = 0;
-    while (index < verified_extrinsic.len) : (index += 1) {
-        const current_ticket = verified_extrinsic[index];
+    {
+        const order_check_zone = tracy.ZoneN(@src(), "check_order");
+        defer order_check_zone.End();
+        var index: usize = 0;
+        while (index < verified_extrinsic.len) : (index += 1) {
+            const current_ticket = verified_extrinsic[index];
 
-        // Check order and duplicates with previous ticket
-        if (index > 0) {
-            const order = std.mem.order(u8, &current_ticket.id, &verified_extrinsic[index - 1].id);
-            switch (order) {
-                .lt => return Error.BadTicketOrder,
-                .eq => return Error.DuplicateTicket,
+            // Check order and duplicates with previous ticket
+            if (index > 0) {
+                const order = std.mem.order(u8, &current_ticket.id, &verified_extrinsic[index - 1].id);
+                switch (order) {
+                    .lt => return Error.BadTicketOrder,
+                    .eq => return Error.DuplicateTicket,
 
-                .gt => {},
+                    .gt => {},
+                }
             }
-        }
 
-        // Check for duplicates in gamma_a using binary search
-        std.debug.assert(blk: {
-            if (gamma.a.len <= 1) break :blk true;
-            var i: usize = 1;
-            while (i < gamma.a.len) : (i += 1) {
-                if (!std.mem.lessThan(u8, &gamma.a[i - 1].id, &gamma.a[i].id)) break :blk false;
-            }
-            break :blk true;
-        });
+            // Check for duplicates in gamma_a using binary search
+            {
+                const duplicate_check_zone = tracy.ZoneN(@src(), "check_duplicates");
+                defer duplicate_check_zone.End();
+                std.debug.assert(blk: {
+                    if (gamma.a.len <= 1) break :blk true;
+                    var i: usize = 1;
+                    while (i < gamma.a.len) : (i += 1) {
+                        if (!std.mem.lessThan(u8, &gamma.a[i - 1].id, &gamma.a[i].id)) break :blk false;
+                    }
+                    break :blk true;
+                });
 
-        const position = std.sort.binarySearch(types.TicketBody, gamma.a, current_ticket, struct {
-            fn order(context: types.TicketBody, item: types.TicketBody) std.math.Order {
-                return std.mem.order(u8, &context.id, &item.id);
-            }
-        }.order);
+                const position = std.sort.binarySearch(types.TicketBody, gamma.a, current_ticket, struct {
+                    fn order(context: types.TicketBody, item: types.TicketBody) std.math.Order {
+                        return std.mem.order(u8, &context.id, &item.id);
+                    }
+                }.order);
 
-        if (position != null) {
-            span.warn("Found duplicate ticket ID: {s}", .{std.fmt.fmtSliceHexLower(&current_ticket.id)});
-            span.trace("Current gamma_a contents:", .{});
-            for (gamma.a, 0..) |ticket, idx| {
-                span.trace("  [{d}] ID: {s}", .{ idx, std.fmt.fmtSliceHexLower(&ticket.id) });
+                if (position != null) {
+                    span.warn("Found duplicate ticket ID: {s}", .{std.fmt.fmtSliceHexLower(&current_ticket.id)});
+                    span.trace("Current gamma_a contents:", .{});
+                    for (gamma.a, 0..) |ticket, idx| {
+                        span.trace("  [{d}] ID: {s}", .{ idx, std.fmt.fmtSliceHexLower(&ticket.id) });
+                    }
+                    return Error.DuplicateTicket;
+                }
             }
-            return Error.DuplicateTicket;
         }
     }
 
@@ -119,6 +131,8 @@ fn verifyTicketEnvelope(
 ) ![]types.TicketBody {
     const span = trace.span(.verify_ticket_envelope);
     defer span.deinit();
+    const tracy_zone = tracy.ZoneN(@src(), "verify_envelope");
+    defer tracy_zone.End();
     span.debug("Verifying {d} ticket envelopes", .{extrinsic.len});
     span.trace("Ring size: {d}, gamma_z: {any}, n2: {any}", .{
         ring_size,
@@ -143,13 +157,17 @@ fn verifyTicketEnvelope(
         // TODO: rewrite
         const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
 
-        const output = try ring_vrf.verifyRingSignatureAgainstCommitment(
-            gamma_z,
-            ring_size,
-            vrf_input,
-            &empty_aux_data,
-            &extr.signature,
-        );
+        const output = blk: {
+            const vrf_zone = tracy.ZoneN(@src(), "vrf_verify");
+            defer vrf_zone.End();
+            break :blk try ring_vrf.verifyRingSignatureAgainstCommitment(
+                gamma_z,
+                ring_size,
+                vrf_input,
+                &empty_aux_data,
+                &extr.signature,
+            );
+        };
         span.trace("  VRF output (ticket ID): {s}", .{std.fmt.fmtSliceHexLower(&output)});
 
         tickets[i].attempt = extr.attempt;

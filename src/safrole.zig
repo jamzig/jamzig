@@ -14,6 +14,7 @@ const Params = @import("jam_params.zig").Params;
 const StateTransition = state_delta.StateTransition;
 
 const trace = @import("tracing.zig").scoped(.safrole);
+const tracy = @import("tracy");
 
 pub const Error = error{
     /// Bad slot value.
@@ -53,6 +54,8 @@ pub fn transition(
 
     // Handle epoch transition if needed
     if (stx.time.isNewEpoch()) {
+        const epoch_zone = tracy.ZoneN(@src(), "epoch_transition");
+        defer epoch_zone.End();
         try epoch_handler.handleEpochTransition(
             params,
             stx,
@@ -63,6 +66,8 @@ pub fn transition(
     const gamma = try stx.ensure(.gamma);
     const gamma_prime: *state.Gamma(params.validators_count, params.epoch_length) = try stx.ensure(.gamma_prime);
     if (stx.time.isInTicketSubmissionPeriod()) {
+        const accumulate_zone = tracy.ZoneN(@src(), "accumulate_tickets");
+        defer accumulate_zone.End();
         span.debug("Processing ticket submissions", .{});
         const merged_gamma_a = try mergeTicketsIntoTicketAccumulatorGammaA(
             stx.allocator,
@@ -77,6 +82,8 @@ pub fn transition(
     // Generate markers
     var epoch_marker: ?types.EpochMark = null;
     if (stx.time.isNewEpoch()) {
+        const epoch_marker_zone = tracy.ZoneN(@src(), "generate_epoch_marker");
+        defer epoch_marker_zone.End();
         const eta_prime = try stx.ensure(.eta_prime);
         epoch_marker = .{
             .entropy = eta_prime[1],
@@ -90,6 +97,8 @@ pub fn transition(
     if (stx.time.didCrossTicketSubmissionEndInSameEpoch() and
         gamma_prime.a.len == params.epoch_length)
     {
+        const ticket_marker_zone = tracy.ZoneN(@src(), "generate_ticket_marker");
+        defer ticket_marker_zone.End();
         winning_ticket_marker = .{
             .tickets = try ordering.outsideInOrdering(
                 types.TicketBody,
