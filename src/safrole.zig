@@ -36,6 +36,8 @@ pub const Error = error{
 } || std.mem.Allocator.Error || ring_vrf.Error || state_delta.Error;
 
 pub fn transition(
+    comptime IOExecutor: type,
+    io_executor: *IOExecutor,
     comptime params: Params,
     stx: *StateTransition(params),
     ticket_extrinsic: types.TicketsExtrinsic,
@@ -46,6 +48,8 @@ pub fn transition(
 
     // Process and validate ticket extrinsic
     const verified_extrinsic = try ticket_validation.processTicketExtrinsic(
+        IOExecutor,
+        io_executor,
         params,
         stx,
         ticket_extrinsic,

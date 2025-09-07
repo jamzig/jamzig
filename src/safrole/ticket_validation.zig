@@ -2,6 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 
 const ring_vrf = @import("../ring_vrf.zig");
+const io = @import("../io.zig");
 
 pub const entropy = @import("../entropy.zig");
 pub const types = @import("../types.zig");
@@ -16,6 +17,8 @@ const Error = @import("../safrole.zig").Error;
 
 // Extracted ticket processing logic
 pub fn processTicketExtrinsic(
+    comptime IOExecutor: type,
+    io_executor: *IOExecutor,
     comptime params: Params,
     stx: *StateTransition(params),
     ticket_extrinsic: types.TicketsExtrinsic,
@@ -57,6 +60,8 @@ pub fn processTicketExtrinsic(
     const gamma = try stx.ensure(.gamma);
     const eta_prime = try stx.ensure(.eta_prime);
     const verified_extrinsic = verifyTicketEnvelope(
+        IOExecutor,
+        io_executor,
         stx.allocator,
         params.validators_count,
         &gamma.z,
@@ -65,7 +70,7 @@ pub fn processTicketExtrinsic(
     ) catch |e| {
         if (e == error.SignatureVerificationFailed) {
             return Error.BadTicketProof;
-        } else return e;
+        } else return @errorCast(e);
     };
     errdefer stx.allocator.free(verified_extrinsic);
 
@@ -123,6 +128,8 @@ pub fn processTicketExtrinsic(
 }
 
 fn verifyTicketEnvelope(
+    comptime IOExecutor: type,
+    io_executor: *IOExecutor,
     allocator: std.mem.Allocator,
     ring_size: usize,
     gamma_z: *const types.BandersnatchVrfRoot,
@@ -131,8 +138,10 @@ fn verifyTicketEnvelope(
 ) ![]types.TicketBody {
     const span = trace.span(.verify_ticket_envelope);
     defer span.deinit();
+
     const tracy_zone = tracy.ZoneN(@src(), "verify_envelope");
     defer tracy_zone.End();
+
     span.debug("Verifying {d} ticket envelopes", .{extrinsic.len});
     span.trace("Ring size: {d}, gamma_z: {any}, n2: {any}", .{
         ring_size,
@@ -149,30 +158,63 @@ fn verifyTicketEnvelope(
 
     const empty_aux_data = [_]u8{};
 
+    // Use provided IO executor for parallel VRF verification
+    var task_group = io_executor.createGroup();
+    defer task_group.deinit();
+
+    // Spawn parallel VRF verification tasks
+
     for (extrinsic, 0..) |extr, i| {
-        span.trace("Verifying ticket envelope [{d}]:", .{i});
+        span.trace("Spawning VRF verification task [{d}]:", .{i});
         span.trace("  Attempt: {d}", .{extr.attempt});
         span.trace("  Signature: {s}", .{std.fmt.fmtSliceHexLower(&extr.signature)});
 
-        // TODO: rewrite
-        const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
+        try task_group.spawn(verifyTicketTask, .{
+            gamma_z,
+            ring_size,
+            n2,
+            extr,
+            &tickets[i],
+            &empty_aux_data,
+        });
+    }
 
-        const output = blk: {
-            const vrf_zone = tracy.ZoneN(@src(), "vrf_verify");
-            defer vrf_zone.End();
-            break :blk try ring_vrf.verifyRingSignatureAgainstCommitment(
-                gamma_z,
-                ring_size,
-                vrf_input,
-                &empty_aux_data,
-                &extr.signature,
-            );
-        };
-        span.trace("  VRF output (ticket ID): {s}", .{std.fmt.fmtSliceHexLower(&output)});
+    // Wait for all VRF verifications to complete
+    try task_group.waitAndCheckErrors();
 
-        tickets[i].attempt = extr.attempt;
-        tickets[i].id = output;
+    // Log results
+    for (tickets, 0..) |ticket, i| {
+        span.trace("VRF result [{d}] - ID: {s}", .{ i, std.fmt.fmtSliceHexLower(&ticket.id) });
     }
 
     return tickets;
+}
+
+// Helper function for parallel VRF verification task
+fn verifyTicketTask(
+    gamma_z: *const types.BandersnatchVrfRoot,
+    ring_size: usize,
+    n2: types.Entropy,
+    extr: types.TicketEnvelope,
+    output_ticket: *types.TicketBody,
+    empty_aux_data: *const [0]u8,
+) !void {
+    const vrf_zone = tracy.ZoneN(@src(), "vrf_verify_parallel");
+    defer vrf_zone.End();
+
+    // Construct VRF input for this ticket
+    const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
+
+    // Perform VRF verification
+    const output = try ring_vrf.verifyRingSignatureAgainstCommitment(
+        gamma_z,
+        ring_size,
+        vrf_input,
+        empty_aux_data,
+        &extr.signature,
+    );
+
+    // Store results
+    output_ticket.attempt = extr.attempt;
+    output_ticket.id = output;
 }

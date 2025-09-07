@@ -190,6 +190,8 @@ pub fn stateTransition(
         const safrole_zone = tracy.ZoneN(@src(), "stf_safrole_transition");
         defer safrole_zone.End();
         break :blk try safrole.transition(
+            IOExecutor,
+            io_executor,
             params,
             stx,
             block.extrinsic.tickets,

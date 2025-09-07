@@ -12,6 +12,8 @@ const trace = tracing.scoped(.stf);
 pub const Error = error{};
 
 pub fn transition(
+    comptime IOExecutor: type,
+    io_executor: *IOExecutor,
     comptime params: Params,
     stx: *StateTransition(params),
     extrinsic_tickets: types.TicketsExtrinsic,
@@ -20,6 +22,8 @@ pub fn transition(
     defer span.deinit();
 
     return try safrole.transition(
+        IOExecutor,
+        io_executor,
         params,
         stx,
         extrinsic_tickets,
