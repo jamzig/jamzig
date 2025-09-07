@@ -280,6 +280,7 @@ pub fn build(b: *std.Build) !void {
 
     // Statically link our rust_deps to the unit tests
     rust_deps.staticallyLinkTo(unit_tests);
+    configureTracy(b, unit_tests, testing_config.enable_tracy, tracy_dep);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
@@ -322,6 +323,7 @@ pub fn build(b: *std.Build) !void {
 
     // Statically link our rust_deps to the test vectors
     rust_deps.staticallyLinkTo(test_vectors);
+    configureTracy(b, test_vectors, testing_config.enable_tracy, tracy_dep);
 
     const run_test_vectors = b.addRunArtifact(test_vectors);
     if (b.args) |args| {
