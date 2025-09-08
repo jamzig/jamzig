@@ -57,15 +57,18 @@ fn configureTracing(b: *std.Build, exe: *std.Build.Step.Compile, config: BuildCo
     exe.root_module.addImport("tracing", tracing_mod);
 }
 
-// Helper function to configure tracy for an executable, it either adds the library and the real root module or a noop module
+// Helper function to configure tracy for an executable using ztracy's built-in stubs
 fn configureTracy(b: *std.Build, exe: *std.Build.Step.Compile, config: BuildConfig, tracy_dep: anytype) void {
     const tracy_needed = config.enable_tracy or config.tracing_mode == .tracy;
-    const tracy_mod = if (tracy_needed)
-        tracy_dep.module("root")
-    else
-        b.createModule(.{
-            .root_source_file = b.path("src/tracy_noop.zig"),
-        });
+    
+    // Create ztracy options module to control enable/disable
+    const ztracy_options = b.addOptions();
+    ztracy_options.addOption(bool, "enable_ztracy", tracy_needed);
+    
+    // Always use ztracy module - it handles stubs internally based on enable_ztracy option
+    const tracy_mod = tracy_dep.module("root");
+    tracy_mod.addImport("ztracy_options", ztracy_options.createModule());
+    
     exe.root_module.addImport("tracy", tracy_mod);
     if (tracy_needed) {
         exe.linkLibrary(tracy_dep.artifact("tracy"));
