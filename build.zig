@@ -119,7 +119,7 @@ pub fn build(b: *std.Build) !void {
     const conformance_config = BuildConfig{
         .tracing_scopes = base_config.tracing_scopes,
         .tracing_level = base_config.tracing_level,
-        .tracing_mode = .runtime, // Force runtime tracing for conformance tools
+        .tracing_mode = base_config.tracing_mode,
         .conformance_params = base_config.conformance_params,
         .enable_tracy = base_config.enable_tracy,
     };
@@ -130,7 +130,7 @@ pub fn build(b: *std.Build) !void {
         .tracing_level = "", // No default level
         .tracing_mode = .disabled, // Compile out all tracing
         .conformance_params = base_config.conformance_params,
-        .enable_tracy = base_config.enable_tracy,
+        .enable_tracy = false,
     };
 
     // Create build options objects
