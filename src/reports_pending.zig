@@ -9,7 +9,7 @@ const RefineContext = types.RefineContext;
 const WorkPackageSpec = types.WorkPackageSpec;
 const CoreIndex = types.CoreIndex;
 
-const trace = @import("tracing.zig").scoped(.rho);
+const trace = @import("tracing").scoped(.rho);
 
 pub const RhoEntry = struct {
     assignment: types.AvailabilityAssignment,

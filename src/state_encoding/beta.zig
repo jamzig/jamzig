@@ -12,7 +12,7 @@ const BeefyBelt = beta_component.BeefyBelt;
 
 const mmr = @import("../merkle/mmr.zig");
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 /// Encode Beta component (v0.6.7: contains recent_history and beefy_belt)
 /// As per graypaper: encode(recent_history, encode_MMR(beefy_belt))

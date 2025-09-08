@@ -26,7 +26,7 @@ const CommandMetadata = common.CommandMetadata;
 
 const Mailbox = @import("../datastruct/blocking_queue.zig").BlockingQueue;
 
-const trace = @import("../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Builder for creating a ServerThread instance.
 /// Ensures that the underlying JamSnpServer is also initialized.

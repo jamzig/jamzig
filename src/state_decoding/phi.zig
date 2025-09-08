@@ -8,7 +8,7 @@ const DecodingContext = state_decoding.DecodingContext;
 
 const H = 32; // Hash size (32)
 
-const trace = @import("../tracing.zig").scoped(.state_decoding);
+const trace = @import("tracing").scoped(.state_decoding);
 
 pub const DecoderParams = struct {
     core_count: u16,

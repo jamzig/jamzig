@@ -2,7 +2,7 @@ const std = @import("std");
 const uuid = @import("uuid");
 const network = @import("network");
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Maximum size of a message that can be received (1MB)
 pub const MAX_MESSAGE_SIZE: usize = 1024 * 1024;

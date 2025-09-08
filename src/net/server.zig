@@ -12,7 +12,7 @@ const common = @import("common.zig");
 const CommandCallback = common.CommandCallback;
 const CommandMetadata = common.CommandMetadata;
 
-const trace = @import("../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Server API for the JamSnpServer
 pub const Server = struct {

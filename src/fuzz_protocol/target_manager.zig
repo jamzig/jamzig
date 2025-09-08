@@ -5,7 +5,7 @@ const messages = @import("messages.zig");
 const frame = @import("frame.zig");
 const io = @import("../io.zig");
 
-const trace = @import("../tracing.zig").scoped(.fuzz_protocol);
+const trace = @import("tracing").scoped(.fuzz_protocol);
 const RestartBehavior = target.RestartBehavior;
 
 /// Thread context for target server

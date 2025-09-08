@@ -9,7 +9,7 @@ const types = @import("../types.zig");
 const state = @import("../state.zig");
 const Params = @import("../jam_params.zig").Params;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Error types for history tracking
 pub const HistoryError = error{

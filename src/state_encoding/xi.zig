@@ -3,7 +3,7 @@ const sort = std.sort;
 const encoder = @import("../codec/encoder.zig");
 const HashSet = @import("../datastruct/hash_set.zig").HashSet;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 const makeLessThanSliceOfFn = @import("../utils/sort.zig").makeLessThanSliceOfFn;
 const lessThanSliceOfHashes = makeLessThanSliceOfFn([32]u8);

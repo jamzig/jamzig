@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const trace = @import("../tracing.zig").scoped(.safrole);
+const trace = @import("tracing").scoped(.safrole);
 const tracy = @import("tracy");
 
 // (69) Outside in ordering function

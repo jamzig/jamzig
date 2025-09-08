@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const state = @import("../state.zig");
 const types = @import("../types.zig");
-const tracing = @import("../tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.stf_authorization);
 
 const Params = @import("../jam_params.zig").Params;

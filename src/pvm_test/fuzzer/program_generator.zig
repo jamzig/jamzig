@@ -10,7 +10,7 @@ const MaxInstructionSizeInBytes = @import("../../pvm/instruction.zig").MaxInstru
 const SeedGenerator = @import("seed.zig").SeedGenerator;
 const code_gen = @import("program_generator/code_generator.zig");
 
-const trace = @import("../../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 const JumpAlignmentFactor = 2; // ZA = 2 as per spec
 

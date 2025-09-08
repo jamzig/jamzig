@@ -3,7 +3,7 @@ const testing = std.testing;
 
 const Eta = @import("../types.zig").Eta;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 pub fn encode(self: *const Eta, writer: anytype) !void {
     const span = trace.span(.encode_entropy_pool);

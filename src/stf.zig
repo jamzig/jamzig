@@ -5,7 +5,7 @@ const jam_params = @import("jam_params.zig");
 const types = @import("types.zig");
 const state = @import("state.zig");
 const state_delta = @import("state_delta.zig");
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const tracy = @import("tracy");
 
 // Type aliases

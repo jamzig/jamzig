@@ -16,7 +16,7 @@ const state_decoding = @import("../state_decoding.zig");
 const DecodingError = state_decoding.DecodingError;
 const DecodingContext = state_decoding.DecodingContext;
 
-const trace = @import("../tracing.zig").scoped(.decode_beta);
+const trace = @import("tracing").scoped(.decode_beta);
 
 /// Decode Beta component (v0.6.7: contains recent_history and beefy_belt)
 pub fn decode(

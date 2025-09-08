@@ -9,7 +9,7 @@ const state_dict = @import("../state_dictionary.zig");
 
 const jam_params = @import("../jam_params.zig");
 
-const tracing = @import("../tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.trace_runner);
 
 const block_import = @import("../block_import.zig");
@@ -260,51 +260,49 @@ pub fn runTracesInDir(
                 std.debug.print("Parent state root: {s}\n", .{std.fmt.fmtSliceHexLower(&state_transition.block().header.parent_state_root)});
             }
 
-            // If runtime tracing is enabled, retry with detailed tracing
-            if (comptime tracing.tracing_mode == .runtime) {
-                if (!config.quiet) {
-                    std.debug.print("\nRetrying with debug tracing enabled...\n\n", .{});
-                }
-
-                try tracing.runtime.setScope("block_import", .trace);
-                defer tracing.runtime.disableScope("block_import") catch {};
-
-                try tracing.runtime.setScope("block_import", .trace);
-                defer tracing.runtime.disableScope("block_import") catch {};
-
-                // Retry the import with tracing
-                var retry_result = importer.importBlockBuildingRoot(
-                    &current_state.?,
-                    state_transition.block(),
-                ) catch |retry_err| {
-                    if (!config.quiet) {
-                        std.debug.print("\n=== Detailed trace above shows failure context ===\n", .{});
-                        std.debug.print("Error persists: {s}\n\n", .{@errorName(retry_err)});
-                    }
-                    // Check again if it's a no-op block
-                    if (is_no_op_block) {
-                        // Track the exception if not already tracked
-                        if (!result.had_no_op_blocks) {
-                            result.had_no_op_blocks = true;
-                            if (no_op_exceptions.items.len > 0) {
-                                try no_op_exceptions.appendSlice(", ");
-                            }
-                            try no_op_exceptions.appendSlice(@errorName(retry_err));
-                        }
-
-                        const current_root = try current_state.?.buildStateRoot(allocator);
-                        if (std.mem.eql(u8, &expected_post_root, &current_root)) {
-                            if (!config.quiet) {
-                                std.debug.print("\x1b[32m✓ State correctly remained unchanged after retry\x1b[0m\n", .{});
-                            }
-                            last_post_state_root = expected_post_root;
-                            continue;
-                        }
-                    }
-                    return retry_err;
-                };
-                defer retry_result.deinit();
+            // Try to enable runtime tracing for detailed error reporting
+            if (!config.quiet) {
+                std.debug.print("\nRetrying with debug tracing enabled...\n\n", .{});
             }
+
+            try tracing.setScope("block_import", .trace);
+            defer tracing.disableScope("block_import") catch {};
+
+            try tracing.setScope("stf", .trace);
+            defer tracing.disableScope("stf") catch {};
+
+            // Retry the import with tracing
+            var retry_result = importer.importBlockBuildingRoot(
+                &current_state.?,
+                state_transition.block(),
+            ) catch |retry_err| {
+                if (!config.quiet) {
+                    std.debug.print("\n=== Detailed trace above shows failure context ===\n", .{});
+                    std.debug.print("Error persists: {s}\n\n", .{@errorName(retry_err)});
+                }
+                // Check again if it's a no-op block
+                if (is_no_op_block) {
+                    // Track the exception if not already tracked
+                    if (!result.had_no_op_blocks) {
+                        result.had_no_op_blocks = true;
+                        if (no_op_exceptions.items.len > 0) {
+                            try no_op_exceptions.appendSlice(", ");
+                        }
+                        try no_op_exceptions.appendSlice(@errorName(retry_err));
+                    }
+
+                    const current_root = try current_state.?.buildStateRoot(allocator);
+                    if (std.mem.eql(u8, &expected_post_root, &current_root)) {
+                        if (!config.quiet) {
+                            std.debug.print("\x1b[32m✓ State correctly remained unchanged after retry\x1b[0m\n", .{});
+                        }
+                        last_post_state_root = expected_post_root;
+                        continue;
+                    }
+                }
+                return retry_err;
+            };
+            defer retry_result.deinit();
 
             return err;
         };

@@ -12,7 +12,7 @@ const Params = @import("../jam_params.zig").Params;
 const accumulate_types = @import("types.zig");
 const Queued = accumulate_types.Queued;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Error types for queue processing
 pub const QueueError = error{

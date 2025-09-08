@@ -5,7 +5,7 @@ const lsquic = @import("lsquic");
 const shared = @import("../jamsnp/shared_types.zig");
 const Connection = @import("connection.zig").Connection;
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 pub const StreamId = shared.StreamId;
 

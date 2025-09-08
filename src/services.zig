@@ -8,7 +8,7 @@ const Params = @import("jam_params.zig").Params;
 
 const Allocator = std.mem.Allocator;
 
-const trace = @import("tracing.zig").scoped(.service_state_keys);
+const trace = @import("tracing").scoped(.service_state_keys);
 
 pub const Transfer = struct {
     from: ServiceId,

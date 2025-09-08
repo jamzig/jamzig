@@ -9,7 +9,7 @@ const accumulation_outputs = @import("../accumulation_outputs.zig");
 const Theta = accumulation_outputs.Theta;
 const AccumulationOutput = accumulation_outputs.AccumulationOutput;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 /// Encode Theta (θ) - the most recent accumulation outputs
 /// As per v0.6.7: θ ∈ seq{(N_S, H)}

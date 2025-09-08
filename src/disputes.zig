@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const crypto = std.crypto;
 
-const trace = @import("tracing.zig").scoped(.disputes);
+const trace = @import("tracing").scoped(.disputes);
 
 // Types
 pub const Hash = [32]u8;

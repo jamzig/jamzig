@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const tracing = @import("../tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.types_fmt);
 
 pub fn IndentedWriter(comptime T: type) type {

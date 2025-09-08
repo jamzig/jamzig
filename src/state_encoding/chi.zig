@@ -6,7 +6,7 @@ const codec = @import("../codec.zig");
 const types = @import("../types.zig");
 const jam_params = @import("../jam_params.zig");
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 pub fn encode(
     comptime params: jam_params.Params,

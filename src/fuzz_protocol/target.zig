@@ -12,7 +12,7 @@ const types = @import("../types.zig");
 const block_import = @import("../block_import.zig");
 const io = @import("../io.zig");
 
-const trace = @import("../tracing.zig").scoped(.fuzz_protocol);
+const trace = @import("tracing").scoped(.fuzz_protocol);
 
 /// Server restart behavior after client disconnect
 pub const RestartBehavior = enum {

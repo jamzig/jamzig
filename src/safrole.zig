@@ -13,7 +13,7 @@ pub const epoch_handler = @import("safrole/epoch_handler.zig");
 const Params = @import("jam_params.zig").Params;
 const StateTransition = state_delta.StateTransition;
 
-const trace = @import("tracing.zig").scoped(.safrole);
+const trace = @import("tracing").scoped(.safrole);
 const tracy = @import("tracy");
 
 pub const Error = error{

@@ -6,7 +6,7 @@ const JamState = @import("state.zig").JamState;
 const StateTransition = @import("state_delta.zig").StateTransition;
 const HeaderValidator = @import("header_validator.zig").HeaderValidator;
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.block_import);
 const tracy = @import("tracy");
 

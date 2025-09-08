@@ -19,7 +19,7 @@ const banned = @import("reports/banned/banned.zig");
 
 const StateTransition = @import("state_delta.zig").StateTransition;
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.reports);
 
 /// Error types for report validation and processing

@@ -10,7 +10,7 @@ const Decoder = @import("decoder.zig").Decoder;
 const Memory = @import("memory.zig").Memory;
 const ExecutionTrace = @import("execution_trace.zig").ExecutionTrace;
 
-const trace = @import("../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 pub const ExecutionContext = struct {
     program: Program,
@@ -265,13 +265,13 @@ pub const ExecutionContext = struct {
         // Initialize registers according to specification
         // Determine trace mode from tracing scope
         const trace_mode = blk: {
-            if (@hasDecl(@import("../tracing.zig"), "boption_scope_configs")) {
+            if (@hasDecl(@import("tracing"), "boption_scope_configs")) {
                 // Check for pvm_exec=compact
-                if (@import("../tracing.zig").findScope("pvm_exec_compact") != null) {
+                if (@import("tracing").findScope("pvm_exec_compact") != null) {
                     break :blk ExecutionTrace.TraceMode.compact;
                 }
                 // Check for pvm_exec (verbose)
-                if (@import("../tracing.zig").findScope("pvm_exec") != null) {
+                if (@import("tracing").findScope("pvm_exec") != null) {
                     break :blk ExecutionTrace.TraceMode.verbose;
                 }
             }

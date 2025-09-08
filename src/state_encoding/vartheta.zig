@@ -11,7 +11,7 @@ const VarTheta = reports_ready.Theta; // Still using Theta type from reports_rea
 const makeLessThanSliceOfFn = @import("../utils/sort.zig").makeLessThanSliceOfFn;
 const lessThanSliceOfHashes = makeLessThanSliceOfFn(types.Hash);
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 /// VarTheta (ϑ) is defined as a sequence of work reports and their dependencies: ⟦(W, {H})⟧E
 /// where W is a work report and H is a set of 32-byte hashes representing unaccumulated dependencies

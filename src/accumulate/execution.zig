@@ -9,7 +9,7 @@ const meta = @import("../meta.zig");
 
 const HashSet = @import("../datastruct/hash_set.zig").HashSet;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 const AccumulationContext = pvm_accumulate.AccumulationContext;
 const AccumulationOperand = pvm_accumulate.AccumulationOperand;

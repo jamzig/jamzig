@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const tracing = @import("../../tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.convert_generic);
 
 pub fn convert(comptime ToType: type, conversionFunctions: anytype, allocator: anytype, from: anytype) !ToType {

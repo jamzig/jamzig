@@ -13,7 +13,7 @@ const Connection = @import("connection.zig").Connection;
 const Stream = @import("stream.zig").Stream;
 
 const toSocketAddress = @import("../ext.zig").toSocketAddress;
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 // Use shared types
 pub const ConnectionId = shared.ConnectionId;

@@ -7,7 +7,7 @@ const ServiceId = services.ServiceId;
 const Allocator = std.mem.Allocator;
 
 // Import the tracing module
-const trace = @import("tracing.zig").scoped(.delta_snapshot);
+const trace = @import("tracing").scoped(.delta_snapshot);
 
 /// DeltaSnapshot provides a copy-on-write wrapper around the Delta state.
 /// It allows modifications to services without affecting the original state until commit.

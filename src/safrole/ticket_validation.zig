@@ -10,7 +10,7 @@ pub const types = @import("../types.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("../tracing.zig").scoped(.safrole);
+const trace = @import("tracing").scoped(.safrole);
 const tracy = @import("tracy");
 
 const Error = @import("../safrole.zig").Error;

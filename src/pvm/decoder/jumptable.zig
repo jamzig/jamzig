@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const trace = @import("../../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 pub const JumpTable = struct {
     indices: []u32,

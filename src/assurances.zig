@@ -3,7 +3,7 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const crypto = std.crypto;
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.assurances);
 
 /// A wrapper type that guarantees an AssuranceExtrinsic has been validated

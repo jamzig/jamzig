@@ -12,7 +12,7 @@ const state_decoding = @import("../state_decoding.zig");
 const DecodingError = state_decoding.DecodingError;
 const DecodingContext = state_decoding.DecodingContext;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 /// Decode Theta (θ) - the most recent accumulation outputs
 /// As per v0.6.7: θ ∈ seq{(N_S, H)}

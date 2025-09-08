@@ -7,7 +7,7 @@ const PreimageLookup = services.PreimageLookup;
 const Params = @import("../jam_params.zig").Params;
 // PreimageLookupKey removed - using types.StateKey directly
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 /// Encodes base service account data: C(255, s) ↦ a_c ⌢ E_8(a_b, a_g, a_m, a_l) ⌢ E_4(a_i)
 pub fn encodeServiceAccountBase(params: Params, account: *const ServiceAccount, writer: anytype) !void {

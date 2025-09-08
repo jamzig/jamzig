@@ -21,7 +21,7 @@ pub fn OnTransferContext(comptime params: Params) type {
 }
 
 // Add tracing import
-const trace = @import("../tracing.zig").scoped(.ontransfer);
+const trace = @import("tracing").scoped(.ontransfer);
 
 // The to be encoded arguments for OnTransfer
 const OnTransferArgs = struct {

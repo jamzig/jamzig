@@ -6,7 +6,7 @@ const codec = @import("../codec.zig");
 const Decoder = @import("decoder.zig").Decoder;
 const JumpTable = @import("decoder/jumptable.zig").JumpTable;
 
-const trace = @import("../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 pub const Program = struct {
     code: []const u8,

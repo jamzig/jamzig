@@ -7,7 +7,7 @@ const state_keys = @import("state_keys.zig");
 const Params = @import("jam_params.zig").Params;
 
 // Add tracing import
-const trace = @import("tracing.zig").scoped(.preimages);
+const trace = @import("tracing").scoped(.preimages);
 
 /// Compares two preimages for ordering
 fn comparePreimages(lhs: types.Preimage, rhs: types.Preimage) bool {

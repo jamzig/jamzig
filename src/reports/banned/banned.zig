@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
-const tracing = @import("../../tracing.zig");
+const tracing = @import("tracing");
 const disputes = @import("../../disputes.zig");
 
 const trace = tracing.scoped(.reports);

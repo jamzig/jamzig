@@ -6,7 +6,7 @@ const Memory = @import("../../../pvm/memory.zig").Memory;
 const InstructionWithArgs = instlib.InstructionWithArgs;
 
 // Import tracing module and create a scope
-const trace = @import("../../../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 /// Generate a sequence of random instructions
 pub fn generate(allocator: std.mem.Allocator, seed_gen: *SeedGenerator, instruction_count: usize) ![]InstructionWithArgs {

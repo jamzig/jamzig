@@ -7,7 +7,7 @@ pub const StreamId = shared.StreamId;
 pub const StreamKind = shared.StreamKind;
 pub const StreamHandle = @import("stream_handle.zig").StreamHandle;
 
-const trace = @import("../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Callback type for command completion
 pub fn CommandCallback(T: type) type {

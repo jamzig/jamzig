@@ -15,7 +15,7 @@ const report = @import("../report.zig");
 
 const Fuzzer = fuzzer_mod.Fuzzer;
 
-const trace = @import("../../tracing.zig").scoped(.fuzz_protocol);
+const trace = @import("tracing").scoped(.fuzz_protocol);
 
 const FUZZ_PARAMS = jam_params.TINY_PARAMS;
 

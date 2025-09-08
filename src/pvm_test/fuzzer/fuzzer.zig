@@ -5,7 +5,7 @@ const SeedGenerator = @import("seed.zig").SeedGenerator;
 const ProgramGenerator = @import("program_generator.zig").ProgramGenerator;
 const Register = @import("../../pvm/registers.zig").Register;
 
-const trace = @import("../../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 /// Configuration for program mutations
 pub const MutationConfig = struct {
@@ -400,7 +400,7 @@ pub const PVMFuzzer = struct {
 
             // Check if pvm scope tracing is enabled, in that case we want polkavm logging as well
             // NOTE: use RUST_LOG=trace to actually show the pvm logs
-            if (@import("../../tracing.zig").findScope("pvm")) |_| {
+            if (@import("tracing").findScope("pvm")) |_| {
                 polkavm_ffi.initLogging();
             }
 

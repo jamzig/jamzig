@@ -14,7 +14,7 @@ const ServiceActivityRecord = validator_statistics.ServiceActivityRecord;
 const ValidatorIndex = @import("../types.zig").ValidatorIndex;
 const ServiceId = @import("../types.zig").ServiceId;
 
-const trace = @import("../tracing.zig").scoped(.pi_decoding);
+const trace = @import("tracing").scoped(.pi_decoding);
 
 pub const DecoderParams = struct {
     validators_count: u32,

@@ -3,7 +3,7 @@ const ssl = @import("ssl");
 
 const Base32 = @import("../base32.zig").Encoding;
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Certificate verification callback for JAMSNP
 pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.C) c_int {

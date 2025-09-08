@@ -5,7 +5,7 @@ const types = @import("../types.zig");
 
 const PVM = @import("../pvm.zig").PVM;
 
-const trace = @import("../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 const MachineInvocationResult = struct {
     gas_used: types.Gas,

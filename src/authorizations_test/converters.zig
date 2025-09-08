@@ -6,7 +6,7 @@ const auth_pool = @import("../authorizer_pool.zig");
 const auth_queue = @import("../authorizer_queue.zig");
 
 const jamtestvectors = @import("../jamtestvectors/authorizations.zig");
-const trace = @import("../tracing.zig").scoped(.converters);
+const trace = @import("tracing").scoped(.converters);
 
 const Params = @import("../jam_params.zig").Params;
 

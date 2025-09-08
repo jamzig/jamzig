@@ -1,5 +1,5 @@
 const std = @import("std");
-const trace = @import("tracing.zig").scoped(.authorizations);
+const trace = @import("tracing").scoped(.authorizations);
 const types = @import("types.zig");
 
 const Params = @import("jam_params.zig").Params;

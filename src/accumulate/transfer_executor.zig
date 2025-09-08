@@ -14,7 +14,7 @@ const Params = @import("../jam_params.zig").Params;
 const DeferredTransfer = @import("../pvm_invocations/accumulate.zig").DeferredTransfer;
 const TransferServiceStats = @import("execution.zig").TransferServiceStats;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Error types for transfer execution
 pub const TransferError = error{

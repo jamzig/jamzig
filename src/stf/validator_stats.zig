@@ -7,7 +7,7 @@ const validator_stats = @import("../validator_stats.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("../tracing.zig").scoped(.stf);
+const trace = @import("tracing").scoped(.stf);
 
 /// This structure contains all the necessary data for the validator statistics
 /// state transition function, decoupled from the Block type.
@@ -227,7 +227,7 @@ pub fn transitionEpoch(
     comptime params: Params,
     stx: *StateTransition(params),
 ) !void {
-    const span = trace.span(.transition_validator_stats_epoch);
+    const span = trace.span(.transition_epoch);
     defer span.deinit();
     span.debug("Starting validator_stats transition", .{});
     var pi: *state.Pi = try stx.ensure(.pi_prime);
@@ -242,7 +242,7 @@ pub fn clearPerBlockStats(
     comptime params: Params,
     stx: *StateTransition(params),
 ) !void {
-    const span = trace.span(.transition_validator_stats_epoch);
+    const span = trace.span(.clear_per_block_stats);
     defer span.deinit();
     var pi: *state.Pi = try stx.ensure(.pi_prime);
 

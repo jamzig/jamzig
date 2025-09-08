@@ -22,7 +22,7 @@ const CommandMetadata = common.CommandMetadata;
 
 const Mailbox = @import("../datastruct/blocking_queue.zig").BlockingQueue;
 
-const trace = @import("../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Client API for the JamSnpClient
 pub const Client = struct {

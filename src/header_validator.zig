@@ -6,7 +6,7 @@ const codec = @import("codec.zig");
 const crypto = @import("crypto.zig");
 const io = @import("io.zig");
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.stf);
 const tracy = @import("tracy");
 

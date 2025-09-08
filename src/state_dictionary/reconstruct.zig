@@ -11,7 +11,7 @@ const Params = @import("../jam_params.zig").Params;
 
 pub const detectKeyType = @import("../state_dictionary/key_type_detection.zig").detectKeyType;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 /// Reconstructs a JamState from a MerklizationDictionary by decoding its entries
 pub fn reconstructState(

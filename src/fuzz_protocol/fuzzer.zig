@@ -22,7 +22,7 @@ const io = @import("../io.zig");
 const JamState = @import("../state.zig").JamState;
 const state_dictionary = @import("../state_dictionary.zig");
 
-const trace = @import("../tracing.zig").scoped(.fuzz_protocol);
+const trace = @import("tracing").scoped(.fuzz_protocol);
 
 const FuzzerState = enum {
     initial,

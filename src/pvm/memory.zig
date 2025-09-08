@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const trace = @import("../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 pub const Memory = struct {
     pub const Page = struct {

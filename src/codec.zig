@@ -6,7 +6,7 @@ const Scanner = @import("codec/scanner.zig").Scanner;
 const GenericReader = std.io.GenericReader;
 pub const DecodingContext = @import("codec/context.zig").DecodingContext;
 
-const trace = @import("tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 // Tests
 comptime {

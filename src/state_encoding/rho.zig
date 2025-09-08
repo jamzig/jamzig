@@ -11,7 +11,7 @@ const codec = @import("../codec.zig");
 const pending_reports = @import("../reports_pending.zig");
 const Rho = pending_reports.Rho;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 pub fn encode(
     comptime params: jam_params.Params,

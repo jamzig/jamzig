@@ -16,7 +16,7 @@ const TransferServiceStats = execution.TransferServiceStats;
 const OuterAccumulationResult = execution.OuterAccumulationResult;
 const ProcessAccumulationResult = execution.ProcessAccumulationResult;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Error types for statistics calculation
 pub const StatisticsError = error{

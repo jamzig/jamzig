@@ -6,7 +6,7 @@ const network = @import("network");
 const shared = @import("../jamsnp/shared_types.zig");
 pub const ConnectionId = shared.ConnectionId;
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 // -- Nested Connection Struct
 pub fn Connection(T: type) type {

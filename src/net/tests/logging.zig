@@ -2,7 +2,7 @@ const std = @import("std");
 const ssl = @import("ssl");
 const lsquic = @import("lsquic");
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 // -- LSQUIC Logging
 

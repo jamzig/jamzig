@@ -21,7 +21,7 @@ const Params = @import("../jam_params.zig").Params;
 const HostCallMap = @import("accumulate/host_calls_map.zig");
 
 // Add tracing import
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 // Replace the AccumulateArgs struct definition with this:
 const AccumulateArgs = struct {

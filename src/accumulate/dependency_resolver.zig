@@ -21,7 +21,7 @@ const PartitionResult = accumulate_types.PartitionResult;
 
 const WorkReportAndDeps = state.reports_ready.WorkReportAndDeps;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Error types specific to dependency resolution
 pub const DependencyError = error{

@@ -10,7 +10,7 @@ const ring_vrf = @import("../ring_vrf.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("../tracing.zig").scoped(.epoch_handler);
+const trace = @import("tracing").scoped(.epoch_handler);
 const tracy = @import("tracy");
 
 /// Transitions the epoch, handling validator rotation and state updates

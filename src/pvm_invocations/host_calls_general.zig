@@ -13,7 +13,7 @@ const ReturnCode = host_calls.ReturnCode;
 const HostCallError = host_calls.HostCallError;
 
 // Add tracing import
-const trace = @import("../tracing.zig").scoped(.host_calls);
+const trace = @import("tracing").scoped(.host_calls);
 
 // Type aliases for convenience
 const Hash256 = types.Hash;

@@ -6,7 +6,7 @@ const constants = @import("constants.zig");
 
 const Base32 = @import("../base32.zig").Encoding;
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Builds the ALPN identifier string for JAMSNP
 pub fn buildAlpnIdentifier(allocator: std.mem.Allocator, chain_genesis_hash: []const u8, is_builder: bool) ![]u8 {

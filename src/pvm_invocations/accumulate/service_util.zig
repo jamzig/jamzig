@@ -4,7 +4,7 @@ const types = @import("../../types.zig");
 const state = @import("../../state.zig");
 const codec = @import("../../codec.zig");
 
-const trace = @import("../../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Checks if a service ID is available and finds the next available one if not
 /// As defined in B.13 of the graypaper

@@ -5,7 +5,7 @@ const types = @import("../types.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("../tracing.zig").scoped(.stf);
+const trace = @import("tracing").scoped(.stf);
 
 pub const Error = error{};
 

@@ -279,7 +279,7 @@ pub const WorkExecResult = union(enum(u8)) {
     pub fn decode(_: anytype, reader: anytype, alloc: std.mem.Allocator) !@This() {
         const tag = try reader.readByte();
 
-        const tracing = comptime @import("tracing.zig").scoped(.codec);
+        const tracing = comptime @import("tracing").scoped(.codec);
         const span = tracing.span(.work_exec_result_decode);
         span.debug("Decoding WorkExecResult with tag: {d}", .{tag});
 

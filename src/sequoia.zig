@@ -9,7 +9,7 @@ const codec = @import("codec.zig");
 const time = @import("time.zig");
 
 pub const logging = @import("sequoia/logging.zig");
-const trace = @import("tracing.zig").scoped(.sequoia);
+const trace = @import("tracing").scoped(.sequoia);
 
 const Ed25519 = std.crypto.sign.Ed25519;
 const Bls12_381 = crypto.bls12_381.Bls12_381;

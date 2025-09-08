@@ -15,7 +15,7 @@ const TimeInfo = accumulate_types.TimeInfo;
 
 const WorkReportAndDeps = state.reports_ready.WorkReportAndDeps;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Error types for state updates
 pub const StateUpdateError = error{
