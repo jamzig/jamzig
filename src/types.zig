@@ -4,6 +4,8 @@ const jam_params = @import("jam_params.zig");
 
 pub const fmt = @import("types/fmt.zig");
 
+const tracing = @import("tracing").scoped(.codec);
+
 pub const U8 = u8;
 pub const U16 = u16;
 pub const U32 = u32;
@@ -279,8 +281,8 @@ pub const WorkExecResult = union(enum(u8)) {
     pub fn decode(_: anytype, reader: anytype, alloc: std.mem.Allocator) !@This() {
         const tag = try reader.readByte();
 
-        const tracing = comptime @import("tracing").scoped(.codec);
         const span = tracing.span(.work_exec_result_decode);
+        defer span.deinit();
         span.debug("Decoding WorkExecResult with tag: {d}", .{tag});
 
         return switch (tag) {

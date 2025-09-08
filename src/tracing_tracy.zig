@@ -13,6 +13,9 @@ var config_fba = std.heap.FixedBufferAllocator.init(&config_buffer);
 // Global config instance - initialized on first use
 var config: ?Config = null;
 
+// Thread-local depth for tracking span hierarchy
+threadlocal var depth: usize = 0;
+
 // Get config, initializing if necessary
 fn getConfig() *Config {
     if (config == null) {
@@ -41,12 +44,16 @@ pub const Span = struct {
     scope: []const u8,
     operation: []const u8,
     tracy_zone: tracy.ZoneCtx,
+    saved_depth: usize,
 
     pub fn init(scope: []const u8, operation: [:0]const u8) Span {
+        const current_depth = depth;
+        depth += 1;
         return Span{
             .scope = scope,
             .operation = operation,
             .tracy_zone = tracy.ZoneN(@src(), operation),
+            .saved_depth = current_depth,
         };
     }
 
@@ -55,7 +62,33 @@ pub const Span = struct {
     }
 
     pub fn deinit(self: *const Span) void {
-        self.tracy_zone.End();
+        // ALWAYS check - this is critical for Tracy correctness
+        if (depth != self.saved_depth + 1) {
+            // Log error to stderr since we're in Tracy mode (can't use Tracy to report Tracy errors)
+            std.debug.print(
+                "ERROR: Span '{s}.{s}' being deinitialized with incorrect depth!\n" ++
+                "  Expected depth: {d}\n" ++
+                "  Actual depth: {d}\n" ++
+                "  This means child spans were not properly deinitialized.\n" ++
+                "  Tracy profiling data will be corrupted!\n",
+                .{ self.scope, self.operation, self.saved_depth + 1, depth }
+            );
+            
+            // Still end the zone to prevent Tracy from hanging
+            self.tracy_zone.End();
+            
+            // Force depth correction to prevent cascading errors
+            depth = self.saved_depth;
+            
+            // In debug builds, panic to catch this during development
+            if (std.debug.runtime_safety) {
+                std.debug.panic("Child span leak detected - see error above", .{});
+            }
+        } else {
+            // Normal case - everything is correct
+            depth = self.saved_depth;
+            self.tracy_zone.End();
+        }
     }
 
     pub inline fn trace(self: *const Span, comptime fmt: []const u8, args: anytype) void {

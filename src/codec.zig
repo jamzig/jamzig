@@ -488,10 +488,12 @@ fn deserializeStruct(comptime T: type, comptime params: anytype, allocator: std.
 }
 
 fn deserializeUnion(comptime T: type, comptime params: anytype, allocator: std.mem.Allocator, reader: anytype, context: ?*DecodingContext) !T {
-    const unionInfo = @typeInfo(T).@"union";
     const union_span = trace.span(.union_deserialize);
     defer union_span.deinit();
+
     union_span.debug("union: {s}", .{@typeName(T)});
+
+    const unionInfo = @typeInfo(T).@"union";
 
     if (@hasDecl(T, "decode")) {
         union_span.debug("union: custom decode", .{});
