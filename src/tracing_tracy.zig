@@ -49,6 +49,7 @@ pub const Span = struct {
     pub inline fn init(src: std.builtin.SourceLocation, scope: []const u8, operation: [:0]const u8) Span {
         const current_depth = depth;
         depth += 1;
+
         return Span{
             .scope = scope,
             .operation = operation,
@@ -65,21 +66,18 @@ pub const Span = struct {
         // ALWAYS check - this is critical for Tracy correctness
         if (depth != self.saved_depth + 1) {
             // Log error to stderr since we're in Tracy mode (can't use Tracy to report Tracy errors)
-            std.debug.print(
-                "ERROR: Span '{s}.{s}' being deinitialized with incorrect depth!\n" ++
+            std.debug.print("ERROR: Span '{s}.{s}' being deinitialized with incorrect depth!\n" ++
                 "  Expected depth: {d}\n" ++
                 "  Actual depth: {d}\n" ++
                 "  This means child spans were not properly deinitialized.\n" ++
-                "  Tracy profiling data will be corrupted!\n",
-                .{ self.scope, self.operation, self.saved_depth + 1, depth }
-            );
-            
+                "  Tracy profiling data will be corrupted!\n", .{ self.scope, self.operation, self.saved_depth + 1, depth });
+
             // Still end the zone to prevent Tracy from hanging
             self.tracy_zone.End();
-            
+
             // Force depth correction to prevent cascading errors
             depth = self.saved_depth;
-            
+
             // In debug builds, panic to catch this during development
             if (std.debug.runtime_safety) {
                 std.debug.panic("Child span leak detected - see error above", .{});
