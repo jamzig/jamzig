@@ -27,6 +27,16 @@ pub const LogLevel = enum(u8) {
             .err => "ERROR",
         };
     }
+
+    pub fn fromString(level_str: []const u8) !LogLevel {
+        if (std.mem.eql(u8, level_str, "trace")) return .trace;
+        if (std.mem.eql(u8, level_str, "debug")) return .debug;
+        if (std.mem.eql(u8, level_str, "info")) return .info;
+        if (std.mem.eql(u8, level_str, "warn")) return .warn;
+        if (std.mem.eql(u8, level_str, "err")) return .err;
+        return error.InvalidLogLevel;
+    }
+
 };
 
 pub const Scope = []const u8;
@@ -82,12 +92,7 @@ pub const Config = struct {
     }
 
     fn parseLogLevel(level_str: []const u8) LogLevel {
-        if (std.mem.eql(u8, level_str, "trace")) return .trace;
-        if (std.mem.eql(u8, level_str, "debug")) return .debug;
-        if (std.mem.eql(u8, level_str, "info")) return .info;
-        if (std.mem.eql(u8, level_str, "warn")) return .warn;
-        if (std.mem.eql(u8, level_str, "err")) return .err;
-        return .info; // Default fallback
+        return LogLevel.fromString(level_str) catch .info; // Default fallback on error
     }
 
     pub fn getLevel(self: *const Config, scope: Scope) LogLevel {

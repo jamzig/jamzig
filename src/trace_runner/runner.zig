@@ -266,10 +266,10 @@ pub fn runTracesInDir(
             }
 
             try tracing.setScope("block_import", .trace);
-            defer tracing.disableScope("block_import") catch {};
+            defer tracing.disableScope("block_import");
 
             try tracing.setScope("stf", .trace);
-            defer tracing.disableScope("stf") catch {};
+            defer tracing.disableScope("stf");
 
             // Retry the import with tracing
             var retry_result = importer.importBlockBuildingRoot(
