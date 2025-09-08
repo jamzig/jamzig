@@ -11,20 +11,20 @@ const codec = @import("../codec.zig");
 const pending_reports = @import("../reports_pending.zig");
 const Rho = pending_reports.Rho;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 pub fn encode(
     comptime params: jam_params.Params,
     rho: *const Rho(params.core_count),
     writer: anytype,
 ) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting Rho state encoding with {d} cores", .{params.core_count});
 
     // The number of cores (C) is not encoded as it is a constant
     for (rho.reports, 0..) |maybe_entry, core_idx| {
-        const entry_span = span.child(.entry);
+        const entry_span = span.child(@src(), .entry);
         defer entry_span.deinit();
         entry_span.debug("Processing core {d}", .{core_idx});
 

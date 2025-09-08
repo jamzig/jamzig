@@ -8,12 +8,12 @@ const codec = @import("../codec.zig");
 const authorization_queue = @import("../authorizer_queue.zig");
 const Phi = authorization_queue.Phi;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 const H = 32;
 
 pub fn encode(self: anytype, writer: anytype) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting phi encoding", .{});
 

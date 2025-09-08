@@ -7,7 +7,7 @@ const InstructionWithArgs = PVM.InstructionWithArgs;
 
 const codec = @import("../codec.zig");
 
-const trace = @import("../tracing.zig").scoped(.pvm_test);
+const trace = @import("tracing").scoped(.pvm_test);
 
 pub const InstructionExecutionResult = struct {
     registers: [13]u64,

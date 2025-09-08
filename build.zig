@@ -1,7 +1,7 @@
 const std = @import("std");
 
 // Define enum types that can be shared
-const TracingMode = enum { disabled, compile_time, runtime };
+const TracingMode = enum { disabled, runtime, tracy };
 const ConformanceParams = enum { tiny, full };
 
 // Configuration struct to hold all build parameters
@@ -10,6 +10,7 @@ const BuildConfig = struct {
     tracing_level: []const u8,
     tracing_mode: TracingMode,
     conformance_params: ?ConformanceParams = null,
+    enable_tracy: bool = false,
 };
 
 // Helper function to apply build configuration to options
@@ -17,8 +18,60 @@ fn applyBuildConfig(options: *std.Build.Step.Options, config: BuildConfig) void 
     options.addOption([]const []const u8, "enable_tracing_scopes", config.tracing_scopes);
     options.addOption([]const u8, "enable_tracing_level", config.tracing_level);
     options.addOption(@TypeOf(config.tracing_mode), "tracing_mode", config.tracing_mode);
+    options.addOption(bool, "enable_tracy", config.enable_tracy);
     if (config.conformance_params) |conformance_params| {
         options.addOption(ConformanceParams, "conformance_params", conformance_params);
+    }
+}
+
+// Helper function to configure tracing module based on tracing mode
+fn configureTracing(b: *std.Build, exe: *std.Build.Step.Compile, config: BuildConfig, tracy_dep: anytype) void {
+    // Create a separate options module for tracing with only the fields it needs
+    const tracing_options = b.addOptions();
+    tracing_options.addOption([]const []const u8, "enable_tracing_scopes", config.tracing_scopes);
+    tracing_options.addOption([]const u8, "enable_tracing_level", config.tracing_level);
+
+    const tracing_mod = switch (config.tracing_mode) {
+        .disabled => b.createModule(.{
+            .root_source_file = b.path("src/tracing_noop.zig"),
+        }),
+        .runtime => blk: {
+            const mod = b.createModule(.{
+                .root_source_file = b.path("src/tracing.zig"),
+            });
+            // Add tracing_options instead of build_options to avoid module conflicts
+            mod.addOptions("build_options", tracing_options);
+            break :blk mod;
+        },
+        .tracy => blk: {
+            const mod = b.createModule(.{
+                .root_source_file = b.path("src/tracing_tracy.zig"),
+            });
+            // Add tracing_options instead of build_options to avoid module conflicts
+            mod.addOptions("build_options", tracing_options);
+            // Add tracy module import for tracing_tracy.zig
+            mod.addImport("tracy", tracy_dep.module("root"));
+            break :blk mod;
+        },
+    };
+    exe.root_module.addImport("tracing", tracing_mod);
+}
+
+// Helper function to configure tracy for an executable using ztracy's built-in stubs
+fn configureTracy(b: *std.Build, exe: *std.Build.Step.Compile, config: BuildConfig, tracy_dep: anytype) void {
+    const tracy_needed = config.enable_tracy or config.tracing_mode == .tracy;
+
+    // Create ztracy options module to control enable/disable
+    const ztracy_options = b.addOptions();
+    ztracy_options.addOption(bool, "enable_ztracy", tracy_needed);
+
+    // Always use ztracy module - it handles stubs internally based on enable_ztracy option
+    const tracy_mod = tracy_dep.module("root");
+    tracy_mod.addImport("ztracy_options", ztracy_options.createModule());
+
+    exe.root_module.addImport("tracy", tracy_mod);
+    if (tracy_needed) {
+        exe.linkLibrary(tracy_dep.artifact("tracy"));
     }
 }
 
@@ -29,12 +82,37 @@ pub fn build(b: *std.Build) !void {
     // Parse command-line options
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match filter") orelse &[0][]const u8{};
 
+    // Parse command-line options
+    const tracing_scopes = b.option([][]const u8, "tracing-scope", "Enable detailed tracing by scope") orelse &[_][]const u8{};
+
     // Create base configuration from command-line options
     const base_config = BuildConfig{
-        .tracing_scopes = b.option([][]const u8, "tracing-scope", "Enable detailed tracing by scope") orelse &[_][]const u8{},
+        .tracing_scopes = tracing_scopes,
         .tracing_level = b.option([]const u8, "tracing-level", "Tracing log level default is info") orelse &[_]u8{},
-        .tracing_mode = b.option(TracingMode, "tracing-mode", "Tracing compilation mode (disabled/compile_time/runtime)") orelse .compile_time,
+        .tracing_mode = b.option(TracingMode, "tracing-mode", "Tracing mode (disabled/runtime/tracy)") orelse blk: {
+            // Auto-enable runtime tracing when scopes are specified
+            break :blk if (tracing_scopes.len > 0) .runtime else .disabled;
+        },
         .conformance_params = b.option(ConformanceParams, "conformance-params", "JAM protocol parameters for conformance testing (tiny/full)") orelse .tiny,
+        .enable_tracy = b.option(bool, "enable-tracy", "Enable Tracy profiler") orelse false,
+    };
+
+    // Create conformance configuration with runtime tracing
+    const testing_config = BuildConfig{
+        .tracing_scopes = base_config.tracing_scopes,
+        .tracing_level = base_config.tracing_level,
+        .tracing_mode = base_config.tracing_mode,
+        .conformance_params = base_config.conformance_params,
+        .enable_tracy = false, // Disable tracy for tests
+    };
+
+    // Create benchmark configuration - respects user's tracing settings
+    const bench_config = BuildConfig{
+        .tracing_scopes = base_config.tracing_scopes, // Use user's tracing scopes
+        .tracing_level = base_config.tracing_level, // Use user's tracing level
+        .tracing_mode = base_config.tracing_mode, // Use user's tracing mode
+        .conformance_params = base_config.conformance_params,
+        .enable_tracy = base_config.enable_tracy, // Allow tracy for benchmarking
     };
 
     // Create conformance configuration with runtime tracing
@@ -43,6 +121,7 @@ pub fn build(b: *std.Build) !void {
         .tracing_level = base_config.tracing_level,
         .tracing_mode = .runtime, // Force runtime tracing for conformance tools
         .conformance_params = base_config.conformance_params,
+        .enable_tracy = base_config.enable_tracy,
     };
 
     // Create target-specific optimized configuration with disabled tracing
@@ -51,22 +130,7 @@ pub fn build(b: *std.Build) !void {
         .tracing_level = "", // No default level
         .tracing_mode = .disabled, // Compile out all tracing
         .conformance_params = base_config.conformance_params,
-    };
-
-    // Create conformance configuration with runtime tracing
-    const testing_config = BuildConfig{
-        .tracing_scopes = base_config.tracing_scopes,
-        .tracing_level = base_config.tracing_level,
-        .tracing_mode = .runtime, // Force runtime tracing for conformance tools
-        .conformance_params = base_config.conformance_params,
-    };
-
-    // Create benchmark configuration optimized for performance - no debugging
-    const bench_config = BuildConfig{
-        .tracing_scopes = &[_][]const u8{}, // No tracing scopes
-        .tracing_level = "", // No tracing level
-        .tracing_mode = .disabled, // Compile out all tracing
-        .conformance_params = base_config.conformance_params,
+        .enable_tracy = base_config.enable_tracy,
     };
 
     // Create build options objects
@@ -109,6 +173,15 @@ pub fn build(b: *std.Build) !void {
     const base32_dep = b.dependency("base32", dep_opts);
     const base32_mod = base32_dep.module("base32");
 
+    // Tracy Profiler
+    const tracy_dep = b.dependency("tracy", .{
+        .target = target,
+        .optimize = optimize,
+        .enable_ztracy = true,
+        .enable_fibers = false, // Not needed - using real threads
+        .on_demand = false, // Always on when enabled
+    });
+
     // Rest of the existing build.zig implementation...
     var rust_deps = try buildRustDependencies(b, target, optimize);
     defer rust_deps.deinit();
@@ -130,6 +203,8 @@ pub fn build(b: *std.Build) !void {
     jamzig_exe.root_module.addImport("lsquic", lsquic_mod);
     jamzig_exe.root_module.addImport("ssl", ssl_mod);
     jamzig_exe.root_module.addImport("base32", base32_mod);
+    configureTracing(b, jamzig_exe, base_config, tracy_dep);
+    configureTracy(b, jamzig_exe, base_config, tracy_dep);
 
     b.installArtifact(jamzig_exe);
 
@@ -142,6 +217,8 @@ pub fn build(b: *std.Build) !void {
 
     pvm_fuzzer.root_module.addOptions("build_options", build_options);
     pvm_fuzzer.root_module.addImport("clap", clap_module);
+    configureTracing(b, pvm_fuzzer, base_config, tracy_dep);
+    configureTracy(b, pvm_fuzzer, base_config, tracy_dep);
     pvm_fuzzer.linkLibCpp();
     try rust_deps.staticallyLinkDepTo("polkavm_ffi", pvm_fuzzer);
     b.installArtifact(pvm_fuzzer);
@@ -157,6 +234,8 @@ pub fn build(b: *std.Build) !void {
     });
     jam_conformance_fuzzer.root_module.addOptions("build_options", conformance_build_options);
     jam_conformance_fuzzer.root_module.addImport("clap", clap_module);
+    configureTracing(b, jam_conformance_fuzzer, conformance_config, tracy_dep);
+    configureTracy(b, jam_conformance_fuzzer, conformance_config, tracy_dep);
     jam_conformance_fuzzer.linkLibCpp();
     rust_deps.staticallyLinkTo(jam_conformance_fuzzer);
     b.installArtifact(jam_conformance_fuzzer);
@@ -169,6 +248,8 @@ pub fn build(b: *std.Build) !void {
     });
     jam_conformance_target.root_module.addOptions("build_options", target_build_options);
     jam_conformance_target.root_module.addImport("clap", clap_module);
+    configureTracing(b, jam_conformance_target, target_config, tracy_dep);
+    configureTracy(b, jam_conformance_target, target_config, tracy_dep);
     jam_conformance_target.linkLibCpp();
     rust_deps.staticallyLinkTo(jam_conformance_target);
     b.installArtifact(jam_conformance_target);
@@ -246,6 +327,8 @@ pub fn build(b: *std.Build) !void {
 
     // Statically link our rust_deps to the unit tests
     rust_deps.staticallyLinkTo(unit_tests);
+    configureTracing(b, unit_tests, testing_config, tracy_dep);
+    configureTracy(b, unit_tests, testing_config, tracy_dep);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
@@ -288,6 +371,8 @@ pub fn build(b: *std.Build) !void {
 
     // Statically link our rust_deps to the test vectors
     rust_deps.staticallyLinkTo(test_vectors);
+    configureTracing(b, test_vectors, testing_config, tracy_dep);
+    configureTracy(b, test_vectors, testing_config, tracy_dep);
 
     const run_test_vectors = b.addRunArtifact(test_vectors);
     if (b.args) |args| {
@@ -314,12 +399,14 @@ pub fn build(b: *std.Build) !void {
         .name = "bench-block-import",
         .root_source_file = b.path("src/bench_block_import.zig"),
         .target = target,
-        .optimize = .ReleaseFast,
+        .optimize = optimize,
     });
 
     bench_block_import.root_module.addOptions("build_options", bench_build_options);
     bench_block_import.root_module.addImport("pretty", pretty_module);
     bench_block_import.root_module.addImport("diffz", diffz_module);
+    configureTracing(b, bench_block_import, bench_config, tracy_dep);
+    configureTracy(b, bench_block_import, bench_config, tracy_dep);
     bench_block_import.linkLibCpp();
     rust_deps.staticallyLinkTo(bench_block_import);
     b.installArtifact(bench_block_import);
@@ -327,6 +414,27 @@ pub fn build(b: *std.Build) !void {
     const run_bench_block_import = b.addRunArtifact(bench_block_import);
     const bench_block_import_step = b.step("bench-block-import", "Run block import benchmarks");
     bench_block_import_step.dependOn(&run_bench_block_import.step);
+
+    // Add target trace benchmark step
+    const bench_target_trace = b.addExecutable(.{
+        .name = "bench-target-trace",
+        .root_source_file = b.path("src/bench_target_trace.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    bench_target_trace.root_module.addOptions("build_options", bench_build_options);
+    bench_target_trace.root_module.addImport("pretty", pretty_module);
+    bench_target_trace.root_module.addImport("diffz", diffz_module);
+    configureTracing(b, bench_target_trace, bench_config, tracy_dep);
+    configureTracy(b, bench_target_trace, bench_config, tracy_dep);
+    bench_target_trace.linkLibCpp();
+    rust_deps.staticallyLinkTo(bench_target_trace);
+    b.installArtifact(bench_target_trace);
+
+    const run_bench_target_trace = b.addRunArtifact(bench_target_trace);
+    const bench_target_trace_step = b.step("bench-target-trace", "Benchmark target processing traces (for profiling)");
+    bench_target_trace_step.dependOn(&run_bench_target_trace.step);
 }
 
 const RustDeps = struct {

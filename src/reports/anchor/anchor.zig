@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
-const tracing = @import("../../tracing.zig");
+const tracing = @import("tracing");
 
 const trace = tracing.scoped(.reports);
 const StateTransition = @import("../../state_delta.zig").StateTransition;
@@ -20,7 +20,7 @@ pub fn validateAnchor(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_anchor);
+    const span = trace.span(@src(), .validate_anchor);
     defer span.deinit();
 
     const beta: *const state.Beta = try stx.ensure(.beta_prime);

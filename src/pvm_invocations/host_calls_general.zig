@@ -13,7 +13,7 @@ const ReturnCode = host_calls.ReturnCode;
 const HostCallError = host_calls.HostCallError;
 
 // Add tracing import
-const trace = @import("../tracing.zig").scoped(.host_calls);
+const trace = @import("tracing").scoped(.host_calls);
 
 // Type aliases for convenience
 const Hash256 = types.Hash;
@@ -67,7 +67,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
         pub fn debugLog(
             exec_ctx: *PVM.ExecutionContext,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_debug_log);
+            const span = trace.span(@src(), .host_call_debug_log);
             defer span.deinit();
 
             // https://hackmd.io/@polkadot/jip1
@@ -102,7 +102,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
         pub fn gasRemaining(
             exec_ctx: *PVM.ExecutionContext,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_gas);
+            const span = trace.span(@src(), .host_call_gas);
             defer span.deinit();
             span.debug("Host call: gas remaining", .{});
 
@@ -122,7 +122,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             host_ctx: anytype,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_lookup);
+            const span = trace.span(@src(), .host_call_lookup);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -195,7 +195,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             host_ctx_: anytype,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_read);
+            const span = trace.span(@src(), .host_call_read);
             defer span.deinit();
 
             const host_ctx: Context = host_ctx_;
@@ -281,7 +281,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             host_ctx: anytype,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_write);
+            const span = trace.span(@src(), .host_call_write);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -463,7 +463,7 @@ pub fn GeneralHostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             host_ctx_: anytype,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_info);
+            const span = trace.span(@src(), .host_call_info);
             defer span.deinit();
 
             const host_ctx: Context = host_ctx_;

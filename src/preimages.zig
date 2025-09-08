@@ -7,7 +7,7 @@ const state_keys = @import("state_keys.zig");
 const Params = @import("jam_params.zig").Params;
 
 // Add tracing import
-const trace = @import("tracing.zig").scoped(.preimages);
+const trace = @import("tracing").scoped(.preimages);
 
 /// Compares two preimages for ordering
 fn comparePreimages(lhs: types.Preimage, rhs: types.Preimage) bool {
@@ -36,7 +36,7 @@ pub fn processPreimagesExtrinsic(
     stx: *state_delta.StateTransition(params),
     preimages: types.PreimagesExtrinsic,
 ) !void {
-    const span = trace.span(.process_preimages_extrinsic);
+    const span = trace.span(@src(), .process_preimages_extrinsic);
     defer span.deinit();
 
     span.debug("Starting preimages extrinsic processing with {d} preimages", .{preimages.data.len});
@@ -72,7 +72,7 @@ pub fn processPreimagesExtrinsic(
 
     // Process each preimage
     for (preimages.data, 0..) |preimage, i| {
-        const preimage_span = span.child(.process_preimage);
+        const preimage_span = span.child(@src(), .process_preimage);
         defer preimage_span.deinit();
 
         preimage_span.debug("Processing preimage {d} for service {d}", .{ i, preimage.requester });

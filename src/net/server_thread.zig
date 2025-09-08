@@ -26,7 +26,7 @@ const CommandMetadata = common.CommandMetadata;
 
 const Mailbox = @import("../datastruct/blocking_queue.zig").BlockingQueue;
 
-const trace = @import("../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Builder for creating a ServerThread instance.
 /// Ensures that the underlying JamSnpServer is also initialized.
@@ -237,7 +237,7 @@ pub const ServerThread = struct {
     }
 
     pub fn shutdown(self: *ServerThread) !void {
-        const span = trace.span(.thread_shutdown);
+        const span = trace.span(@src(), .thread_shutdown);
         defer span.deinit();
         span.debug("ServerThread shutdown requested", .{});
         try self.stop.notify();
@@ -262,7 +262,7 @@ pub const ServerThread = struct {
     }
 
     pub fn threadMain(self: *ServerThread) void {
-        const span = trace.span(.thread_main);
+        const span = trace.span(@src(), .thread_main);
         defer span.deinit();
         span.debug("Server thread starting", .{});
 
@@ -275,7 +275,7 @@ pub const ServerThread = struct {
     }
 
     fn threadMain_(self: *ServerThread) !void {
-        const span = trace.span(.thread_main_impl);
+        const span = trace.span(@src(), .thread_main_impl);
         defer span.deinit();
 
         span.debug("Registering wakeup and stop handlers", .{});
@@ -295,7 +295,7 @@ pub const ServerThread = struct {
         _: *xev.Completion,
         r: xev.Async.WaitError!void,
     ) xev.CallbackAction {
-        const span = trace.span(.wakeup_callback);
+        const span = trace.span(@src(), .wakeup_callback);
         defer span.deinit();
 
         _ = r catch |err| {
@@ -320,7 +320,7 @@ pub const ServerThread = struct {
         _: *xev.Completion,
         r: xev.Async.WaitError!void,
     ) xev.CallbackAction {
-        const span = trace.span(.stop_callback);
+        const span = trace.span(@src(), .stop_callback);
         defer span.deinit();
 
         _ = r catch unreachable; // Should not fail
@@ -330,7 +330,7 @@ pub const ServerThread = struct {
     }
 
     fn drainMailbox(self: *ServerThread) !void {
-        const span = trace.span(.drain_mailbox);
+        const span = trace.span(@src(), .drain_mailbox);
         defer span.deinit();
 
         var command_count: usize = 0;
@@ -346,13 +346,13 @@ pub const ServerThread = struct {
 
     // Processes a command and returns a CommandResult
     fn processCommand(self: *ServerThread, command: Command) !void {
-        const span = trace.span(.process_command);
+        const span = trace.span(@src(), .process_command);
         defer span.deinit();
 
         span.debug("Processing command: {s}", .{@tagName(command)});
         switch (command) {
             .listen => |cmd| {
-                const cmd_span = span.child(.listen_command);
+                const cmd_span = span.child(@src(), .listen_command);
                 defer cmd_span.deinit();
                 cmd_span.debug("Processing listen command for {s}:{d}", .{ cmd.data.address, cmd.data.port });
 
@@ -405,7 +405,7 @@ pub const ServerThread = struct {
 
     // Pushes an event to the event queue.
     fn pushEvent(self: *ServerThread, event: Server.Event) anyerror!void {
-        const span = trace.span(.push_event);
+        const span = trace.span(@src(), .push_event);
         defer span.deinit();
 
         span.debug("Pushing event: {s}", .{@tagName(event)});
@@ -416,7 +416,7 @@ pub const ServerThread = struct {
     // These interact with JamSnpServer and its components
 
     fn findConnection(self: *ServerThread, id: ConnectionId) !*ServerConnection {
-        const span = trace.span(.find_connection);
+        const span = trace.span(@src(), .find_connection);
         defer span.deinit();
 
         span.debug("Looking for connection: {}", .{id});
@@ -428,7 +428,7 @@ pub const ServerThread = struct {
     }
 
     fn findStream(self: *ServerThread, id: StreamId) !*ServerStream {
-        const span = trace.span(.find_stream);
+        const span = trace.span(@src(), .find_stream);
         defer span.deinit();
 
         span.debug("Looking for stream: {}", .{id});
@@ -440,7 +440,7 @@ pub const ServerThread = struct {
     }
 
     fn disconnectClientImpl(self: *ServerThread, conn_id: ConnectionId) anyerror!void {
-        const span = trace.span(.disconnect_client);
+        const span = trace.span(@src(), .disconnect_client);
         defer span.deinit();
 
         span.debug("Disconnecting client: {}", .{conn_id});
@@ -451,7 +451,7 @@ pub const ServerThread = struct {
     }
 
     fn createStreamImpl(self: *ServerThread, conn_id: ConnectionId) anyerror!void {
-        const span = trace.span(.create_stream);
+        const span = trace.span(@src(), .create_stream);
         defer span.deinit();
 
         span.debug("Creating stream for connection: {}", .{conn_id});
@@ -462,7 +462,7 @@ pub const ServerThread = struct {
     }
 
     fn destroyStreamImpl(self: *ServerThread, stream_id: StreamId) anyerror!void {
-        const span = trace.span(.destroy_stream);
+        const span = trace.span(@src(), .destroy_stream);
         defer span.deinit();
 
         span.debug("Destroying stream: {}", .{stream_id});
@@ -477,7 +477,7 @@ pub const ServerThread = struct {
     }
 
     fn sendDataImpl(self: *ServerThread, stream_id: StreamId, data: []const u8) anyerror!void {
-        const span = trace.span(.send_data);
+        const span = trace.span(@src(), .send_data);
         defer span.deinit();
 
         span.debug("Sending data on stream: {}", .{stream_id});
@@ -491,7 +491,7 @@ pub const ServerThread = struct {
     }
 
     fn sendMessageImpl(self: *ServerThread, stream_id: StreamId, message: []const u8) anyerror!void {
-        const span = trace.span(.send_message);
+        const span = trace.span(@src(), .send_message);
         defer span.deinit();
 
         span.debug("Sending message on stream: {}", .{stream_id});
@@ -505,7 +505,7 @@ pub const ServerThread = struct {
     }
 
     fn streamWantReadImpl(self: *ServerThread, stream_id: StreamId, want: bool) anyerror!void {
-        const span = trace.span(.stream_want_read);
+        const span = trace.span(@src(), .stream_want_read);
         defer span.deinit();
 
         span.debug("Setting stream {d} wantRead={}", .{ stream_id, want });
@@ -515,7 +515,7 @@ pub const ServerThread = struct {
     }
 
     fn streamWantWriteImpl(self: *ServerThread, stream_id: StreamId, want: bool) anyerror!void {
-        const span = trace.span(.stream_want_write);
+        const span = trace.span(@src(), .stream_want_write);
         defer span.deinit();
 
         span.debug("Setting stream {d} wantWrite={}", .{ stream_id, want });
@@ -525,7 +525,7 @@ pub const ServerThread = struct {
     }
 
     fn streamFlushImpl(self: *ServerThread, stream_id: StreamId) anyerror!void {
-        const span = trace.span(.stream_flush);
+        const span = trace.span(@src(), .stream_flush);
         defer span.deinit();
 
         span.debug("Flushing stream: {}", .{stream_id});
@@ -536,7 +536,7 @@ pub const ServerThread = struct {
     }
 
     fn streamShutdownImpl(self: *ServerThread, stream_id: StreamId, how: c_int) anyerror!void {
-        const span = trace.span(.stream_shutdown);
+        const span = trace.span(@src(), .stream_shutdown);
         defer span.deinit();
 
         span.debug("Shutting down stream: {d} (how={d})", .{ stream_id, how });
@@ -552,7 +552,7 @@ pub const ServerThread = struct {
     // -- Internal Callback Handlers
     // These run in the ServerThread's context and push events
     fn internalListenerCreatedCallback(endpoint: network.EndPoint, context: ?*anyopaque) void {
-        const span = trace.span(.listener_created_callback);
+        const span = trace.span(@src(), .listener_created_callback);
         defer span.deinit();
 
         span.debug("Listener created at {}", .{endpoint});
@@ -562,7 +562,7 @@ pub const ServerThread = struct {
     }
 
     fn internalClientConnectedCallback(connection_id: ConnectionId, peer_endpoint: network.EndPoint, context: ?*anyopaque) void {
-        const span = trace.span(.client_connected_callback);
+        const span = trace.span(@src(), .client_connected_callback);
         defer span.deinit();
 
         span.debug("Client connected: {d} at {}", .{ connection_id, peer_endpoint });
@@ -572,7 +572,7 @@ pub const ServerThread = struct {
     }
 
     fn internalClientDisconnectedCallback(connection_id: ConnectionId, context: ?*anyopaque) void {
-        const span = trace.span(.client_disconnected_callback);
+        const span = trace.span(@src(), .client_disconnected_callback);
         defer span.deinit();
 
         span.debug("Client disconnected: {}", .{connection_id});
@@ -582,7 +582,7 @@ pub const ServerThread = struct {
     }
 
     fn internalStreamCreatedCallback(stream: *Stream(JamSnpServer), context: ?*anyopaque) !void {
-        const span = trace.span(.stream_created);
+        const span = trace.span(@src(), .stream_created);
         defer span.deinit();
         span.debug("Stream created: connection={} stream={}", .{ stream.connection.id, stream.id });
 
@@ -638,7 +638,7 @@ pub const ServerThread = struct {
         data: []const u8,
         ctx: ?*anyopaque,
     ) anyerror!void {
-        const span = trace.span(.remote_initiated_stream_kind_received);
+        const span = trace.span(@src(), .remote_initiated_stream_kind_received);
         defer span.deinit();
 
         // check the inputs close stream when invalid
@@ -673,7 +673,7 @@ pub const ServerThread = struct {
         error_code: i32,
         ctx: ?*anyopaque,
     ) anyerror!void {
-        const span = trace.span(.remote_initiated_stream_kind_received_error);
+        const span = trace.span(@src(), .remote_initiated_stream_kind_received_error);
         defer span.deinit();
 
         const server_thread: *ServerThread = @ptrCast(@alignCast(ctx.?));
@@ -690,7 +690,7 @@ pub const ServerThread = struct {
     // fn internalStreamCreatedByServerCallback(...)
 
     fn internalStreamClosedByClientCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) void {
-        const span = trace.span(.stream_closed_callback);
+        const span = trace.span(@src(), .stream_closed_callback);
         defer span.deinit();
 
         span.debug("Stream closed by client: {d} on connection {d}", .{ stream_id, connection_id });
@@ -700,7 +700,7 @@ pub const ServerThread = struct {
     }
 
     fn internalDataReadCompletedCallback(connection_id: ConnectionId, stream_id: StreamId, data: []const u8, context: ?*anyopaque) void {
-        const span = trace.span(.data_received_callback);
+        const span = trace.span(@src(), .data_received_callback);
         defer span.deinit();
 
         span.debug("Data received on stream {d} (connection {d}), length: {d} bytes", .{ stream_id, connection_id, data.len });
@@ -715,7 +715,7 @@ pub const ServerThread = struct {
     }
 
     fn internalDataWriteCompletedCallback(connection_id: ConnectionId, stream_id: StreamId, total_bytes_written: usize, context: ?*anyopaque) void {
-        const span = trace.span(.data_write_completed_callback);
+        const span = trace.span(@src(), .data_write_completed_callback);
         defer span.deinit();
 
         span.debug("Data write completed on stream {d} (connection {d}), bytes written: {d}", .{ stream_id, connection_id, total_bytes_written });
@@ -725,7 +725,7 @@ pub const ServerThread = struct {
     }
 
     fn internalDataReadErrorCallback(connection_id: ConnectionId, stream_id: StreamId, error_code: i32, context: ?*anyopaque) void {
-        const span = trace.span(.data_read_error_callback);
+        const span = trace.span(@src(), .data_read_error_callback);
         defer span.deinit();
 
         span.err("Data read error on stream {d} (connection {d}), error code: {d}", .{ stream_id, connection_id, error_code });
@@ -735,7 +735,7 @@ pub const ServerThread = struct {
     }
 
     fn internalDataWriteErrorCallback(connection_id: ConnectionId, stream_id: StreamId, error_code: i32, context: ?*anyopaque) void {
-        const span = trace.span(.data_write_error_callback);
+        const span = trace.span(@src(), .data_write_error_callback);
         defer span.deinit();
 
         span.err("Data write error on stream {d} (connection {d}), error code: {d}", .{ stream_id, connection_id, error_code });
@@ -745,7 +745,7 @@ pub const ServerThread = struct {
     }
 
     fn internalDataReadWouldBlockCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) void {
-        const span = trace.span(.data_read_would_block_callback);
+        const span = trace.span(@src(), .data_read_would_block_callback);
         defer span.deinit();
 
         span.debug("Data read would block on stream {d} (connection {d})", .{ stream_id, connection_id });
@@ -755,7 +755,7 @@ pub const ServerThread = struct {
     }
 
     fn internalDataWriteWouldBlockCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) void {
-        const span = trace.span(.data_write_would_block_callback);
+        const span = trace.span(@src(), .data_write_would_block_callback);
         defer span.deinit();
 
         span.debug("Data write would block on stream {d} (connection {d})", .{ stream_id, connection_id });
@@ -765,7 +765,7 @@ pub const ServerThread = struct {
     }
 
     fn internalMessageSendCallback(connection_id: ConnectionId, stream_id: StreamId, context: ?*anyopaque) !void {
-        const span = trace.span(.message_send);
+        const span = trace.span(@src(), .message_send);
         defer span.deinit();
         span.debug("Message send: connection={} stream={}", .{ connection_id, stream_id });
 
@@ -774,7 +774,7 @@ pub const ServerThread = struct {
     }
 
     fn internalMessageReceivedCallback(connection_id: ConnectionId, stream_id: StreamId, message: []const u8, context: ?*anyopaque) void {
-        const span = trace.span(.message_received_callback);
+        const span = trace.span(@src(), .message_received_callback);
         defer span.deinit();
 
         span.debug("Message received on stream {d} (connection {d}), length: {d} bytes", .{ stream_id, connection_id, message.len });

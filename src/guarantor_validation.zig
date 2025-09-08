@@ -1,6 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const guarantor_assignments = @import("guarantor_assignments.zig");
 
 const trace = tracing.scoped(.reports);
@@ -23,7 +23,7 @@ pub fn validateGuarantorAssignment(
     core_index: types.CoreIndex,
     guarantee_slot: types.TimeSlot,
 ) !bool {
-    const span = trace.span(.validate_assignment);
+    const span = trace.span(@src(), .validate_assignment);
     defer span.deinit();
 
     span.debug("Validating assignment @ current_slot {d}", .{stx.time.current_slot});
@@ -91,7 +91,7 @@ pub fn validateGuarantors(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_guarantors);
+    const span = trace.span(@src(), .validate_guarantors);
     defer span.deinit();
 
     span.debug("Validating {d} guarantor signatures for slot {d}", .{ guarantee.signatures.len, guarantee.slot });

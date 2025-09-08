@@ -16,7 +16,7 @@ const state_decoding = @import("../state_decoding.zig");
 const DecodingError = state_decoding.DecodingError;
 const DecodingContext = state_decoding.DecodingContext;
 
-const trace = @import("../tracing.zig").scoped(.decode_beta);
+const trace = @import("tracing").scoped(.decode_beta);
 
 /// Decode Beta component (v0.6.7: contains recent_history and beefy_belt)
 pub fn decode(
@@ -24,7 +24,7 @@ pub fn decode(
     context: *DecodingContext,
     reader: anytype,
 ) !Beta {
-    const span = trace.span(.decode);
+    const span = trace.span(@src(), .decode);
     defer span.deinit();
     span.debug("Starting beta decoding (v0.6.7)", .{});
 
@@ -54,7 +54,7 @@ fn decodeRecentHistory(
     context: *DecodingContext,
     reader: anytype,
 ) !RecentHistory {
-    const span = trace.span(.decode);
+    const span = trace.span(@src(), .decode);
     defer span.deinit();
     span.debug("Starting history decoding", .{});
 
@@ -79,7 +79,7 @@ fn decodeRecentHistory(
     while (i < blocks_len) : (i += 1) {
         try context.push(.{ .array_index = i });
 
-        const block_span = span.child(.block);
+        const block_span = span.child(@src(), .block);
         defer block_span.deinit();
         block_span.debug("Decoding block {d} of {d}", .{ i + 1, blocks_len });
 
@@ -112,7 +112,7 @@ fn decodeRecentHistory(
 
         // Read work reports
         try context.push(.{ .field = "work_reports" });
-        const reports_span = block_span.child(.work_reports);
+        const reports_span = block_span.child(@src(), .work_reports);
         defer reports_span.deinit();
 
         const reports_len = codec.readInteger(reader) catch |err| {
@@ -126,7 +126,7 @@ fn decodeRecentHistory(
         for (work_reports, 0..) |*report, report_idx| {
             try context.push(.{ .array_index = report_idx });
 
-            const report_span = reports_span.child(.report);
+            const report_span = reports_span.child(@src(), .report);
             defer report_span.deinit();
             report_span.debug("Reading work report {d} of {d}", .{ report_idx + 1, reports_len });
 
@@ -173,7 +173,7 @@ fn decodeBeefyBelt(
     context: *DecodingContext,
     reader: anytype,
 ) !BeefyBelt {
-    const span = trace.span(.decode_beefy_belt);
+    const span = trace.span(@src(), .decode_beefy_belt);
     defer span.deinit();
     span.debug("Starting beefy belt decoding", .{});
 

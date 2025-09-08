@@ -10,7 +10,7 @@ const Decoder = @import("decoder.zig").Decoder;
 const Memory = @import("memory.zig").Memory;
 const ExecutionTrace = @import("execution_trace.zig").ExecutionTrace;
 
-const trace = @import("../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 pub const ExecutionContext = struct {
     program: Program,
@@ -74,7 +74,7 @@ pub const ExecutionContext = struct {
         max_gas: u32,
         dynamic_allocation: bool,
     ) !ExecutionContext {
-        const span = trace.span(.init_standard_program);
+        const span = trace.span(@src(), .init_standard_program);
         defer span.deinit();
         span.debug("Initializing with standard program code format", .{});
         span.trace("Program code size: {d} bytes, input size: {d} bytes", .{ program_code.len, input.len });
@@ -172,7 +172,7 @@ pub const ExecutionContext = struct {
         max_gas: u32,
         dynamic_allocation: bool,
     ) !ExecutionContext {
-        const span = trace.span(.init_simple);
+        const span = trace.span(@src(), .init_simple);
         defer span.deinit();
         span.debug("Initializing with simple configuration", .{});
         span.trace("Program size: {d} bytes, stack: {d} bytes, heap: {d} pages", .{
@@ -206,7 +206,7 @@ pub const ExecutionContext = struct {
         max_gas: u32,
         dynamic_allocation: bool,
     ) !ExecutionContext {
-        const span = trace.span(.init_with_memory_segments);
+        const span = trace.span(@src(), .init_with_memory_segments);
         defer span.deinit();
         span.debug("Initializing with memory segments", .{});
         span.trace("Program: {d} bytes, RO: {d} bytes, RW: {d} bytes, input: {d} bytes", .{
@@ -247,7 +247,7 @@ pub const ExecutionContext = struct {
         memory: Memory,
         max_gas: u32,
     ) !ExecutionContext {
-        const span = trace.span(.init_with_memory);
+        const span = trace.span(@src(), .init_with_memory);
         defer span.deinit();
         span.debug("Initializing with memory and raw program", .{});
         span.trace("Program size: {d} bytes, max gas: {d}", .{ raw_program.len, max_gas });
@@ -265,13 +265,13 @@ pub const ExecutionContext = struct {
         // Initialize registers according to specification
         // Determine trace mode from tracing scope
         const trace_mode = blk: {
-            if (@hasDecl(@import("../tracing.zig"), "boption_scope_configs")) {
+            if (@hasDecl(@import("tracing"), "boption_scope_configs")) {
                 // Check for pvm_exec=compact
-                if (@import("../tracing.zig").findScope("pvm_exec_compact") != null) {
+                if (@import("tracing").findScope("pvm_exec_compact") != null) {
                     break :blk ExecutionTrace.TraceMode.compact;
                 }
                 // Check for pvm_exec (verbose)
-                if (@import("../tracing.zig").findScope("pvm_exec") != null) {
+                if (@import("tracing").findScope("pvm_exec") != null) {
                     break :blk ExecutionTrace.TraceMode.verbose;
                 }
             }
@@ -293,7 +293,7 @@ pub const ExecutionContext = struct {
 
     /// Initialize the registers
     pub fn initRegisters(self: *@This(), input_len: usize) void {
-        const span = trace.span(.init_registers);
+        const span = trace.span(@src(), .init_registers);
         defer span.deinit();
         span.debug("Initializing registers", .{});
 
@@ -315,7 +315,7 @@ pub const ExecutionContext = struct {
 
     /// Clear all registers by setting them to zero
     pub fn clearRegisters(self: *@This()) void {
-        const span = trace.span(.clear_registers);
+        const span = trace.span(@src(), .clear_registers);
         defer span.deinit();
         span.debug("Clearing all registers", .{});
 
@@ -327,7 +327,7 @@ pub const ExecutionContext = struct {
     /// Construct the return value by looking determining if we can
     /// read the range between registers 7 and 8. If the range is invalid we return []
     pub fn readSliceBetweenRegister7AndRegister8(self: *@This()) Memory.MemorySlice {
-        const span = trace.span(.return_value_as_slice);
+        const span = trace.span(@src(), .return_value_as_slice);
         defer span.deinit();
 
         span.debug("Reading return value registers r7={d} (0x{x:0>16}) len r8={d} (0x{x:0>16})", .{ self.registers[7], self.registers[7], self.registers[8], self.registers[8] });
@@ -349,7 +349,7 @@ pub const ExecutionContext = struct {
     }
 
     pub fn deinit(self: *ExecutionContext, allocator: Allocator) void {
-        const span = trace.span(.deinit);
+        const span = trace.span(@src(), .deinit);
         defer span.deinit();
         span.debug("Deinitializing execution context", .{});
 
@@ -365,7 +365,7 @@ pub const ExecutionContext = struct {
     }
 
     pub fn setHostCalls(self: *ExecutionContext, new_host_calls: *const anyopaque) void {
-        const span = trace.span(.set_host_calls);
+        const span = trace.span(@src(), .set_host_calls);
         defer span.deinit();
         span.debug("Setting host calls", .{});
 
@@ -404,7 +404,7 @@ pub const ExecutionContext = struct {
 
     /// Enable or disable dynamic memory allocation
     pub fn setDynamicMemoryAllocation(self: *ExecutionContext, enable: bool) void {
-        const span = trace.span(.set_dynamic_memory);
+        const span = trace.span(@src(), .set_dynamic_memory);
         defer span.deinit();
         span.debug("Setting dynamic memory allocation: {}", .{enable});
 
@@ -415,7 +415,7 @@ pub const ExecutionContext = struct {
 
     /// Override the stack size by reallocating stack pages
     pub fn overrideStackSize(self: *ExecutionContext, new_stack_size_bytes: u32) !void {
-        const span = trace.span(.override_stack_size);
+        const span = trace.span(@src(), .override_stack_size);
         defer span.deinit();
         span.debug("Overriding stack size to {d} bytes", .{new_stack_size_bytes});
 
@@ -472,7 +472,7 @@ pub const ExecutionContext = struct {
     }
 
     pub fn debugProgram(self: *const ExecutionContext, writer: anytype) !void {
-        const span = trace.span(.debug_program);
+        const span = trace.span(@src(), .debug_program);
         defer span.deinit();
         span.debug("Generating program debug output", .{});
 
@@ -524,7 +524,7 @@ pub const ExecutionContext = struct {
     }
 
     pub fn debugState(self: *const ExecutionContext, context_size_in_instructions: u32, writer: anytype) !void {
-        const span = trace.span(.debug_state);
+        const span = trace.span(@src(), .debug_state);
         defer span.deinit();
         span.debug("Generating debug state around PC={d}", .{self.pc});
 

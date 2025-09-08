@@ -13,7 +13,7 @@ const Connection = @import("connection.zig").Connection;
 const Stream = @import("stream.zig").Stream;
 
 const toSocketAddress = @import("../ext.zig").toSocketAddress;
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 // Use shared types
 pub const ConnectionId = shared.ConnectionId;
@@ -102,7 +102,7 @@ pub const JamSnpServer = struct {
         genesis_hash: []const u8,
         allow_builders: bool,
     ) !*JamSnpServer {
-        const span = trace.span(.init_server);
+        const span = trace.span(@src(), .init_server);
         defer span.deinit();
         span.debug("Initializing JamSnpServer", .{});
 
@@ -200,7 +200,7 @@ pub const JamSnpServer = struct {
     }
 
     pub fn deinit(self: *JamSnpServer) void {
-        const span = trace.span(.deinit);
+        const span = trace.span(@src(), .deinit);
         defer span.deinit();
         span.debug("Deinitializing JamSnpServer", .{});
 
@@ -268,7 +268,7 @@ pub const JamSnpServer = struct {
     }
 
     pub fn listen(self: *JamSnpServer, addr: []const u8, port: u16) !network.EndPoint {
-        const span = trace.span(.listen);
+        const span = trace.span(@src(), .listen);
         defer span.deinit();
         span.debug("Starting listen on {s}:{d}", .{ addr, port });
         const address = try network.Address.parse(addr);
@@ -300,7 +300,7 @@ pub const JamSnpServer = struct {
     }
 
     pub fn buildLoop(self: *@This()) void {
-        const span = trace.span(.build_loop);
+        const span = trace.span(@src(), .build_loop);
         defer span.deinit();
         span.debug("Initializing event loop", .{});
 
@@ -326,14 +326,14 @@ pub const JamSnpServer = struct {
     }
 
     pub fn runTick(self: *@This()) !void {
-        const span = trace.span(.run_server_tick);
+        const span = trace.span(@src(), .run_server_tick);
         defer span.deinit();
         span.trace("Running a single tick on JamSnpServer", .{});
         try self.loop.?.run(.no_wait);
     }
 
     pub fn runUntilDone(self: *@This()) !void {
-        const span = trace.span(.run);
+        const span = trace.span(@src(), .run);
         defer span.deinit();
         span.debug("Starting JamSnpServer event loop", .{});
         try self.loop.?.run(.until_done);
@@ -343,7 +343,7 @@ pub const JamSnpServer = struct {
     // -- Callback Registration
 
     pub fn setCallback(self: *@This(), event_type: EventType, callback_fn_ptr: ?*const anyopaque, context: ?*anyopaque) void {
-        const span = trace.span(.set_callback);
+        const span = trace.span(@src(), .set_callback);
         defer span.deinit();
         span.trace("Setting server callback for event {s}", .{@tagName(event_type)});
         self.callback_handlers[@intFromEnum(event_type)] = .{
@@ -354,7 +354,7 @@ pub const JamSnpServer = struct {
 
     // -- logging
     pub fn enableSslCtxLogging(self: *@This()) void {
-        const span = trace.span(.enable_ssl_ctx_logging);
+        const span = trace.span(@src(), .enable_ssl_ctx_logging);
         defer span.deinit();
         @import("../tests/logging.zig").enableDetailedSslCtxLogging(self.ssl_ctx);
     }
@@ -367,7 +367,7 @@ pub const JamSnpServer = struct {
         xev_completion: *xev.Completion,
         xev_timer_result: xev.Timer.RunError!void,
     ) xev.CallbackAction {
-        const span = trace.span(.on_server_tick);
+        const span = trace.span(@src(), .on_server_tick);
         defer span.deinit();
 
         errdefer |err| {
@@ -424,7 +424,7 @@ pub const JamSnpServer = struct {
         xev_read_buffer: xev.ReadBuffer,
         xev_read_result: xev.ReadError!usize,
     ) xev.CallbackAction {
-        const span = trace.span(.on_packets_in_server);
+        const span = trace.span(@src(), .on_packets_in_server);
         defer span.deinit();
 
         errdefer |err| {
@@ -493,7 +493,7 @@ pub const JamSnpServer = struct {
     // --- lsquic Engine API Callbacks ---
 
     fn getSslContext(ctx: ?*anyopaque, _: ?*const lsquic.struct_sockaddr) callconv(.C) ?*lsquic.struct_ssl_ctx_st {
-        const span = trace.span(.get_ssl_context);
+        const span = trace.span(@src(), .get_ssl_context);
         defer span.deinit();
         span.trace("SSL context request", .{});
         const server: *JamSnpServer = @ptrCast(@alignCast(ctx.?));
@@ -505,7 +505,7 @@ pub const JamSnpServer = struct {
         _: ?*const lsquic.struct_sockaddr,
         sni: ?[*:0]const u8,
     ) callconv(.C) ?*lsquic.struct_ssl_ctx_st {
-        const span = trace.span(.lookup_certificate);
+        const span = trace.span(@src(), .lookup_certificate);
         defer span.deinit();
         const server: ?*JamSnpServer = @ptrCast(@alignCast(ctx.?));
 
@@ -523,7 +523,7 @@ pub const JamSnpServer = struct {
         specs: ?[*]const lsquic.lsquic_out_spec,
         n_specs: c_uint,
     ) callconv(.C) c_int {
-        const span = trace.span(.server_send_packets_out);
+        const span = trace.span(@src(), .server_send_packets_out);
         defer span.deinit();
         span.trace("Sending {d} packet specs", .{n_specs});
 

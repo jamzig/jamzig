@@ -8,10 +8,10 @@ const disputes = @import("../disputes.zig");
 const Psi = disputes.Psi;
 const Hash = disputes.Hash;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 pub fn encode(self: *const Psi, writer: anytype) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting PSI state encoding", .{});
 
@@ -28,7 +28,7 @@ const makeLessThanSliceOfFn = @import("../utils/sort.zig").makeLessThanSliceOfFn
 const lessThanSliceOfHashes = makeLessThanSliceOfFn([32]u8);
 
 fn encodeOrderedSet(set: *const std.AutoArrayHashMap([32]u8, void), name: []const u8, writer: anytype) !void {
-    const span = trace.span(.encode_ordered_set);
+    const span = trace.span(@src(), .encode_ordered_set);
     defer span.deinit();
     span.debug("Encoding ordered set: {s}", .{name});
     span.trace("Set size: {d} items", .{set.count()});
@@ -46,7 +46,7 @@ fn encodeOrderedSet(set: *const std.AutoArrayHashMap([32]u8, void), name: []cons
     span.trace("Wrote length prefix: {d}", .{list.items.len});
 
     for (list.items, 0..) |hash, i| {
-        const item_span = span.child(.hash_item);
+        const item_span = span.child(@src(), .hash_item);
         defer item_span.deinit();
         item_span.trace("Writing hash {d} of {d}: {any}", .{ i + 1, list.items.len, std.fmt.fmtSliceHexLower(&hash) });
         try writer.writeAll(&hash);

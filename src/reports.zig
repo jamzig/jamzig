@@ -19,7 +19,7 @@ const banned = @import("reports/banned/banned.zig");
 
 const StateTransition = @import("state_delta.zig").StateTransition;
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.reports);
 
 /// Error types for report validation and processing
@@ -65,7 +65,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
         stx: *StateTransition(params),
         guarantees: types.GuaranteesExtrinsic,
     ) !@This() {
-        const span = trace.span(.validate_guarantees);
+        const span = trace.span(@src(), .validate_guarantees);
         defer span.deinit();
         span.debug("Starting guarantee validation for {d} guarantees", .{guarantees.data.len});
 
@@ -79,7 +79,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
         // Validate all guarantees
         var prev_guarantee_core: ?u32 = null;
         for (guarantees.data) |guarantee| {
-            const core_span = span.child(.validate_core);
+            const core_span = span.child(@src(), .validate_core);
             defer core_span.deinit();
             core_span.debug("Validating core index {d} for report hash {s}", .{
                 guarantee.report.core_index.value,
@@ -194,7 +194,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
 
             // Validate signatures
             {
-                const sig_span = span.child(.validate_signatures);
+                const sig_span = span.child(@src(), .validate_signatures);
                 defer sig_span.deinit();
 
                 sig_span.debug("Validating {d} guarantor signatures", .{guarantee.signatures.len});
@@ -286,7 +286,7 @@ pub fn processGuaranteeExtrinsic(
     stx: *StateTransition(params),
     validated: ValidatedGuaranteeExtrinsic,
 ) !Result {
-    const span = trace.span(.process_guarantees);
+    const span = trace.span(@src(), .process_guarantees);
     defer span.deinit();
     span.debug("Processing guarantees - count: {d}, slot: {d}", .{ validated.guarantees.len, stx.time.current_slot });
     // span.trace("Current state root: {s}", .{
@@ -301,7 +301,7 @@ pub fn processGuaranteeExtrinsic(
 
     // Process each validated guarantee
     for (validated.guarantees) |guarantee| {
-        const process_span = span.child(.process_guarantee);
+        const process_span = span.child(@src(), .process_guarantee);
         defer process_span.deinit();
 
         const core_index = guarantee.report.core_index.value;

@@ -5,7 +5,7 @@ const types = @import("../types.zig");
 
 const PVM = @import("../pvm.zig").PVM;
 
-const trace = @import("../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 const MachineInvocationResult = struct {
     gas_used: types.Gas,
@@ -35,7 +35,7 @@ pub fn machineInvocation(
     host_calls_config: *const PVM.HostCallsConfig,
     host_call_ctx: *anyopaque,
 ) PVM.Error!MachineInvocationResult {
-    const span = trace.span(.machine_invocation);
+    const span = trace.span(@src(), .machine_invocation);
     defer span.deinit();
     span.debug("Starting machine invocation with {d} gas", .{gas});
 

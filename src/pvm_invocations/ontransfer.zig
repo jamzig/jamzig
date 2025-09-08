@@ -21,7 +21,7 @@ pub fn OnTransferContext(comptime params: Params) type {
 }
 
 // Add tracing import
-const trace = @import("../tracing.zig").scoped(.ontransfer);
+const trace = @import("tracing").scoped(.ontransfer);
 
 // The to be encoded arguments for OnTransfer
 const OnTransferArgs = struct {
@@ -36,7 +36,7 @@ pub fn invoke(
     allocator: std.mem.Allocator,
     context: *OnTransferContext(params),
 ) !OnTransferResult {
-    const span = trace.span(.invoke);
+    const span = trace.span(@src(), .invoke);
     defer span.deinit();
     span.debug("Starting OnTransfer invocation for service {d}", .{context.service_id});
     span.debug("Time slot: {d}, Transfers count: {d}", .{ context.timeslot, context.transfers.len });
@@ -163,7 +163,7 @@ pub fn invoke(
     span.debug("Retrieved service code with metadata, total length: {d} bytes", .{code_preimage.len});
 
     span.debug("Starting PVM machine invocation", .{});
-    const pvm_span = span.child(.pvm_invocation);
+    const pvm_span = span.child(@src(), .pvm_invocation);
     defer pvm_span.deinit();
 
     var result = try pvm_invocation.machineInvocation(

@@ -10,7 +10,7 @@ const MaxInstructionSizeInBytes = @import("../../pvm/instruction.zig").MaxInstru
 const SeedGenerator = @import("seed.zig").SeedGenerator;
 const code_gen = @import("program_generator/code_generator.zig");
 
-const trace = @import("../../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 const JumpAlignmentFactor = 2; // ZA = 2 as per spec
 
@@ -24,7 +24,7 @@ pub const GeneratedProgram = struct {
     jump_table: []u32,
 
     pub fn getRawBytes(self: *@This(), allocator: std.mem.Allocator) ![]u8 {
-        const span = trace.span(.get_raw_bytes);
+        const span = trace.span(@src(), .get_raw_bytes);
         defer span.deinit();
         span.debug("Computing raw bytes for program", .{});
 
@@ -85,7 +85,7 @@ pub const GeneratedProgram = struct {
         heap_start: u32,
         heap_len: u32,
     ) !void {
-        const span = trace.span(.rewrite_memory);
+        const span = trace.span(@src(), .rewrite_memory);
         defer span.deinit();
 
         var decoder = @import("../../pvm/decoder.zig").Decoder.init(self.code, self.mask);
@@ -95,7 +95,7 @@ pub const GeneratedProgram = struct {
 
         while (try iter.next()) |entry| {
             if (entry.inst.getMemoryAccess()) |access| {
-                const inst_span = span.child(.rewrite_instruction);
+                const inst_span = span.child(@src(), .rewrite_instruction);
                 defer inst_span.deinit();
 
                 // Generate a deterministic offset using the seed generator
@@ -157,7 +157,7 @@ pub const ProgramGenerator = struct {
 
     /// Generate a valid PVM program with the specified number of basic blocks
     pub fn generate(self: *Self, instruction_count: u32) !GeneratedProgram {
-        const span = trace.span(.generate);
+        const span = trace.span(@src(), .generate);
         defer span.deinit();
         span.debug("Generating program with {d} instructions", .{instruction_count});
 
@@ -182,14 +182,14 @@ pub const ProgramGenerator = struct {
 
         var pc: u32 = 0;
         const code_writer = code.writer();
-        const encode_span = span.child(.encode_instructions);
+        const encode_span = span.child(@src(), .encode_instructions);
         defer encode_span.deinit();
 
         // We have the instructions and sizes. We can find the indexes to the
         // instructions of the basic blocks by looping.
         mask_bitset.set(0); // We always start with an instruction so first bit is always set
         for (instructions, 0..) |*inst, i| {
-            const inst_span = encode_span.child(.encode_instruction);
+            const inst_span = encode_span.child(@src(), .encode_instruction);
             defer inst_span.deinit();
 
             // Pre-encode jumps with 0xaaaaaaaa to ensure max immediate size, allowing safe rewrites later
@@ -225,7 +225,7 @@ pub const ProgramGenerator = struct {
         }
 
         // generate the mask, we allocate ceil + 1 as the mask could possible end
-        const mask_span = span.child(.generate_mask);
+        const mask_span = span.child(@src(), .generate_mask);
         defer mask_span.deinit();
 
         const mask_size = try std.math.divCeil(usize, pc, 8);
@@ -264,11 +264,11 @@ pub const ProgramGenerator = struct {
         var iter = prgdec.iterator();
 
         {
-            const rewrite_span = span.child(.rewrite_jumps);
+            const rewrite_span = span.child(@src(), .rewrite_jumps);
             rewrite_span.debug("Rewriting jumps", .{});
             while (try iter.next()) |entry| {
                 if (entry.inst.isBranch() or entry.inst.isBranchWithImm() or entry.inst.instruction == .jump) {
-                    const branch_span = rewrite_span.child(.rewrite_branch);
+                    const branch_span = rewrite_span.child(@src(), .rewrite_branch);
                     defer branch_span.deinit();
                     branch_span.debug("Rewriting branch/jump at pc {d}: {}", .{ entry.pc, entry.inst });
 

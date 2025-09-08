@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
-const tracing = @import("../../tracing.zig");
+const tracing = @import("tracing");
 const crypto = std.crypto;
 
 const trace = tracing.scoped(.reports);
@@ -21,7 +21,7 @@ pub fn validateValidatorIndices(
 ) !void {
     for (guarantee.signatures) |sig| {
         if (sig.validator_index >= params.validators_count) {
-            const span = trace.span(.validate_validator_index);
+            const span = trace.span(@src(), .validate_validator_index);
             defer span.deinit();
             span.err("Invalid validator index {d} >= {d}", .{
                 sig.validator_index,
@@ -39,7 +39,7 @@ pub fn validateSignaturesWithAssignments(
     guarantee: types.ReportGuarantee,
     assignments: *const @import("../../guarantor_assignments.zig").GuarantorAssignmentResult,
 ) !void {
-    const span = trace.span(.validate_signatures_prebuilt);
+    const span = trace.span(@src(), .validate_signatures_prebuilt);
     defer span.deinit();
 
     span.debug("Validating {d} guarantor signatures using pre-built assignments", .{guarantee.signatures.len});
@@ -48,7 +48,7 @@ pub fn validateSignaturesWithAssignments(
     const validators = assignments.validators;
 
     for (guarantee.signatures) |sig| {
-        const sig_detail_span = span.child(.validate_signature);
+        const sig_detail_span = span.child(@src(), .validate_signature);
         defer sig_detail_span.deinit();
 
         sig_detail_span.debug("Validating signature for validator index {d}", .{sig.validator_index});

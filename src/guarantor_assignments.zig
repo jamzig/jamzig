@@ -1,6 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.guarantor);
 const utils = @import("utils/sort.zig");
 const state = @import("state.zig");
@@ -41,7 +41,7 @@ pub fn permuteAssignments(
     entropy: [32]u8,
     slot: types.TimeSlot,
 ) ![]u32 {
-    const span = trace.span(.permute_assignments);
+    const span = trace.span(@src(), .permute_assignments);
     defer span.deinit();
 
     // Create initial sequence of core indices
@@ -100,7 +100,7 @@ pub fn determineGuarantorAssignments(
     stx: *StateTransition(params),
     guarantee_slot: types.TimeSlot,
 ) !GuarantorAssignmentResult {
-    const span = trace.span(.determine_assignments);
+    const span = trace.span(@src(), .determine_assignments);
     defer span.deinit();
 
     // Step 1: Calculate rotation periods

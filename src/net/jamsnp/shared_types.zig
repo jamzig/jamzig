@@ -2,7 +2,7 @@ const std = @import("std");
 const uuid = @import("uuid");
 const network = @import("network");
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Maximum size of a message that can be received (1MB)
 pub const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
@@ -190,7 +190,7 @@ pub fn CallbackArg(T: type) type {
 }
 
 pub fn invokeCallback(T: type, callback_handlers: *const CallbackHandlers, args: CallbackArg(T)) void {
-    const span = trace.span(.invoke_callback);
+    const span = trace.span(@src(), .invoke_callback);
     defer span.deinit();
 
     const active_tag = std.meta.activeTag(args);

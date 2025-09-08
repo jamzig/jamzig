@@ -8,7 +8,7 @@ const Params = @import("jam_params.zig").Params;
 
 const Allocator = std.mem.Allocator;
 
-const trace = @import("tracing.zig").scoped(.service_state_keys);
+const trace = @import("tracing").scoped(.service_state_keys);
 
 pub const Transfer = struct {
     from: ServiceId,
@@ -181,7 +181,7 @@ pub const ServiceAccount = struct {
         const storage_key = state_keys.constructStorageKey(service_id, key);
         const value = self.data.get(storage_key);
 
-        const span = trace.span(.storage_read);
+        const span = trace.span(@src(), .storage_read);
         defer span.deinit();
         span.debug("Storage READ - Service: {d}, Key: {s} ({d} bytes), StateKey: {s}, Found: {}", .{
             service_id,
@@ -201,7 +201,7 @@ pub const ServiceAccount = struct {
     pub fn resetStorage(self: *ServiceAccount, service_id: u32, key: []const u8) void {
         const storage_key = state_keys.constructStorageKey(service_id, key);
 
-        const span = trace.span(.storage_reset);
+        const span = trace.span(@src(), .storage_reset);
         defer span.deinit();
 
         if (self.data.getPtr(storage_key)) |old_value_ptr| {
@@ -233,7 +233,7 @@ pub const ServiceAccount = struct {
     pub fn removeStorage(self: *ServiceAccount, service_id: u32, key: []const u8) ?usize {
         const storage_key = state_keys.constructStorageKey(service_id, key);
 
-        const span = trace.span(.storage_remove);
+        const span = trace.span(@src(), .storage_remove);
         defer span.deinit();
 
         if (self.data.fetchRemove(storage_key)) |entry| {
@@ -273,7 +273,7 @@ pub const ServiceAccount = struct {
         // Clear the old, otherwise we are leaking
         const old_value = self.data.get(storage_key);
 
-        const span = trace.span(.storage_write);
+        const span = trace.span(@src(), .storage_write);
         defer span.deinit();
         span.debug("Storage WRITE - Service: {d}, Key: {s} ({d} bytes), StateKey: {s}, Value: {d} bytes, Prior: {d} bytes", .{
             service_id,
@@ -320,7 +320,7 @@ pub const ServiceAccount = struct {
     pub fn dupeAndAddPreimage(self: *ServiceAccount, key: types.StateKey, preimage: []const u8) !void {
         const new_preimage = try self.data.allocator.dupe(u8, preimage);
 
-        const span = trace.span(.preimage_add);
+        const span = trace.span(@src(), .preimage_add);
         defer span.deinit();
         span.debug("Preimage ADD - StateKey: {s}, Size: {d} bytes", .{
             &formatStateKey(key),
@@ -339,7 +339,7 @@ pub const ServiceAccount = struct {
     pub fn getPreimage(self: *const ServiceAccount, key: types.StateKey) ?[]const u8 {
         const value = self.data.get(key);
 
-        const span = trace.span(.preimage_get);
+        const span = trace.span(@src(), .preimage_get);
         defer span.deinit();
         span.debug("Preimage GET - StateKey: {s}, Found: {}", .{
             &formatStateKey(key),
@@ -403,7 +403,7 @@ pub const ServiceAccount = struct {
         const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
         const data = self.data.get(key);
 
-        const span = trace.span(.preimage_lookup);
+        const span = trace.span(@src(), .preimage_lookup);
         defer span.deinit();
         span.debug("Preimage LOOKUP - Service: {d}, Hash: {s}, Length: {d}, StateKey: {s}, Found: {}", .{
             service_id,
@@ -429,7 +429,7 @@ pub const ServiceAccount = struct {
         // TODO: refactor this and make this state keys usage toward storage consistent.
         const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
 
-        const span = trace.span(.preimage_solicit);
+        const span = trace.span(@src(), .preimage_solicit);
         defer span.deinit();
         span.debug("Preimage SOLICIT - Service: {d}, Hash: {s}, Length: {d}, StateKey: {s}, Slot: {d}", .{
             service_id,
@@ -498,7 +498,7 @@ pub const ServiceAccount = struct {
         // we can remove the entries when timeout occurred
         const lookup_key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
 
-        const span = trace.span(.preimage_forget);
+        const span = trace.span(@src(), .preimage_forget);
         defer span.deinit();
         span.debug("Preimage FORGET - Service: {d}, Hash: {s}, Length: {d}, StateKey: {s}, Slot: {d}", .{
             service_id,
@@ -608,7 +608,7 @@ pub const ServiceAccount = struct {
     ) !void {
         const key = state_keys.constructServicePreimageLookupKey(service_id, length, hash);
 
-        const span = trace.span(.preimage_register);
+        const span = trace.span(@src(), .preimage_register);
         defer span.deinit();
         span.debug("Preimage REGISTER - Service: {d}, Hash: {s}, Length: {d}, StateKey: {s}, Slot: {?}", .{
             service_id,

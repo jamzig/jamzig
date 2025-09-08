@@ -3,7 +3,7 @@ const sort = std.sort;
 const encoder = @import("../codec/encoder.zig");
 const HashSet = @import("../datastruct/hash_set.zig").HashSet;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 const makeLessThanSliceOfFn = @import("../utils/sort.zig").makeLessThanSliceOfFn;
 const lessThanSliceOfHashes = makeLessThanSliceOfFn([32]u8);
@@ -11,7 +11,7 @@ const lessThanSliceOfHashes = makeLessThanSliceOfFn([32]u8);
 /// Xi (ξ) is defined as a dictionary mapping hashes to hashes: D⟨H → H⟩E
 /// where H represents 32-byte hashes
 pub fn encode(comptime epoch_size: usize, allocator: std.mem.Allocator, xi: *const [epoch_size]HashSet([32]u8), writer: anytype) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting Xi encoding for {d} epochs", .{epoch_size});
 
@@ -24,7 +24,7 @@ pub fn encode(comptime epoch_size: usize, allocator: std.mem.Allocator, xi: *con
 }
 
 pub fn encodeTimeslotEntry(allocator: std.mem.Allocator, xi: *const HashSet([32]u8), writer: anytype) !void {
-    const span = trace.span(.encode_timeslot);
+    const span = trace.span(@src(), .encode_timeslot);
     defer span.deinit();
 
     const entry_count = xi.count();

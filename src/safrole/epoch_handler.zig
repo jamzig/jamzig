@@ -10,14 +10,15 @@ const ring_vrf = @import("../ring_vrf.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("../tracing.zig").scoped(.epoch_handler);
+const trace = @import("tracing").scoped(.epoch_handler);
+const tracy = @import("tracy");
 
 /// Transitions the epoch, handling validator rotation and state updates
 pub fn handleEpochTransition(
     comptime params: Params,
     stx: *StateTransition(params),
 ) !void {
-    const span = trace.span(.transition_epoch);
+    const span = trace.span(@src(), .transition_epoch);
     defer span.deinit();
     span.debug("Starting epoch transition", .{});
 
@@ -27,25 +28,29 @@ pub fn handleEpochTransition(
     const current_iota: *const types.Iota = try stx.get(.iota);
     const eta_prime: *types.Eta = try stx.get(.eta_prime);
 
-    // Rotate validator keys
-    span.debug("Rotating validator keys", .{});
-
-    // λ gets current κ
-    try stx.createTransient(.lambda_prime, try current_kappa.deepClone(stx.allocator));
-
-    // κ gets current γ.k
-    try stx.createTransient(.kappa_prime, try current_gamma.k.deepClone(stx.allocator));
-
     // Create new gamma state
     var gamma_prime: *state.init.Gamma(params) = try stx.ensure(.gamma_prime);
 
-    // γ.k gets ι (with offenders zeroed out)
-    const current_psi: *const state.Psi = try stx.get(.psi);
-    gamma_prime.k.deinit(stx.allocator);
-    gamma_prime.k = zeroOutOffenders(
-        try current_iota.deepClone(stx.allocator),
-        current_psi.offendersSlice(),
-    );
+    // Rotate validator keys
+    {
+        const rotate_span = span.child(@src(), .rotate_validators);
+        defer rotate_span.deinit();
+        span.debug("Rotating validator keys", .{});
+
+        // λ gets current κ
+        try stx.createTransient(.lambda_prime, try current_kappa.deepClone(stx.allocator));
+
+        // κ gets current γ.k
+        try stx.createTransient(.kappa_prime, try current_gamma.k.deepClone(stx.allocator));
+
+        // γ.k gets ι (with offenders zeroed out)
+        const current_psi: *const state.Psi = try stx.get(.psi);
+        gamma_prime.k.deinit(stx.allocator);
+        gamma_prime.k = zeroOutOffenders(
+            try current_iota.deepClone(stx.allocator),
+            current_psi.offendersSlice(),
+        );
+    }
 
     // Calculate new gamma_z
     span.debug("Calculating new gamma_z from gamma_k", .{});
@@ -53,41 +58,51 @@ pub fn handleEpochTransition(
     span.trace("New gamma_z value: {any}", .{std.fmt.fmtSliceHexLower(&gamma_prime.z)});
 
     // Handle gamma_s transition
-    const gamma_s = &gamma_prime.s;
-    gamma_s.deinit(stx.allocator);
-    _ = gamma_s.clearAndTakeOwnership();
-
-    // Update gamma_s based on conditions
-    if (stx.time.priorWasInTicketSubmissionTail() and
-        current_gamma.a.len == params.epoch_length and
-        stx.time.isConsecutiveEpoch())
     {
-        span.debug("Operating in ticket mode for gamma_s", .{});
-        span.trace("Conditions met: prev_slot({d}) >= Y({d}) and gamma_a.len({d}) == epoch_length({d}) and current_epoch({d}) == prior_epoch({d}) + 1)", .{
-            stx.time.prior_slot_in_epoch,
-            params.ticket_submission_end_epoch_slot,
-            current_gamma.a.len,
-            params.epoch_length,
-            stx.time.current_epoch,
-            stx.time.prior_epoch,
-        });
-        gamma_s.* = .{
-            .tickets = try ordering.outsideInOrdering(types.TicketBody, stx.allocator, current_gamma.a),
-        };
-    } else {
-        span.warn("Falling back to key mode for gamma_s", .{});
+        const gamma_s_span = span.child(@src(), .update_gamma_s);
+        defer gamma_s_span.deinit();
 
-        if (current_gamma.a.len != params.epoch_length) {
-            span.warn("  - Gamma accumulator size {d} != epoch length {d}", .{ current_gamma.a.len, params.epoch_length });
-        }
-        if (!stx.time.isConsecutiveEpoch()) {
-            span.warn("  - Current epoch {d} != prior epoch + 1 ({d})", .{ stx.time.current_epoch, stx.time.prior_epoch + 1 });
-        }
+        const gamma_s = &gamma_prime.s;
+        gamma_s.deinit(stx.allocator);
+        _ = gamma_s.clearAndTakeOwnership();
 
-        const kappa_prime = try stx.ensure(.kappa_prime);
-        gamma_s.* = .{
-            .keys = try entropyBasedKeySelector(stx.allocator, eta_prime[2], params.epoch_length, kappa_prime.*),
-        };
+        // Update gamma_s based on conditions
+        if (stx.time.priorWasInTicketSubmissionTail() and
+            current_gamma.a.len == params.epoch_length and
+            stx.time.isConsecutiveEpoch())
+        {
+            const ticket_mode_span = span.child(@src(), .ticket_mode);
+            defer ticket_mode_span.deinit();
+
+            span.debug("Operating in ticket mode for gamma_s", .{});
+            span.trace("Conditions met: prev_slot({d}) >= Y({d}) and gamma_a.len({d}) == epoch_length({d}) and current_epoch({d}) == prior_epoch({d}) + 1)", .{
+                stx.time.prior_slot_in_epoch,
+                params.ticket_submission_end_epoch_slot,
+                current_gamma.a.len,
+                params.epoch_length,
+                stx.time.current_epoch,
+                stx.time.prior_epoch,
+            });
+            gamma_s.* = .{
+                .tickets = try ordering.outsideInOrdering(types.TicketBody, stx.allocator, current_gamma.a),
+            };
+        } else {
+            const key_mode_span = span.child(@src(), .key_mode);
+            defer key_mode_span.deinit();
+            span.warn("Falling back to key mode for gamma_s", .{});
+
+            if (current_gamma.a.len != params.epoch_length) {
+                span.warn("  - Gamma accumulator size {d} != epoch length {d}", .{ current_gamma.a.len, params.epoch_length });
+            }
+            if (!stx.time.isConsecutiveEpoch()) {
+                span.warn("  - Current epoch {d} != prior epoch + 1 ({d})", .{ stx.time.current_epoch, stx.time.prior_epoch + 1 });
+            }
+
+            const kappa_prime = try stx.ensure(.kappa_prime);
+            gamma_s.* = .{
+                .keys = try entropyBasedKeySelector(stx.allocator, eta_prime[2], params.epoch_length, kappa_prime.*),
+            };
+        }
     }
 
     // Reset gamma_a
@@ -115,7 +130,7 @@ fn buildBandersnatchRingRoot(
     allocator: std.mem.Allocator,
     gamma_k: types.GammaK,
 ) !types.GammaZ {
-    const span = trace.span(.bandersnatch_ring_root);
+    const span = trace.span(@src(), .bandersnatch_ring_root);
     defer span.deinit();
     span.debug("Calculating Bandersnatch ring root from gamma_k", .{});
     span.trace("Number of validator keys in gamma_k: {d}", .{gamma_k.len()});
@@ -144,7 +159,7 @@ pub fn entropyBasedKeySelector(
     epoch_length: u32,
     kappa: types.Kappa,
 ) ![]types.BandersnatchPublic {
-    const span = trace.span(.gamma_s_fallback);
+    const span = trace.span(@src(), .gamma_s_fallback);
     defer span.deinit();
     span.debug("Generating fallback gamma_s", .{});
     span.trace("Input parameters: r={any}, epoch_length={d}, kappa_size={d}", .{

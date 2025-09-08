@@ -212,18 +212,20 @@ pub unsafe extern "C" fn bandersnatch_verify(
   let context = std::slice::from_raw_parts(context_data, context_len);
   let signature = std::slice::from_raw_parts(signature, SIGNATURE_LENGTH);
 
-  let public = if let Ok(p) = Public::deserialize_compressed(public_key) {
-    p
-  } else {
-    return -1;
-  };
-
-  let signature =
-    if let Ok(s) = BandersnatchSignature::deserialize_compressed(signature) {
-      s
+  let public =
+    if let Ok(p) = Public::deserialize_compressed_unchecked(public_key) {
+      p
     } else {
       return -1;
     };
+
+  let signature = if let Ok(s) =
+    BandersnatchSignature::deserialize_compressed_unchecked(signature)
+  {
+    s
+  } else {
+    return -1;
+  };
 
   if let Ok(vrf_hash) =
     bandersnatch_verify_impl(public, vrf_input, context, signature)
@@ -255,12 +257,13 @@ pub unsafe extern "C" fn bandersnatch_output_hash(
 
   let signature = std::slice::from_raw_parts(signature, SIGNATURE_LENGTH);
 
-  let signature =
-    if let Ok(s) = BandersnatchSignature::deserialize_compressed(signature) {
-      s
-    } else {
-      return -1;
-    };
+  let signature = if let Ok(s) =
+    BandersnatchSignature::deserialize_compressed_unchecked(signature)
+  {
+    s
+  } else {
+    return -1;
+  };
 
   let output_hash = signature.output.hash();
   std::ptr::copy_nonoverlapping(

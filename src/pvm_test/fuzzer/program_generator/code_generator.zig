@@ -6,11 +6,11 @@ const Memory = @import("../../../pvm/memory.zig").Memory;
 const InstructionWithArgs = instlib.InstructionWithArgs;
 
 // Import tracing module and create a scope
-const trace = @import("../../../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 /// Generate a sequence of random instructions
 pub fn generate(allocator: std.mem.Allocator, seed_gen: *SeedGenerator, instruction_count: usize) ![]InstructionWithArgs {
-    const span = trace.span(.generate);
+    const span = trace.span(@src(), .generate);
     defer span.deinit();
 
     span.debug("Starting instruction generation, count: {d}", .{instruction_count});
@@ -27,7 +27,7 @@ pub fn generate(allocator: std.mem.Allocator, seed_gen: *SeedGenerator, instruct
     var did_sbrk: usize = 0;
     var i: usize = 0;
     while ((i + did_sbrk) < instruction_count) : (i += 1) {
-        const gen_span = span.child(.generate_instruction);
+        const gen_span = span.child(@src(), .generate_instruction);
         defer gen_span.deinit();
 
         var inst = igen.randomInstruction(seed_gen);

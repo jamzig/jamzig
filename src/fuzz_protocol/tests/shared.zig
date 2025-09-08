@@ -7,7 +7,7 @@ const version = @import("../version.zig");
 
 const TargetServer = @import("../target.zig").TargetServer;
 
-const trace = @import("../../tracing.zig").scoped(.fuzz_protocol);
+const trace = @import("tracing").scoped(.fuzz_protocol);
 
 /// Represents a pair of connected sockets for fuzzer protocol testing
 pub const SocketPair = struct {
@@ -54,7 +54,7 @@ pub fn performHandshake(
     target_sock: net.Stream,
     target: *TargetServer,
 ) !bool {
-    const span = trace.span(.perform_handshake);
+    const span = trace.span(@src(), .perform_handshake);
     defer span.deinit();
 
     // Fuzzer sends PeerInfo

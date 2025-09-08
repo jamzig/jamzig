@@ -9,7 +9,7 @@ const codec = @import("codec.zig");
 const time = @import("time.zig");
 
 pub const logging = @import("sequoia/logging.zig");
-const trace = @import("tracing.zig").scoped(.sequoia);
+const trace = @import("tracing").scoped(.sequoia);
 
 const Ed25519 = std.crypto.sign.Ed25519;
 const Bls12_381 = crypto.bls12_381.Bls12_381;
@@ -24,7 +24,7 @@ pub fn GenesisConfig(params: jam_params.Params) type {
         params: jam_params.Params = params,
 
         pub fn buildWithRng(allocator: std.mem.Allocator, rng: *std.Random) !GenesisConfig(params) {
-            const span = trace.span(.build_with_rng);
+            const span = trace.span(@src(), .build_with_rng);
             defer span.deinit();
             span.debug("Building genesis config with RNG", .{});
 
@@ -39,7 +39,7 @@ pub fn GenesisConfig(params: jam_params.Params) type {
 
             span.debug("Initializing {d} validator keys", .{params.validators_count});
             for (0..params.validators_count) |i| {
-                const key_span = span.child(.validator_key);
+                const key_span = span.child(@src(), .validator_key);
                 defer key_span.deinit();
                 key_span.debug("Generating key for validator {d}", .{i});
 
@@ -66,7 +66,7 @@ pub fn GenesisConfig(params: jam_params.Params) type {
         }
 
         pub fn buildJamState(self: *const GenesisConfig(params), allocator: std.mem.Allocator, _: *std.Random) !jamstate.JamState(params) {
-            const span = trace.span(.build_jam_state);
+            const span = trace.span(@src(), .build_jam_state);
             defer span.deinit();
             span.debug("Building JAM state from genesis config", .{});
 
@@ -169,7 +169,7 @@ const ValidatorKeySet = struct {
 // Manages entropy generation and VRF output for block production
 const EntropyManager = struct {
     pub fn generateVrfOutputFallback(author_keys: *const ValidatorKeySet, eta_prime: *const types.Eta) !types.BandersnatchVrfOutput {
-        const span = trace.span(.generate_vrf_output_fallback);
+        const span = trace.span(@src(), .generate_vrf_output_fallback);
         defer span.deinit();
         span.debug("Generating VRF output using fallback function", .{});
 
@@ -194,7 +194,7 @@ const EntropyManager = struct {
         author_keys: ValidatorKeySet,
         eta_prime: *const types.Eta,
     ) !Bandersnatch.Signature {
-        const span = trace.span(.generate_entropy_source_fallback);
+        const span = trace.span(@src(), .generate_entropy_source_fallback);
         defer span.deinit();
         span.debug("Generating entropy source using fallback method", .{});
 
@@ -221,7 +221,7 @@ const EntropyManager = struct {
         author_keys: ValidatorKeySet,
         ticket: types.TicketBody,
     ) !Bandersnatch.Signature {
-        const span = trace.span(.generate_entropy_source_ticket);
+        const span = trace.span(@src(), .generate_entropy_source_ticket);
         defer span.deinit();
         span.debug("Generating entropy source using ticket method", .{});
 
@@ -271,7 +271,7 @@ const TicketRegistry = struct {
     }
 
     pub fn rotateRegistries(self: *TicketRegistry) void {
-        const span = trace.span(.rotate_registries);
+        const span = trace.span(@src(), .rotate_registries);
         defer span.deinit();
         span.debug("Rotating ticket registries at epoch boundary", .{});
 
@@ -321,7 +321,7 @@ const BlockSealGenerator = struct {
         eta_prime: *const types.Eta,
         comptime params: jam_params.Params,
     ) !Bandersnatch.Signature {
-        const span = trace.span(.generate_seal_fallback);
+        const span = trace.span(@src(), .generate_seal_fallback);
         defer span.deinit();
         span.debug("Generating block seal using fallback method", .{});
 
@@ -360,7 +360,7 @@ const BlockSealGenerator = struct {
         ticket: types.TicketBody,
         comptime params: jam_params.Params,
     ) !Bandersnatch.Signature {
-        const span = trace.span(.generate_seal_tickets);
+        const span = trace.span(@src(), .generate_seal_tickets);
         defer span.deinit();
         span.debug("Generating block seal using tickets method", .{});
 
@@ -416,7 +416,7 @@ const TicketSubmissionManager = struct {
         gamma_z: *const types.BandersnatchVrfRoot,
         comptime params: jam_params.Params,
     ) !GeneratedTicket {
-        const span = trace.span(.generate_single_ticket);
+        const span = trace.span(@src(), .generate_single_ticket);
         defer span.deinit();
         span.debug("Generating ticket for validator {d}", .{validator_index});
 
@@ -523,7 +523,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn determineGammaSPrime(self: *Self) !struct { bool, types.GammaS } {
-            const span = trace.span(.determine_gamma_s_prime);
+            const span = trace.span(@src(), .determine_gamma_s_prime);
             defer span.deinit();
             // Determine gamma_s_prime based on ticket submission state
             if (self.block_time.priorWasInTicketSubmissionTail() and
@@ -581,7 +581,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn generateBlockContent(self: *Self, eta_prime: *const types.Eta) !types.Extrinsic {
-            const span = trace.span(.generate_block_content);
+            const span = trace.span(@src(), .generate_block_content);
             defer span.deinit();
 
             var tickets = types.TicketsExtrinsic{ .data = &[_]types.TicketEnvelope{} };
@@ -634,7 +634,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
         // Build the next block in the chain with proper sealing
         pub fn buildNextBlock(self: *Self) !types.Block {
-            const span = trace.span(.build_next_block);
+            const span = trace.span(@src(), .build_next_block);
             defer span.deinit();
 
             // Progress to next slot and update state root
@@ -714,7 +714,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             self: *Self,
             eta_prime: *const types.Eta,
         ) ![]types.TicketEnvelope {
-            const span = trace.span(.generate_tickets);
+            const span = trace.span(@src(), .generate_tickets);
             defer span.deinit();
             span.debug("Generating tickets", .{});
 
@@ -804,7 +804,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn selectBlockAuthorFromTickets(self: *Self, tickets: []const types.TicketBody, slot_in_epoch: u64) !types.ValidatorIndex {
-            const span = trace.span(.select_block_author_tickets);
+            const span = trace.span(@src(), .select_block_author_tickets);
             defer span.deinit();
             span.debug("Using ticket-based author selection for slot {d}", .{slot_in_epoch});
 
@@ -835,7 +835,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn selectBlockAuthorFromKeys(self: *Self, keys: []const types.BandersnatchPublic, slot_in_epoch: u64) !types.ValidatorIndex {
-            const span = trace.span(.select_block_author_keys);
+            const span = trace.span(@src(), .select_block_author_keys);
             defer span.deinit();
             span.debug("Using fallback key-based author selection for slot {d}", .{slot_in_epoch});
 
@@ -885,7 +885,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn selectBlockAuthor(self: *Self, gamma_s_prime: types.GammaS) !types.ValidatorIndex {
-            const span = trace.span(.select_block_author);
+            const span = trace.span(@src(), .select_block_author);
             defer span.deinit();
             span.debug("Selecting block author for slot {d}", .{self.block_time.current_slot});
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const ssl = @import("ssl");
 const lsquic = @import("lsquic");
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 // -- LSQUIC Logging
 
@@ -32,7 +32,7 @@ pub fn enableDetailedSslCtxLogging(ssl_ctx: *ssl.SSL_CTX) void {
 }
 
 fn ssl_info_callback(ssl_handle: ?*const ssl.SSL, where_val: c_int, ret: c_int) callconv(.C) void {
-    const span = trace.span(.ssl_info_callback);
+    const span = trace.span(@src(), .ssl_info_callback);
     defer span.deinit();
 
     // Get state string only if handle is not null (can be null in early stages)

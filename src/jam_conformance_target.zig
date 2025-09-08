@@ -1,12 +1,12 @@
 const std = @import("std");
 const clap = @import("clap");
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const io = @import("io.zig");
 
 const target = @import("fuzz_protocol/target.zig");
 const TargetServer = target.TargetServer;
 const RestartBehavior = target.RestartBehavior;
-const trace = @import("tracing.zig").scoped(.jam_conformance_target);
+const trace = @import("tracing").scoped(.jam_conformance_target);
 const jam_params = @import("jam_params.zig");
 const jam_params_format = @import("jam_params_format.zig");
 const build_options = @import("build_options");
@@ -44,7 +44,7 @@ fn showHelp(params: anytype) !void {
 }
 
 pub fn main() !void {
-    const span = trace.span(.main);
+    const span = trace.span(@src(), .main);
     defer span.deinit();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

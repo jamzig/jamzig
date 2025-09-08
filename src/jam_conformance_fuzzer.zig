@@ -1,6 +1,6 @@
 const std = @import("std");
 const clap = @import("clap");
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 
 const io = @import("io.zig");
 const Fuzzer = @import("fuzz_protocol/fuzzer.zig").Fuzzer;
@@ -12,7 +12,7 @@ const messages = @import("fuzz_protocol/messages.zig");
 const param_formatter = @import("fuzz_protocol/param_formatter.zig");
 const trace_config = @import("fuzz_protocol/trace_config.zig");
 
-const trace = @import("tracing.zig").scoped(.jam_conformance_fuzzer);
+const trace = @import("tracing").scoped(.jam_conformance_fuzzer);
 
 fn showHelp(params: anytype) !void {
     std.debug.print(

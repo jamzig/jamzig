@@ -6,8 +6,9 @@ const JamState = @import("state.zig").JamState;
 const StateTransition = @import("state_delta.zig").StateTransition;
 const HeaderValidator = @import("header_validator.zig").HeaderValidator;
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.block_import);
+const tracy = @import("tracy");
 
 /// Re-export validation error from header_validator
 pub const ValidationError = @import("header_validator.zig").HeaderValidationError;
@@ -19,7 +20,7 @@ pub const ValidationConfig = @import("header_validator.zig").ValidationConfig;
 pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Params) type {
     return struct {
         allocator: std.mem.Allocator,
-        header_validator: HeaderValidator(params),
+        header_validator: HeaderValidator(IOExecutor, params),
         executor: *IOExecutor,
 
         const Self = @This();
@@ -47,7 +48,7 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
         pub fn init(executor: *IOExecutor, allocator: std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
-                .header_validator = HeaderValidator(params).init(allocator),
+                .header_validator = HeaderValidator(IOExecutor, params).init(allocator, executor),
                 .executor = executor,
             };
         }
@@ -55,42 +56,64 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
         pub fn initWithConfig(executor: *IOExecutor, allocator: std.mem.Allocator, config: ValidationConfig) Self {
             return .{
                 .allocator = allocator,
-                .header_validator = HeaderValidator(params).initWithConfig(allocator, config),
+                .header_validator = HeaderValidator(IOExecutor, params).initWithConfig(allocator, executor, config),
                 .executor = executor,
             };
         }
 
-        /// Import a block with state-based validation and state transition
-        pub fn importBlock(
+        /// Import a block building the state root for validation
+        pub fn importBlockBuildingRoot(
             self: *Self,
             current_state: *const JamState(params),
             block: *const types.Block,
         ) !ImportResult {
-            const span = trace.span(.import_block);
+            const span = trace.span(@src(), .import_block_building_root);
             defer span.deinit();
 
             // Build current state root for validation
             const current_state_root = try current_state.buildStateRoot(self.allocator);
 
-            // Step 1: Validate header using the header validator
-            const validation_result = try self.header_validator.validateHeader(
+            return self.importBlockWithCachedRoot(
                 current_state,
-                &block.header,
                 current_state_root,
-                &block.extrinsic,
+                block,
             );
+        }
+
+        /// Import a block using a cached state root for validation
+        pub fn importBlockWithCachedRoot(
+            self: *Self,
+            current_state: *const JamState(params),
+            cached_state_root: types.StateRoot,
+            block: *const types.Block,
+        ) !ImportResult {
+            const span = trace.span(@src(), .import_block_with_cached_root);
+            defer span.deinit();
+
+            // Frame per block
+            defer tracy.FrameMarkNamed("Block");
+
+            // Step 1: Validate header using the cached state root
+            const validation_result =
+                try self.header_validator.validateHeader(
+                    current_state,
+                    &block.header,
+                    cached_state_root,
+                    &block.extrinsic,
+                );
 
             span.debug("Header validated, sealed with tickets: {}", .{validation_result.sealed_with_tickets});
 
             // Step 2: Apply state transition
-            const state_transition = try stf.stateTransition(
-                IOExecutor,
-                self.executor,
-                params,
-                self.allocator,
-                current_state,
-                block,
-            );
+            const state_transition =
+                try stf.stateTransition(
+                    IOExecutor,
+                    self.executor,
+                    params,
+                    self.allocator,
+                    current_state,
+                    block,
+                );
 
             return ImportResult{
                 .state_transition = state_transition,

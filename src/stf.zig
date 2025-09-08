@@ -5,7 +5,8 @@ const jam_params = @import("jam_params.zig");
 const types = @import("types.zig");
 const state = @import("state.zig");
 const state_delta = @import("state_delta.zig");
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
+const tracy = @import("tracy");
 
 // Type aliases
 const Allocator = std.mem.Allocator;
@@ -26,7 +27,7 @@ pub fn stateTransition(
     current_state: *const JamState(params),
     block: *const Block,
 ) !*StateTransition(params) {
-    const span = trace.span(.state_transition);
+    const span = trace.span(@src(), .state_transition);
     defer span.deinit();
 
     // Ensure we have a fully initialized state at the start
@@ -49,11 +50,13 @@ pub fn stateTransition(
         block.header.slot,
     );
 
-    try eta.transition(
-        params,
-        stx,
-        try block.header.getEntropy(),
-    );
+    const entropy = blk: {
+        const entropy_span = span.child(@src(), .get_entropy);
+        defer entropy_span.deinit();
+        break :blk try block.header.getEntropy();
+    };
+
+    try eta.transition(params, stx, entropy);
 
     try validator_stats.clearPerBlockStats(
         params,
@@ -74,13 +77,14 @@ pub fn stateTransition(
     );
 
     // => rho_double_dagger
-    var assurance_result = try assurances.transition(
-        params,
-        allocator,
-        stx,
-        block.extrinsic.assurances,
-        block.header.parent,
-    );
+    var assurance_result =
+        try assurances.transition(
+            params,
+            allocator,
+            stx,
+            block.extrinsic.assurances,
+            block.header.parent,
+        );
     defer assurance_result.deinit(allocator);
 
     // Update parent block's state root before processing reports
@@ -92,26 +96,29 @@ pub fn stateTransition(
     );
 
     // => rho_prime
-    var reports_result = try reports.transition(
-        params,
-        allocator,
-        stx,
-        block,
-    );
+    var reports_result =
+        try reports.transition(
+            params,
+            allocator,
+            stx,
+            block,
+        );
     defer reports_result.deinit(allocator);
 
     // accumulate
     const ready_reports = try assurance_result.available_assignments.getWorkReports(allocator);
     defer @import("meta.zig").deinit.deinitEntriesAndFreeSlice(allocator, ready_reports);
 
-    var accumulate_result = try accumulate.transition(
-        IOExecutor,
-        io_executor,
-        params,
-        allocator,
-        stx,
-        ready_reports,
-    );
+    var accumulate_result =
+        try accumulate.transition(
+            IOExecutor,
+            io_executor,
+            params,
+            allocator,
+            stx,
+            ready_reports,
+        );
+
     defer accumulate_result.deinit(allocator);
 
     try preimages.transition(
@@ -136,6 +143,8 @@ pub fn stateTransition(
     );
 
     var markers = try safrole.transition(
+        IOExecutor,
+        io_executor,
         params,
         stx,
         block.extrinsic.tickets,
@@ -144,7 +153,6 @@ pub fn stateTransition(
 
     // Create comprehensive ValidatorStatsInput with all collected data
     // Convert reporters to validator indices for statistics
-
     try validator_stats.transition(
         params,
         stx,

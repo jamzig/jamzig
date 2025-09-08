@@ -5,10 +5,10 @@ const target_manager = @import("../target_manager.zig");
 const FuzzTargetServerInThread = target_manager.FuzzTargetInThread(io.SequentialExecutor);
 const RestartBehavior = @import("../target.zig").RestartBehavior;
 
-const trace = @import("../../tracing.zig").scoped(.fuzz_protocol);
+const trace = @import("tracing").scoped(.fuzz_protocol);
 
 test "target_manager_initialization" {
-    const span = trace.span(.test_target_manager_init);
+    const span = trace.span(@src(), .test_target_manager_init);
     defer span.deinit();
 
     const allocator = testing.allocator;

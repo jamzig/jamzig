@@ -56,7 +56,10 @@ test "sequoia: State transition with sequoia-generated blocks" {
         sequoia.logging.printBlockEntropyDebug(jam_params.TINY_PARAMS, &block, current_state);
 
         // Perform state transition
-        var result = try block_importer.importBlock(current_state, &block);
+        var result = try block_importer.importBlockBuildingRoot(
+            current_state,
+            &block,
+        );
         defer result.deinit();
         try result.commit();
 
@@ -102,7 +105,7 @@ test "IO executor integration: sequential vs parallel execution" {
         defer block.deinit(allocator);
 
         // Test sequential execution
-        var seq_result = try seq_importer.importBlock(&builder.state, &block);
+        var seq_result = try seq_importer.importBlockBuildingRoot(&builder.state, &block);
         defer seq_result.deinit();
 
         // Commit the sequential result to advance the state
@@ -124,7 +127,7 @@ test "IO executor integration: sequential vs parallel execution" {
         defer block.deinit(allocator);
 
         // Test parallel execution
-        var par_result = try par_importer.importBlock(&builder.state, &block);
+        var par_result = try par_importer.importBlockBuildingRoot(&builder.state, &block);
         defer par_result.deinit();
 
         // Commit the parallel result

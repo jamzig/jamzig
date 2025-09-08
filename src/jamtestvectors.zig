@@ -8,7 +8,7 @@ pub const RunConfig = @import("trace_runner/runner.zig").RunConfig;
 const jam_params = @import("jam_params.zig");
 const io = @import("io.zig");
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.jamtestvectors);
 
 const block_import = @import("block_import.zig");

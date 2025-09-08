@@ -11,19 +11,19 @@ const VarTheta = reports_ready.Theta; // Still using Theta type from reports_rea
 const makeLessThanSliceOfFn = @import("../utils/sort.zig").makeLessThanSliceOfFn;
 const lessThanSliceOfHashes = makeLessThanSliceOfFn(types.Hash);
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 /// VarTheta (ϑ) is defined as a sequence of work reports and their dependencies: ⟦(W, {H})⟧E
 /// where W is a work report and H is a set of 32-byte hashes representing unaccumulated dependencies
 /// v0.6.7: This was renamed from Theta to VarTheta
 pub fn encode(vartheta: anytype, writer: anytype) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting vartheta encoding", .{});
 
     // Encode each entry
     for (vartheta.entries, 0..) |slot_entry, i| {
-        const entry_span = span.child(.slot_entry);
+        const entry_span = span.child(@src(), .slot_entry);
         defer entry_span.deinit();
         entry_span.debug("Processing slot entry {d}", .{i});
 
@@ -33,7 +33,7 @@ pub fn encode(vartheta: anytype, writer: anytype) !void {
         entry_span.debug("Wrote {d} slot entries", .{slot_entry.items.len});
 
         for (slot_entry.items, 0..) |entry, j| {
-            const item_span = entry_span.child(.entry_item);
+            const item_span = entry_span.child(@src(), .entry_item);
             defer item_span.deinit();
             item_span.debug("Encoding entry {d} of {d}", .{ j + 1, slot_entry.items.len });
             try encodeEntry(vartheta.allocator, entry, writer);
@@ -43,7 +43,7 @@ pub fn encode(vartheta: anytype, writer: anytype) !void {
 }
 
 pub fn encodeSlotEntry(allocator: std.mem.Allocator, slot_entries: reports_ready.TimeslotEntries, writer: anytype) !void {
-    const span = trace.span(.encode_slot_entry);
+    const span = trace.span(@src(), .encode_slot_entry);
     defer span.deinit();
     span.debug("Starting slot entries encoding", .{});
 
@@ -51,7 +51,7 @@ pub fn encodeSlotEntry(allocator: std.mem.Allocator, slot_entries: reports_ready
     span.debug("Wrote slot entries count: {d}", .{slot_entries.items.len});
 
     for (slot_entries.items, 0..) |entry, i| {
-        const entry_span = span.child(.entry);
+        const entry_span = span.child(@src(), .entry);
         defer entry_span.deinit();
         entry_span.debug("Encoding entry {d} of {d}", .{ i + 1, slot_entries.items.len });
         try encodeEntry(allocator, entry, writer);
@@ -60,7 +60,7 @@ pub fn encodeSlotEntry(allocator: std.mem.Allocator, slot_entries: reports_ready
 }
 
 pub fn encodeEntry(allocator: std.mem.Allocator, entry: reports_ready.WorkReportAndDeps, writer: anytype) !void {
-    const span = trace.span(.encode_entry);
+    const span = trace.span(@src(), .encode_entry);
     defer span.deinit();
     span.debug("Starting entry encoding", .{});
 
@@ -83,7 +83,7 @@ pub fn encodeEntry(allocator: std.mem.Allocator, entry: reports_ready.WorkReport
     span.debug("Sorted dependency hashes", .{});
 
     for (keys, 0..) |hash, i| {
-        const hash_span = span.child(.hash);
+        const hash_span = span.child(@src(), .hash);
         defer hash_span.deinit();
         hash_span.trace("Writing hash {d} of {d}: {s}", .{ i + 1, keys.len, std.fmt.fmtSliceHexLower(&hash) });
         try writer.writeAll(&hash);

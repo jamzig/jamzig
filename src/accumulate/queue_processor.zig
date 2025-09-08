@@ -12,7 +12,7 @@ const Params = @import("../jam_params.zig").Params;
 const accumulate_types = @import("types.zig");
 const Queued = accumulate_types.Queued;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Error types for queue processing
 pub const QueueError = error{
@@ -38,7 +38,7 @@ pub fn QueueProcessor(comptime params: Params) type {
             queues: *QueueSet,
             resolved_hashes: []const types.WorkReportHash,
         ) !ProcessResult {
-            const span = trace.span(.process_queues);
+            const span = trace.span(@src(), .process_queues);
             defer span.deinit();
 
             var result = ProcessResult{
@@ -67,7 +67,7 @@ pub fn QueueProcessor(comptime params: Params) type {
             queue: *Queued(types.WorkReport),
         ) !usize {
             _ = self;
-            const span = trace.span(.remove_stale_reports);
+            const span = trace.span(@src(), .remove_stale_reports);
             defer span.deinit();
 
             const removed: usize = 0;
@@ -91,7 +91,7 @@ pub fn QueueProcessor(comptime params: Params) type {
         ) !usize {
             _ = self;
             _ = queue;
-            const span = trace.span(.update_dependencies);
+            const span = trace.span(@src(), .update_dependencies);
             defer span.deinit();
 
             var updated: usize = 0;
@@ -111,7 +111,7 @@ pub fn QueueProcessor(comptime params: Params) type {
             ready: *Queued(types.WorkReport),
         ) !usize {
             _ = self;
-            const span = trace.span(.move_ready_reports);
+            const span = trace.span(@src(), .move_ready_reports);
             defer span.deinit();
 
             var moved: usize = 0;
@@ -138,7 +138,7 @@ pub fn QueueProcessor(comptime params: Params) type {
         /// Validates queue consistency
         pub fn validateQueues(self: Self, queues: *const QueueSet) !void {
             _ = self;
-            const span = trace.span(.validate_queues);
+            const span = trace.span(@src(), .validate_queues);
             defer span.deinit();
 
             // Check for duplicates across queues

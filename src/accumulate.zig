@@ -25,7 +25,7 @@ const TransferExecutor = @import("accumulate/transfer_executor.zig").TransferExe
 const HistoryTracker = @import("accumulate/history_tracker.zig").HistoryTracker;
 const QueueProcessor = @import("accumulate/queue_processor.zig").QueueProcessor;
 
-const trace = @import("tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Main entry point for processing work reports according to JAM §12.1
 /// Coordinates the full accumulation pipeline through specialized modules
@@ -37,7 +37,7 @@ pub fn processAccumulationReports(
     stx: *state_delta.StateTransition(params),
     reports: []types.WorkReport,
 ) !ProcessAccumulationResult {
-    const span = trace.span(.process_accumulate_reports);
+    const span = trace.span(@src(), .process_accumulate_reports);
     defer span.deinit();
 
     span.debug("Starting accumulation process with {d} reports", .{reports.len});

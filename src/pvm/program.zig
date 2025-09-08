@@ -6,7 +6,7 @@ const codec = @import("../codec.zig");
 const Decoder = @import("decoder.zig").Decoder;
 const JumpTable = @import("decoder/jumptable.zig").JumpTable;
 
-const trace = @import("../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 pub const Program = struct {
     code: []const u8,
@@ -36,7 +36,7 @@ pub const Program = struct {
     };
 
     pub fn decode(allocator: Allocator, raw_program: []const u8) !Program {
-        const span = trace.span(.decode);
+        const span = trace.span(@src(), .decode);
         defer span.deinit();
         span.debug("Starting program decoding, raw size: {d} bytes", .{raw_program.len});
         //span.trace("Raw program bytes: {any}", .{std.fmt.fmtSliceHexLower(raw_program)});
@@ -130,7 +130,7 @@ pub const Program = struct {
         }
 
         // Trace mask bits
-        const mask_span = span.child(.mask);
+        const mask_span = span.child(@src(), .mask);
         defer mask_span.deinit();
         mask_span.debug("Mask length: {d} bytes", .{mask_length_in_bytes});
 
@@ -152,7 +152,7 @@ pub const Program = struct {
         try basic_blocks.append(0);
 
         var pc: u32 = 0;
-        const basic_span = span.child(.basic_blocks);
+        const basic_span = span.child(@src(), .basic_blocks);
         defer basic_span.deinit();
         basic_span.debug("Starting basic block analysis", .{});
 
@@ -183,7 +183,7 @@ pub const Program = struct {
         errdefer allocator.free(program.basic_blocks);
 
         // Validate that all jump table destinations point to valid basic blocks
-        const jump_span = span.child(.jump_validation);
+        const jump_span = span.child(@src(), .jump_validation);
         defer jump_span.deinit();
         jump_span.debug("Validating jump table destinations", .{});
 
@@ -225,7 +225,7 @@ pub const Program = struct {
     /// - Alignment check (must be aligned to ZA)
     /// - Basic block validation
     pub fn validateJumpAddress(self: *const Program, address: u32) JumpError!u32 {
-        const span = trace.span(.validate_jump);
+        const span = trace.span(@src(), .validate_jump);
         defer span.deinit();
         span.debug("Validating jump address: {d:0>8} (0x{x:0>8})", .{ address, address });
 

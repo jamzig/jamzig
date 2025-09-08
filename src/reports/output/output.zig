@@ -1,6 +1,6 @@
 const std = @import("std");
 const types = @import("../../types.zig");
-const tracing = @import("../../tracing.zig");
+const tracing = @import("tracing");
 
 const trace = tracing.scoped(.reports);
 
@@ -14,7 +14,7 @@ pub fn validateOutputSize(
     comptime params: @import("../../jam_params.zig").Params,
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_output_sizes);
+    const span = trace.span(@src(), .validate_output_sizes);
     defer span.deinit();
 
     span.debug("Starting output size validation", .{});

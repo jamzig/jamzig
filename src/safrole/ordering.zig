@@ -1,11 +1,13 @@
 const std = @import("std");
 
-const trace = @import("../tracing.zig").scoped(.safrole);
+const trace = @import("tracing").scoped(.safrole);
+const tracy = @import("tracy");
 
 // (69) Outside in ordering function
 pub fn outsideInOrdering(comptime T: type, allocator: std.mem.Allocator, data: []const T) ![]T {
-    const span = trace.span(.z_outside_in_ordering);
+    const span = trace.span(@src(), .z_outside_in_ordering);
     defer span.deinit();
+
     span.debug("Performing outside-in ordering on type {s}", .{@typeName(T)});
     span.trace("Input data length: {d}", .{data.len});
 

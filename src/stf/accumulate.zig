@@ -7,7 +7,7 @@ const accumulate = @import("../accumulate.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const tracing = @import("../tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.stf);
 
 pub const Error = error{};
@@ -57,7 +57,7 @@ pub fn transition(
     stx: *StateTransition(params),
     reports: []types.WorkReport,
 ) !AccumulateResult {
-    const span = trace.span(.accumulate);
+    const span = trace.span(@src(), .accumulate);
     defer span.deinit();
 
     // Process the newly available reports

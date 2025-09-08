@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const state = @import("../state.zig");
 const types = @import("../types.zig");
-const tracing = @import("../tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.stf_authorization);
 
 const Params = @import("../jam_params.zig").Params;
@@ -17,16 +17,16 @@ pub fn transition(
     stx: *StateTransition(params),
     xtguarantees: types.GuaranteesExtrinsic,
 ) !void {
-    const span = trace.span(.authorization_transition);
+    const span = trace.span(@src(), .authorization);
     defer span.deinit();
-    
+
     span.debug("Processing authorizations from guarantees in STF for slot {d}", .{stx.time.current_slot});
     span.debug("Number of guarantees: {d}", .{xtguarantees.data.len});
-    
+
     // Create a list of CoreAuthorizer from the guarantee reports
     var authorizers = std.ArrayList(auth.CoreAuthorizer).init(stx.allocator);
     defer authorizers.deinit();
-    
+
     // Extract authorizer information from each guarantee's work report
     for (xtguarantees.data) |guarantee| {
         try authorizers.append(auth.CoreAuthorizer{
@@ -34,13 +34,13 @@ pub fn transition(
             .auth_hash = guarantee.report.authorizer_hash,
         });
     }
-    
+
     // Process the authorizations
     try auth.processAuthorizations(
         params,
         stx,
         authorizers.items,
     );
-    
+
     span.debug("Authorization processing completed successfully", .{});
 }
