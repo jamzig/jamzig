@@ -30,9 +30,6 @@ pub fn stateTransition(
     const span = trace.span(@src(), .state_transition);
     defer span.deinit();
 
-    const tracy_zone = tracy.ZoneN(@src(), "stf_state_transition");
-    defer tracy_zone.End();
-
     // Ensure we have a fully initialized state at the start
     if (@import("builtin").mode == .Debug) {
         if (!try current_state.checkIfFullyInitialized()) {
@@ -47,102 +44,73 @@ pub fn stateTransition(
     var stx = try StateTransition(params).create(allocator, current_state, transition_time);
     errdefer stx.destroy(allocator);
 
-    {
-        const time_zone = tracy.ZoneN(@src(), "stf_time_transition");
-        defer time_zone.End();
-        try time.transition(
-            params,
-            stx,
-            block.header.slot,
-        );
-    }
+    try time.transition(
+        params,
+        stx,
+        block.header.slot,
+    );
 
-    {
-        const eta_zone = tracy.ZoneN(@src(), "stf_eta_transition");
-        defer eta_zone.End();
+    const entropy = blk: {
+        const entropy_span = span.child(@src(), .get_entropy);
+        defer entropy_span.deinit();
+        break :blk try block.header.getEntropy();
+    };
 
-        const entropy = blk: {
-            const entropy_zone = tracy.ZoneN(@src(), "get_entropy");
-            defer entropy_zone.End();
-            break :blk try block.header.getEntropy();
-        };
+    try eta.transition(params, stx, entropy);
 
-        try eta.transition(params, stx, entropy);
-    }
+    try validator_stats.clearPerBlockStats(
+        params,
+        stx,
+    );
 
-    {
-        const validator_stats_zone = tracy.ZoneN(@src(), "stf_validator_stats_clear");
-        defer validator_stats_zone.End();
-        try validator_stats.clearPerBlockStats(
-            params,
-            stx,
-        );
-
-        try validator_stats.transitionEpoch(
-            params,
-            stx,
-        );
-    }
+    try validator_stats.transitionEpoch(
+        params,
+        stx,
+    );
 
     // => rho_dagger
-    {
-        const disputes_zone = tracy.ZoneN(@src(), "stf_disputes_transition");
-        defer disputes_zone.End();
-        _ = try disputes.transition(
-            params,
-            allocator,
-            stx,
-            block.extrinsic.disputes,
-        );
-    }
+    _ = try disputes.transition(
+        params,
+        allocator,
+        stx,
+        block.extrinsic.disputes,
+    );
 
     // => rho_double_dagger
-    var assurance_result = blk: {
-        const assurances_zone = tracy.ZoneN(@src(), "stf_assurances_transition");
-        defer assurances_zone.End();
-        break :blk try assurances.transition(
+    var assurance_result =
+        try assurances.transition(
             params,
             allocator,
             stx,
             block.extrinsic.assurances,
             block.header.parent,
         );
-    };
     defer assurance_result.deinit(allocator);
 
     // Update parent block's state root before processing reports
     // This ensures guarantees can validate against the correct state root
-    {
-        const recent_history_zone = tracy.ZoneN(@src(), "stf_recent_history_update");
-        defer recent_history_zone.End();
-        try recent_history.updateParentBlockStateRoot(
-            params,
-            stx,
-            block.header.parent_state_root,
-        );
-    }
+    try recent_history.updateParentBlockStateRoot(
+        params,
+        stx,
+        block.header.parent_state_root,
+    );
 
     // => rho_prime
-    var reports_result = blk: {
-        const reports_zone = tracy.ZoneN(@src(), "stf_reports_transition");
-        defer reports_zone.End();
-        break :blk try reports.transition(
+    var reports_result =
+        try reports.transition(
             params,
             allocator,
             stx,
             block,
         );
-    };
     defer reports_result.deinit(allocator);
 
     // accumulate
     const ready_reports = try assurance_result.available_assignments.getWorkReports(allocator);
     defer @import("meta.zig").deinit.deinitEntriesAndFreeSlice(allocator, ready_reports);
 
-    var accumulate_result = blk: {
-        const accumulate_zone = tracy.ZoneN(@src(), "stf_accumulate_transition");
-        defer accumulate_zone.End();
-        break :blk try accumulate.transition(
+    var accumulate_result =
+        try accumulate.transition(
             IOExecutor,
             io_executor,
             params,
@@ -150,70 +118,50 @@ pub fn stateTransition(
             stx,
             ready_reports,
         );
-    };
+
     defer accumulate_result.deinit(allocator);
 
-    {
-        const preimages_zone = tracy.ZoneN(@src(), "stf_preimages_transition");
-        defer preimages_zone.End();
-        try preimages.transition(
-            params,
-            stx,
-            block.extrinsic.preimages,
-            block.header.author_index,
-        );
-    }
+    try preimages.transition(
+        params,
+        stx,
+        block.extrinsic.preimages,
+        block.header.author_index,
+    );
 
-    {
-        const recent_history_zone = tracy.ZoneN(@src(), "stf_recent_history_transition");
-        defer recent_history_zone.End();
-        try recent_history.transition(
-            params,
-            stx,
-            block,
-            accumulate_result.accumulate_root,
-        );
-    }
+    try recent_history.transition(
+        params,
+        stx,
+        block,
+        accumulate_result.accumulate_root,
+    );
 
     // Process authorizations using guarantees extrinsic data
-    {
-        const authorization_zone = tracy.ZoneN(@src(), "stf_authorization_transition");
-        defer authorization_zone.End();
-        try authorization.transition(
-            params,
-            stx,
-            block.extrinsic.guarantees,
-        );
-    }
+    try authorization.transition(
+        params,
+        stx,
+        block.extrinsic.guarantees,
+    );
 
-    var markers = blk: {
-        const safrole_zone = tracy.ZoneN(@src(), "stf_safrole_transition");
-        defer safrole_zone.End();
-        break :blk try safrole.transition(
-            IOExecutor,
-            io_executor,
-            params,
-            stx,
-            block.extrinsic.tickets,
-        );
-    };
+    var markers = try safrole.transition(
+        IOExecutor,
+        io_executor,
+        params,
+        stx,
+        block.extrinsic.tickets,
+    );
     defer markers.deinit(allocator);
 
     // Create comprehensive ValidatorStatsInput with all collected data
     // Convert reporters to validator indices for statistics
-    {
-        const validator_stats_zone = tracy.ZoneN(@src(), "stf_validator_stats_final");
-        defer validator_stats_zone.End();
-        try validator_stats.transition(
-            params,
-            stx,
-            block,
-            &reports_result,
-            &assurance_result,
-            &accumulate_result,
-            ready_reports,
-        );
-    }
+    try validator_stats.transition(
+        params,
+        stx,
+        block,
+        &reports_result,
+        &assurance_result,
+        &accumulate_result,
+        ready_reports,
+    );
 
     return stx;
 }

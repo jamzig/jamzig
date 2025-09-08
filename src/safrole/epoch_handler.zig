@@ -18,9 +18,6 @@ pub fn handleEpochTransition(
     comptime params: Params,
     stx: *StateTransition(params),
 ) !void {
-    const handle_epoch_transition_zone = tracy.ZoneN(@src(), "handle_epoch_transition");
-    defer handle_epoch_transition_zone.End();
-
     const span = trace.span(@src(), .transition_epoch);
     defer span.deinit();
     span.debug("Starting epoch transition", .{});
@@ -36,8 +33,8 @@ pub fn handleEpochTransition(
 
     // Rotate validator keys
     {
-        const rotate_zone = tracy.ZoneN(@src(), "rotate_validators");
-        defer rotate_zone.End();
+        const rotate_span = span.child(@src(), .rotate_validators);
+        defer rotate_span.deinit();
         span.debug("Rotating validator keys", .{});
 
         // λ gets current κ
@@ -62,8 +59,9 @@ pub fn handleEpochTransition(
 
     // Handle gamma_s transition
     {
-        const gamma_s_zone = tracy.ZoneN(@src(), "update_gamma_s");
-        defer gamma_s_zone.End();
+        const gamma_s_span = span.child(@src(), .update_gamma_s);
+        defer gamma_s_span.deinit();
+
         const gamma_s = &gamma_prime.s;
         gamma_s.deinit(stx.allocator);
         _ = gamma_s.clearAndTakeOwnership();
@@ -73,8 +71,8 @@ pub fn handleEpochTransition(
             current_gamma.a.len == params.epoch_length and
             stx.time.isConsecutiveEpoch())
         {
-            const ticket_mode_zone = tracy.ZoneN(@src(), "ticket_mode");
-            defer ticket_mode_zone.End();
+            const ticket_mode_span = span.child(@src(), .ticket_mode);
+            defer ticket_mode_span.deinit();
 
             span.debug("Operating in ticket mode for gamma_s", .{});
             span.trace("Conditions met: prev_slot({d}) >= Y({d}) and gamma_a.len({d}) == epoch_length({d}) and current_epoch({d}) == prior_epoch({d}) + 1)", .{
@@ -89,8 +87,8 @@ pub fn handleEpochTransition(
                 .tickets = try ordering.outsideInOrdering(types.TicketBody, stx.allocator, current_gamma.a),
             };
         } else {
-            const key_mode_zone = tracy.ZoneN(@src(), "key_mode");
-            defer key_mode_zone.End();
+            const key_mode_span = span.child(@src(), .key_mode);
+            defer key_mode_span.deinit();
             span.warn("Falling back to key mode for gamma_s", .{});
 
             if (current_gamma.a.len != params.epoch_length) {
@@ -134,8 +132,6 @@ fn buildBandersnatchRingRoot(
 ) !types.GammaZ {
     const span = trace.span(@src(), .bandersnatch_ring_root);
     defer span.deinit();
-    const tracy_zone = tracy.ZoneN(@src(), "build_ring_root");
-    defer tracy_zone.End();
     span.debug("Calculating Bandersnatch ring root from gamma_k", .{});
     span.trace("Number of validator keys in gamma_k: {d}", .{gamma_k.len()});
 
@@ -165,8 +161,6 @@ pub fn entropyBasedKeySelector(
 ) ![]types.BandersnatchPublic {
     const span = trace.span(@src(), .gamma_s_fallback);
     defer span.deinit();
-    const tracy_zone = tracy.ZoneN(@src(), "entropy_key_selection");
-    defer tracy_zone.End();
     span.debug("Generating fallback gamma_s", .{});
     span.trace("Input parameters: r={any}, epoch_length={d}, kappa_size={d}", .{
         std.fmt.fmtSliceHexLower(&r),

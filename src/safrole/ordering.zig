@@ -7,8 +7,7 @@ const tracy = @import("tracy");
 pub fn outsideInOrdering(comptime T: type, allocator: std.mem.Allocator, data: []const T) ![]T {
     const span = trace.span(@src(), .z_outside_in_ordering);
     defer span.deinit();
-    const tracy_zone = tracy.ZoneN(@src(), "outside_in_ordering");
-    defer tracy_zone.End();
+
     span.debug("Performing outside-in ordering on type {s}", .{@typeName(T)});
     span.trace("Input data length: {d}", .{data.len});
 

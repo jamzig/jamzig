@@ -18,7 +18,7 @@ pub fn transition(
     stx: *StateTransition(params),
     extrinsic_tickets: types.TicketsExtrinsic,
 ) !safrole.Result {
-    const span = trace.span(@src(), .transition_safrole);
+    const span = trace.span(@src(), .safrole);
     defer span.deinit();
 
     return try safrole.transition(

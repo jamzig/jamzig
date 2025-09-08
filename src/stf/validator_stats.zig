@@ -7,7 +7,7 @@ const validator_stats = @import("../validator_stats.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("tracing").scoped(.stf);
+const trace = @import("tracing").scoped(.validator_stats);
 
 /// This structure contains all the necessary data for the validator statistics
 /// state transition function, decoupled from the Block type.
@@ -208,6 +208,9 @@ pub fn transition(
     accumulate_result: *const @import("accumulate.zig").AccumulateResult,
     ready_reports: []types.WorkReport,
 ) !void {
+    const span = trace.span(@src(), .validator_stats);
+    defer span.deinit();
+
     const input = ValidatorStatsInput.fromBlockWithValidators(
         block,
         reports_result.validator_indices,

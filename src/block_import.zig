@@ -70,9 +70,6 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             const span = trace.span(@src(), .import_block_building_root);
             defer span.deinit();
 
-            const tracy_zone = tracy.ZoneN(@src(), "block_import_build_root");
-            defer tracy_zone.End();
-
             // Build current state root for validation
             const current_state_root = try current_state.buildStateRoot(self.allocator);
 
@@ -94,29 +91,22 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             defer span.deinit();
 
             // Frame per block
-            const tracy_zone = tracy.ZoneN(@src(), "block_import_with_cached_root");
-            defer tracy_zone.End();
             defer tracy.FrameMarkNamed("Block");
 
             // Step 1: Validate header using the cached state root
-            const validation_result = blk: {
-                const header_zone = tracy.ZoneN(@src(), "validate_header");
-                defer header_zone.End();
-                break :blk try self.header_validator.validateHeader(
+            const validation_result =
+                try self.header_validator.validateHeader(
                     current_state,
                     &block.header,
                     cached_state_root,
                     &block.extrinsic,
                 );
-            };
 
             span.debug("Header validated, sealed with tickets: {}", .{validation_result.sealed_with_tickets});
 
             // Step 2: Apply state transition
-            const state_transition = blk: {
-                const stf_zone = tracy.ZoneN(@src(), "stf_transition");
-                defer stf_zone.End();
-                break :blk try stf.stateTransition(
+            const state_transition =
+                try stf.stateTransition(
                     IOExecutor,
                     self.executor,
                     params,
@@ -124,7 +114,6 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
                     current_state,
                     block,
                 );
-            };
 
             return ImportResult{
                 .state_transition = state_transition,

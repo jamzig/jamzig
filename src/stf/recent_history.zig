@@ -45,7 +45,7 @@ pub fn transition(
     new_block: *const types.Block,
     accumulate_root: types.AccumulateRoot,
 ) !void {
-    const span = trace.span(@src(), .transition_recent_history);
+    const span = trace.span(@src(), .recent_history);
     defer span.deinit();
 
     var beta_prime: *state.Beta = try stx.ensure(.beta_prime);

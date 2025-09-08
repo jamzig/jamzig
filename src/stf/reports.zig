@@ -7,6 +7,8 @@ const StateTransition = @import("../state_delta.zig").StateTransition;
 
 const reports = @import("../reports.zig");
 
+const trace = @import("tracing").scoped(.reports);
+
 pub const Error = error{};
 
 pub fn accumulateWorkReports(
@@ -39,6 +41,9 @@ pub fn transition(
     stx: *StateTransition(params),
     block: *const types.Block,
 ) !ReportsResult {
+    const span = trace.span(@src(), .reports);
+    defer span.deinit();
+
     const validated = try reports.ValidatedGuaranteeExtrinsic.validate(
         params,
         allocator,

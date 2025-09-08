@@ -11,7 +11,6 @@ const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
 const trace = @import("tracing").scoped(.safrole);
-const tracy = @import("tracy");
 
 const Error = @import("../safrole.zig").Error;
 
@@ -23,8 +22,6 @@ pub fn processTicketExtrinsic(
     stx: *StateTransition(params),
     ticket_extrinsic: types.TicketsExtrinsic,
 ) Error![]types.TicketBody {
-    const function_zone = tracy.ZoneN(@src(), "process_ticket_extrinsic");
-    defer function_zone.End();
     const span = trace.span(@src(), .process_ticket_extrinsic);
     defer span.deinit();
 
@@ -76,8 +73,8 @@ pub fn processTicketExtrinsic(
 
     // Chapter 6.7: The tickets should be in order of their implied identifier
     {
-        const order_check_zone = tracy.ZoneN(@src(), "check_order");
-        defer order_check_zone.End();
+        const order_check_span = span.child(@src(), .check_order);
+        defer order_check_span.deinit();
         var index: usize = 0;
         while (index < verified_extrinsic.len) : (index += 1) {
             const current_ticket = verified_extrinsic[index];
@@ -95,8 +92,8 @@ pub fn processTicketExtrinsic(
 
             // Check for duplicates in gamma_a using binary search
             {
-                const duplicate_check_zone = tracy.ZoneN(@src(), "check_duplicates");
-                defer duplicate_check_zone.End();
+                const duplicate_check_span = span.child(@src(), .check_duplicates);
+                defer duplicate_check_span.deinit();
                 std.debug.assert(blk: {
                     if (gamma.a.len <= 1) break :blk true;
                     var i: usize = 1;
@@ -138,9 +135,6 @@ fn verifyTicketEnvelope(
 ) ![]types.TicketBody {
     const span = trace.span(@src(), .verify_ticket_envelope);
     defer span.deinit();
-
-    const tracy_zone = tracy.ZoneN(@src(), "verify_envelope");
-    defer tracy_zone.End();
 
     span.debug("Verifying {d} ticket envelopes", .{extrinsic.len});
     span.trace("Ring size: {d}, gamma_z: {any}, n2: {any}", .{
@@ -199,8 +193,8 @@ fn verifyTicketTask(
     output_ticket: *types.TicketBody,
     empty_aux_data: *const [0]u8,
 ) !void {
-    const vrf_zone = tracy.ZoneN(@src(), "vrf_verify_parallel");
-    defer vrf_zone.End();
+    const vrf_zone = trace.span(@src(), .verify_ticket_task);
+    defer vrf_zone.deinit();
 
     // Construct VRF input for this ticket
     const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
