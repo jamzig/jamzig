@@ -18,13 +18,13 @@ pub fn encode(
     rho: *const Rho(params.core_count),
     writer: anytype,
 ) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting Rho state encoding with {d} cores", .{params.core_count});
 
     // The number of cores (C) is not encoded as it is a constant
     for (rho.reports, 0..) |maybe_entry, core_idx| {
-        const entry_span = span.child(.entry);
+        const entry_span = span.child(@src(), .entry);
         defer entry_span.deinit();
         entry_span.debug("Processing core {d}", .{core_idx});
 

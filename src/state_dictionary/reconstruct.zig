@@ -19,7 +19,7 @@ pub fn reconstructState(
     allocator: std.mem.Allocator,
     dict: *const MerklizationDictionary,
 ) !state.JamState(params) {
-    var span = trace.span(.reconstruct_state);
+    var span = trace.span(@src(), .reconstruct_state);
     defer span.deinit();
 
     span.debug("Starting state reconstruction with dictionary size: {d}", .{dict.entries.count()});
@@ -47,7 +47,7 @@ pub fn reconstructState(
         const key = entry.key_ptr.*;
         const dict_entry = entry.value_ptr.*;
 
-        var entry_span = span.child(.process_entry);
+        var entry_span = span.child(@src(), .process_entry);
         defer entry_span.deinit();
 
         entry_span.debug("Processing entry {d}/{d}: key length={d}, value length={d}", .{ entry_count, dict.entries.count(), key.len, dict_entry.value.len });
@@ -58,7 +58,7 @@ pub fn reconstructState(
         switch (key_type) {
             .state_component => switch (key[0]) {
                 1 => {
-                    var component_span = entry_span.child(.decode_alpha);
+                    var component_span = entry_span.child(@src(), .decode_alpha);
                     defer component_span.deinit();
                     component_span.debug("Decoding alpha component (id={d})", .{key[0]});
                     var f = fbs(dict_entry.value);
@@ -71,7 +71,7 @@ pub fn reconstructState(
                     );
                 },
                 2 => {
-                    var component_span = entry_span.child(.decode_phi);
+                    var component_span = entry_span.child(@src(), .decode_phi);
                     defer component_span.deinit();
                     component_span.debug("Decoding phi component (id={d})", .{key[0]});
                     var f = fbs(dict_entry.value);
@@ -162,14 +162,14 @@ pub fn reconstructState(
                 },
             },
             .delta_base => {
-                var delta_span = entry_span.child(.process_delta_base);
+                var delta_span = entry_span.child(@src(), .process_delta_base);
                 defer delta_span.deinit();
                 delta_span.debug("Processing delta base entry", .{});
 
                 try delta_reconstruction.reconstructServiceAccountBase(allocator, &jam_state.delta.?, key, dict_entry.value);
             },
             .delta_service_data => {
-                var storage_span = entry_span.child(.process_service_data);
+                var storage_span = entry_span.child(@src(), .process_service_data);
                 defer storage_span.deinit();
                 storage_span.debug("Processing delta storage entry", .{});
 

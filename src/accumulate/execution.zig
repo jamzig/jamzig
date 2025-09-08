@@ -92,7 +92,7 @@ pub fn outerAccumulation(
     work_reports: []const types.WorkReport,
     gas_limit: types.Gas,
 ) !OuterAccumulationResult {
-    const span = trace.span(.outer_accumulation);
+    const span = trace.span(@src(), .outer_accumulation);
     defer span.deinit();
 
     span.debug("Starting outer accumulation with gas limit: {d}", .{gas_limit});
@@ -262,7 +262,7 @@ pub fn parallelizedAccumulation(
     work_reports: []const types.WorkReport,
     include_privileged: bool, // Whether to include privileged services (first batch only)
 ) !ParallelizedAccumulationResult(params) {
-    const span = trace.span(.parallelized_accumulation);
+    const span = trace.span(@src(), .parallelized_accumulation);
     defer span.deinit();
 
     // Assertions - function parameters are guaranteed to be valid
@@ -405,7 +405,7 @@ pub fn singleServiceAccumulation(
     service_id: types.ServiceId,
     service_operands: ?ServiceAccumulationOperandsMap.Operands,
 ) !AccumulationResult(params) {
-    const span = trace.span(.single_service_accumulation);
+    const span = trace.span(@src(), .single_service_accumulation);
     defer span.deinit();
 
     // Assertions - function parameters are guaranteed to be valid
@@ -445,7 +445,7 @@ pub fn executeAccumulation(
     accumulatable: []const types.WorkReport,
     gas_limit: u64,
 ) !OuterAccumulationResult {
-    const span = trace.span(.execute_accumulation);
+    const span = trace.span(@src(), .execute_accumulation);
     defer span.deinit();
 
     // Build accumulation context

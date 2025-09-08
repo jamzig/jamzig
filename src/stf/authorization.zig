@@ -17,7 +17,7 @@ pub fn transition(
     stx: *StateTransition(params),
     xtguarantees: types.GuaranteesExtrinsic,
 ) !void {
-    const span = trace.span(.authorization_transition);
+    const span = trace.span(@src(), .authorization_transition);
     defer span.deinit();
     
     span.debug("Processing authorizations from guarantees in STF for slot {d}", .{stx.time.current_slot});

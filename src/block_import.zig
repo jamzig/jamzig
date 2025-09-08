@@ -67,7 +67,7 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             current_state: *const JamState(params),
             block: *const types.Block,
         ) !ImportResult {
-            const span = trace.span(.import_block_building_root);
+            const span = trace.span(@src(), .import_block_building_root);
             defer span.deinit();
 
             const tracy_zone = tracy.ZoneN(@src(), "block_import_build_root");
@@ -90,7 +90,7 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             cached_state_root: types.StateRoot,
             block: *const types.Block,
         ) !ImportResult {
-            const span = trace.span(.import_block_with_cached_root);
+            const span = trace.span(@src(), .import_block_with_cached_root);
             defer span.deinit();
 
             // Frame per block

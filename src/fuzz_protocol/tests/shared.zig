@@ -54,7 +54,7 @@ pub fn performHandshake(
     target_sock: net.Stream,
     target: *TargetServer,
 ) !bool {
-    const span = trace.span(.perform_handshake);
+    const span = trace.span(@src(), .perform_handshake);
     defer span.deinit();
 
     // Fuzzer sends PeerInfo

@@ -57,7 +57,7 @@ pub fn transition(
     stx: *StateTransition(params),
     reports: []types.WorkReport,
 ) !AccumulateResult {
-    const span = trace.span(.accumulate);
+    const span = trace.span(@src(), .accumulate);
     defer span.deinit();
 
     // Process the newly available reports

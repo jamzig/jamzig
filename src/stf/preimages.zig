@@ -16,7 +16,7 @@ pub fn transition(
     preimages_extrinsic: types.PreimagesExtrinsic,
     author_index: types.ValidatorIndex,
 ) !void {
-    const span = trace.span(.preimages);
+    const span = trace.span(@src(), .preimages);
     defer span.deinit();
 
     // Process the preimages extrinsic

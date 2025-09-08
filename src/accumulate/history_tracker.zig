@@ -28,7 +28,7 @@ pub fn HistoryTracker(comptime params: Params) type {
             accumulated: []const types.WorkReport,
         ) !void {
             _ = self;
-            const span = trace.span(.update_accumulation_history);
+            const span = trace.span(@src(), .update_accumulation_history);
             defer span.deinit();
 
             span.debug("Shifting down xi to make place for new entry", .{});
@@ -71,7 +71,7 @@ pub fn HistoryTracker(comptime params: Params) type {
             xi: *const state.Xi(params.epoch_length),
         ) !void {
             _ = self;
-            const span = trace.span(.validate_history);
+            const span = trace.span(@src(), .validate_history);
             defer span.deinit();
 
             // Check for duplicates within each slot

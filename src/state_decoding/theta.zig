@@ -21,7 +21,7 @@ pub fn decode(
     context: *DecodingContext,
     reader: anytype,
 ) !Theta {
-    const span = trace.span(.decode);
+    const span = trace.span(@src(), .decode);
     defer span.deinit();
     span.debug("Starting theta (accumulation outputs) decoding", .{});
 
@@ -45,7 +45,7 @@ pub fn decode(
     while (i < outputs_len) : (i += 1) {
         try context.push(.{ .array_index = i });
 
-        const output_span = span.child(.output);
+        const output_span = span.child(@src(), .output);
         defer output_span.deinit();
         output_span.debug("Decoding output {d} of {d}", .{ i + 1, outputs_len });
 

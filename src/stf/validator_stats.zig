@@ -79,7 +79,7 @@ pub fn transitionWithInput(
     accumulate_result: *const @import("accumulate.zig").AccumulateResult,
     ready_reports: []types.WorkReport,
 ) !void {
-    const span = trace.span(.transition_validator_stats);
+    const span = trace.span(@src(), .transition_validator_stats);
     defer span.deinit();
     span.debug("Starting validator_stats transition", .{});
 
@@ -227,7 +227,7 @@ pub fn transitionEpoch(
     comptime params: Params,
     stx: *StateTransition(params),
 ) !void {
-    const span = trace.span(.transition_epoch);
+    const span = trace.span(@src(), .transition_epoch);
     defer span.deinit();
     span.debug("Starting validator_stats transition", .{});
     var pi: *state.Pi = try stx.ensure(.pi_prime);
@@ -242,7 +242,7 @@ pub fn clearPerBlockStats(
     comptime params: Params,
     stx: *StateTransition(params),
 ) !void {
-    const span = trace.span(.clear_per_block_stats);
+    const span = trace.span(@src(), .clear_per_block_stats);
     defer span.deinit();
     var pi: *state.Pi = try stx.ensure(.pi_prime);
 

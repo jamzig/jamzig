@@ -15,7 +15,7 @@ pub fn transition(
     stx: *StateTransition(params),
     new_entropy: types.Entropy,
 ) !void {
-    const span = trace.span(.transition_eta);
+    const span = trace.span(@src(), .transition_eta);
     defer span.deinit();
 
     var eta_current = try stx.ensure(.eta);

@@ -42,7 +42,7 @@ pub fn transition(
     stx: *StateTransition(params),
     ticket_extrinsic: types.TicketsExtrinsic,
 ) Error!Result {
-    const span = trace.span(.transition);
+    const span = trace.span(@src(), .transition);
     defer span.deinit();
     span.debug("Starting state transition", .{});
 
@@ -126,7 +126,7 @@ fn mergeTicketsIntoTicketAccumulatorGammaA(
     extrinsic: []types.TicketBody,
     epoch_length: u32,
 ) ![]types.TicketBody {
-    const span = trace.span(.merge_tickets);
+    const span = trace.span(@src(), .merge_tickets);
     defer span.deinit();
     span.debug("Merging tickets into accumulator gamma_a", .{});
     span.trace("Current gamma_a size: {d}, extrinsic size: {d}, epoch length: {d}", .{

@@ -19,7 +19,7 @@ pub fn Connection(T: type) type {
         // Create function is not typically called directly by user for server
         // It's created internally in onNewConn
         pub fn create(alloc: std.mem.Allocator, server: *T, lsquic_conn: ?*lsquic.lsquic_conn_t, peer_endpoint: network.EndPoint, connection_id: ConnectionId) !*Connection(T) {
-            const span = trace.span(.connection_create);
+            const span = trace.span(@src(), .connection_create);
             defer span.deinit();
             const connection = try alloc.create(Connection(T));
             // TODO: prefix all debug messaeges with the ID
@@ -35,7 +35,7 @@ pub fn Connection(T: type) type {
 
         // Destroy method for cleanup
         pub fn destroy(self: *Connection(T), alloc: std.mem.Allocator) void {
-            const span = trace.span(.connection_destroy);
+            const span = trace.span(@src(), .connection_destroy);
             defer span.deinit();
             span.debug("Destroying connection context for ID: {}", .{self.id});
             // Add any connection-specific resource cleanup here if needed
@@ -43,7 +43,7 @@ pub fn Connection(T: type) type {
         }
 
         pub fn createStream(self: *Connection(T)) void {
-            const span = trace.span(.create_stream);
+            const span = trace.span(@src(), .create_stream);
             defer span.deinit();
             span.debug("Requesting new stream on connection ID: {}", .{self.id});
 
@@ -58,7 +58,7 @@ pub fn Connection(T: type) type {
             _: ?*anyopaque, // ea_stream_if_ctx (unused here)
             maybe_lsquic_connection: ?*lsquic.lsquic_conn_t,
         ) callconv(.C) ?*lsquic.lsquic_conn_ctx_t {
-            const span = trace.span(.on_connection_created);
+            const span = trace.span(@src(), .on_connection_created);
             defer span.deinit();
             // While the documentation doesn't explicitly state that the
             // lsquic_conn_t *c parameter cannot be null, the context strongly
@@ -89,7 +89,7 @@ pub fn Connection(T: type) type {
             ctx: ?*anyopaque, // *T
             maybe_lsquic_connection: ?*lsquic.lsquic_conn_t,
         ) callconv(.C) ?*lsquic.lsquic_conn_ctx_t {
-            const span = trace.span(.on_server_connection_created);
+            const span = trace.span(@src(), .on_server_connection_created);
             defer span.deinit();
 
             const owner = @as(*T, @ptrCast(@alignCast(ctx.?)));
@@ -146,7 +146,7 @@ pub fn Connection(T: type) type {
         }
 
         pub fn onConnectionClosed(maybe_lsquic_connection: ?*lsquic.lsquic_conn_t) callconv(.C) void {
-            const span = trace.span(.on_conn_closed);
+            const span = trace.span(@src(), .on_conn_closed);
             defer span.deinit();
 
             const lsquic_conn_ptr = maybe_lsquic_connection orelse {
@@ -188,7 +188,7 @@ pub fn Connection(T: type) type {
         }
 
         pub fn onHandshakeDone(conn: ?*lsquic.lsquic_conn_t, status: lsquic.lsquic_hsk_status) callconv(.C) void {
-            const span = trace.span(.on_handshake_done);
+            const span = trace.span(@src(), .on_handshake_done);
             defer span.deinit();
             const lsquic_conn_ptr = conn orelse return;
 

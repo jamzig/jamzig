@@ -68,7 +68,7 @@ pub fn HostCalls(comptime params: Params) type {
             /// Apply provided preimages after accumulation
             /// Filters still-relevant preimages and updates service accounts
             pub fn applyProvidedPreimages(self: *@This(), current_timeslot: types.TimeSlot) !void {
-                const span = trace.span(.apply_provided_preimages);
+                const span = trace.span(@src(), .apply_provided_preimages);
                 defer span.deinit();
 
                 var iter = self.provided_preimages.iterator();
@@ -240,7 +240,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_bless);
+            const span = trace.span(@src(), .host_call_bless);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -395,7 +395,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_upgrade);
+            const span = trace.span(@src(), .host_call_upgrade);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -450,7 +450,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_transfer);
+            const span = trace.span(@src(), .host_call_transfer);
             defer span.deinit();
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
@@ -557,7 +557,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_assign);
+            const span = trace.span(@src(), .host_call_assign);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -647,7 +647,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_checkpoint);
+            const span = trace.span(@src(), .host_call_checkpoint);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -680,7 +680,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_new_service);
+            const span = trace.span(@src(), .host_call_new_service);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -798,7 +798,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_eject);
+            const span = trace.span(@src(), .host_call_eject);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -925,7 +925,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_query);
+            const span = trace.span(@src(), .host_call_query);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -1026,7 +1026,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_solicit);
+            const span = trace.span(@src(), .host_call_solicit);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -1109,7 +1109,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_forget);
+            const span = trace.span(@src(), .host_call_forget);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -1164,7 +1164,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_yield);
+            const span = trace.span(@src(), .host_call_yield);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -1203,7 +1203,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_designate);
+            const span = trace.span(@src(), .host_call_designate);
             defer span.deinit();
 
             // Graypaper specifies exactly 336 bytes per validator
@@ -1299,7 +1299,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_provide);
+            const span = trace.span(@src(), .host_call_provide);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});
@@ -1401,7 +1401,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_fetch);
+            const span = trace.span(@src(), .host_call_fetch);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});

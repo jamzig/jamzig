@@ -19,7 +19,7 @@ pub const RhoEntry = struct {
     const Blake2b256 = std.crypto.hash.blake2.Blake2b256;
 
     pub fn init(core: u16, assignment: types.AvailabilityAssignment) @This() {
-        const span = trace.span(.init_entry);
+        const span = trace.span(@src(), .init_entry);
         defer span.deinit();
         span.debug("Initializing RhoEntry for core {d}", .{core});
 
@@ -31,7 +31,7 @@ pub const RhoEntry = struct {
     }
 
     pub fn hash_uncached(self: *const @This(), allocator: std.mem.Allocator) !WorkReportHash {
-        const span = trace.span(.hash_uncached);
+        const span = trace.span(@src(), .hash_uncached);
         defer span.deinit();
         span.debug("Computing uncached hash for core {d}", .{self.core});
 
@@ -61,7 +61,7 @@ pub const RhoEntry = struct {
     }
 
     pub fn hash(self: *@This(), allocator: std.mem.Allocator) !WorkReportHash {
-        const span = trace.span(.hash);
+        const span = trace.span(@src(), .hash);
         defer span.deinit();
 
         if (self.cached_hash == null) {
@@ -75,7 +75,7 @@ pub const RhoEntry = struct {
     }
 
     pub fn deepClone(self: *const @This(), allocator: std.mem.Allocator) !RhoEntry {
-        const span = trace.span(.deep_clone);
+        const span = trace.span(@src(), .deep_clone);
         defer span.deinit();
         span.debug("Deep cloning RhoEntry for core {d}", .{self.core});
 
@@ -87,7 +87,7 @@ pub const RhoEntry = struct {
     }
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        const span = trace.span(.deinit_entry);
+        const span = trace.span(@src(), .deinit_entry);
         defer span.deinit();
         span.debug("Deinitializing RhoEntry for core {d}", .{self.core});
 
@@ -117,7 +117,7 @@ pub fn Rho(comptime core_count: u16) type {
 
 
         pub fn init(allocator: std.mem.Allocator) @This() {
-            const span = trace.span(.init);
+            const span = trace.span(@src(), .init);
             defer span.deinit();
             span.debug("Initializing Rho state with {d} cores", .{core_count});
 
@@ -128,7 +128,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn setReport(self: *@This(), core: usize, assignment: types.AvailabilityAssignment) void {
-            const span = trace.span(.set_report);
+            const span = trace.span(@src(), .set_report);
             defer span.deinit();
             span.debug("Setting report for core {d}", .{core});
             std.debug.assert(core < core_count); // Core index must be within bounds
@@ -137,7 +137,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn getReport(self: *const @This(), core: usize) ?RhoEntry {
-            const span = trace.span(.get_report);
+            const span = trace.span(@src(), .get_report);
             defer span.deinit();
             span.debug("Getting report for core {d}", .{core});
             std.debug.assert(core < core_count); // Core index must be within bounds
@@ -146,7 +146,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn getReportCloned(self: *const @This(), allocator: std.mem.Allocator, core: usize) !?RhoEntry {
-            const span = trace.span(.get_report_owned);
+            const span = trace.span(@src(), .get_report_owned);
             defer span.deinit();
             span.debug("Getting owned (deep clone) report for core {d}", .{core});
             std.debug.assert(core < core_count); // Core index must be within bounds
@@ -158,7 +158,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn hasReport(self: *const @This(), core: usize) bool {
-            const span = trace.span(.has_report);
+            const span = trace.span(@src(), .has_report);
             defer span.deinit();
             span.debug("Checking report presence for core {d}", .{core});
             std.debug.assert(core < core_count); // Core index must be within bounds
@@ -168,7 +168,7 @@ pub fn Rho(comptime core_count: u16) type {
 
         // TODO: how do we check if a core is engaged?
         pub fn isEngaged(self: *const @This(), core: usize) bool {
-            const span = trace.span(.is_engaged);
+            const span = trace.span(@src(), .is_engaged);
             defer span.deinit();
             span.debug("Checking if core {d} is engaged", .{core});
             std.debug.assert(core < core_count); // Core index must be within bounds
@@ -178,7 +178,7 @@ pub fn Rho(comptime core_count: u16) type {
 
         /// takes a report out of the core leaving the core empty
         pub fn takeReport(self: *@This(), core: usize) ?RhoEntry {
-            const span = trace.span(.take_report);
+            const span = trace.span(@src(), .take_report);
             defer span.deinit();
             span.debug("Taking ownership of report for core {d}", .{core});
             std.debug.assert(core < core_count); // Core index must be within bounds
@@ -192,7 +192,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn clearReport(self: *@This(), core: usize) void {
-            const span = trace.span(.clear_report);
+            const span = trace.span(@src(), .clear_report);
             defer span.deinit();
             span.debug("Clearing report for core {d}", .{core});
             std.debug.assert(core < core_count); // Core index must be within bounds
@@ -204,7 +204,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn clearFromCore(self: *@This(), work_report_hash: WorkReportHash) !bool {
-            const span = trace.span(.clear_from_core);
+            const span = trace.span(@src(), .clear_from_core);
             defer span.deinit();
             span.debug("Searching for hash: {s}", .{std.fmt.fmtSliceHexLower(&work_report_hash)});
 
@@ -231,7 +231,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn deepClone(self: *const @This(), allocator: std.mem.Allocator) !@This() {
-            const span = trace.span(.deep_clone);
+            const span = trace.span(@src(), .deep_clone);
             defer span.deinit();
             span.debug("Deep cloning Rho state with {d} cores", .{core_count});
 
@@ -254,7 +254,7 @@ pub fn Rho(comptime core_count: u16) type {
         }
 
         pub fn deinit(self: *@This()) void {
-            const span = trace.span(.deinit);
+            const span = trace.span(@src(), .deinit);
             defer span.deinit();
             span.debug("Deinitializing Rho state", .{});
 

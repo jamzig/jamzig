@@ -42,7 +42,7 @@ pub fn StatisticsCalculator(comptime params: Params) type {
             execution_result: *OuterAccumulationResult,
             transfer_stats: std.AutoHashMap(types.ServiceId, TransferServiceStats),
         ) !ProcessAccumulationResult {
-            const span = trace.span(.compute_all_statistics);
+            const span = trace.span(@src(), .compute_all_statistics);
             defer span.deinit();
 
             // Calculate the AccumulateRoot
@@ -69,7 +69,7 @@ pub fn StatisticsCalculator(comptime params: Params) type {
             self: Self,
             accumulation_outputs: HashSet(execution.ServiceAccumulationOutput),
         ) !types.AccumulateRoot {
-            const span = trace.span(.calculate_accumulate_root);
+            const span = trace.span(@src(), .calculate_accumulate_root);
             defer span.deinit();
 
             span.debug("Calculating AccumulateRoot from {d} accumulation outputs", .{accumulation_outputs.count()});
@@ -109,7 +109,7 @@ pub fn StatisticsCalculator(comptime params: Params) type {
 
             span.debug("Creating blobs for Merkle tree calculation", .{});
             for (outputs.items, 0..) |item, i| {
-                const blob_span = span.child(.create_blob);
+                const blob_span = span.child(@src(), .create_blob);
                 defer blob_span.deinit();
 
                 blob_span.trace("Processing service ID {d} at index {d}", .{ item.service_id, i });
@@ -139,7 +139,7 @@ pub fn StatisticsCalculator(comptime params: Params) type {
             accumulated: []const types.WorkReport,
             service_gas_used: *std.AutoHashMap(types.ServiceId, types.Gas),
         ) !std.AutoHashMap(types.ServiceId, AccumulationServiceStats) {
-            const span = trace.span(.calculate_accumulation_stats);
+            const span = trace.span(@src(), .calculate_accumulation_stats);
             defer span.deinit();
 
             var accumulation_stats = std.AutoHashMap(types.ServiceId, AccumulationServiceStats).init(self.allocator);

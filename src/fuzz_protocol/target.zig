@@ -71,7 +71,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
             // Clean up socket file if it exists
             std.fs.deleteFileAbsolute(self.socket_path) catch |err| {
                 // Log but don't fail on cleanup error
-                const inner_span = trace.span(.cleanup_error);
+                const inner_span = trace.span(@src(), .cleanup_error);
                 defer inner_span.deinit();
                 inner_span.err("Failed to delete socket file: {s}", .{@errorName(err)});
             };
@@ -86,7 +86,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
         /// Start the server and bind to Unix domain socket
         pub fn start(self: *Self) !void {
-            const span = trace.span(.start_server);
+            const span = trace.span(@src(), .start_server);
             defer span.deinit();
             span.debug("Starting target server at socket: {s}", .{self.socket_path});
 
@@ -153,7 +153,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
                 // Handle connection (synchronous for now)
                 self.handleConnection(connection.stream) catch |err| {
-                    const inner_span = trace.span(.handle_error);
+                    const inner_span = trace.span(@src(), .handle_error);
                     defer inner_span.deinit();
 
                     switch (err) {
@@ -183,7 +183,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
         /// Handle a single client connection
         fn handleConnection(self: *Self, stream: net.Stream) !void {
-            const span = trace.span(.handle_connection);
+            const span = trace.span(@src(), .handle_connection);
             defer span.deinit();
 
             while (true) {
@@ -235,7 +235,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
         /// Process an incoming message and generate appropriate response
         pub fn processMessage(self: *Self, message: messages.Message) !?messages.Message {
-            const span = trace.span(.process_message);
+            const span = trace.span(@src(), .process_message);
             defer span.deinit();
 
             switch (message) {

@@ -11,7 +11,7 @@ const PVM = @import("../../pvm.zig").PVM;
 const trace = @import("tracing").scoped(.accumulate);
 
 pub fn buildOrGetCached(comptime params: Params, allocator: std.mem.Allocator) !std.AutoHashMapUnmanaged(u32, PVM.HostCallFn) {
-    const span = trace.span(.build_host_call_fn_map);
+    const span = trace.span(@src(), .build_host_call_fn_map);
     defer span.deinit();
 
     var host_call_map = std.AutoHashMapUnmanaged(u32, PVM.HostCallFn){};

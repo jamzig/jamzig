@@ -135,7 +135,7 @@ pub fn Stream(T: type) type {
         message_read_state: MessageState = .{},
 
         fn create(alloc: std.mem.Allocator, connection: *Connection(T), lsquic_stream: *lsquic.lsquic_stream_t, lsquic_stream_id: u64) !*Stream(T) {
-            const span = trace.span(.stream_create_internal);
+            const span = trace.span(@src(), .stream_create_internal);
             defer span.deinit();
             span.debug("Creating internal Stream context for connection ID: {}", .{connection.id});
             const stream = try alloc.create(Stream(T));
@@ -190,7 +190,7 @@ pub fn Stream(T: type) type {
 
         pub fn destroy(self: *Stream(T), alloc: std.mem.Allocator) void {
             // Just free the memory, lsquic handles its stream resources.
-            const span = trace.span(.stream_destroy_internal);
+            const span = trace.span(@src(), .stream_destroy_internal);
             defer span.deinit();
             span.debug("Destroying internal Stream struct for ID: {}", .{self.id});
 
@@ -214,7 +214,7 @@ pub fn Stream(T: type) type {
         }
 
         pub fn wantRead(self: *Stream(T), want: bool) void {
-            const span = trace.span(.stream_want_read_internal);
+            const span = trace.span(@src(), .stream_want_read_internal);
             defer span.deinit();
             const want_val: c_int = if (want) 1 else 0;
             span.debug("Setting internal stream want-read to {} for ID: {}", .{ want, self.id });
@@ -224,7 +224,7 @@ pub fn Stream(T: type) type {
         }
 
         pub fn wantWrite(self: *Stream(T), want: bool) void {
-            const span = trace.span(.stream_want_write_internal);
+            const span = trace.span(@src(), .stream_want_write_internal);
             defer span.deinit();
             const want_val: c_int = if (want) 1 else 0;
             span.debug("Setting internal stream want-write to {} for ID: {}", .{ want, self.id });
@@ -236,7 +236,7 @@ pub fn Stream(T: type) type {
         /// Prepare the stream to read into the provided buffer.
         /// If owned is set to .owned, the stream takes ownership of the buffer and will free it when done.
         pub fn setReadBuffer(self: *Stream(T), buffer: []u8, owned: Ownership, callback_method: ReadCallbackMethod(T)) !void {
-            const span = trace.span(.stream_set_read_buffer);
+            const span = trace.span(@src(), .stream_set_read_buffer);
             defer span.deinit();
             span.debug("Setting read buffer (len={d}, owned={}, callback={}) for internal stream ID: {}", .{ buffer.len, owned, callback_method, self.id });
 
@@ -261,7 +261,7 @@ pub fn Stream(T: type) type {
 
         /// Prepare the stream to write the provided data.
         pub fn setWriteBuffer(self: *Stream(T), data: []const u8, owned: Ownership, callback_method: WriteCallbackMethod) !void {
-            const span = trace.span(.stream_set_write_buffer);
+            const span = trace.span(@src(), .stream_set_write_buffer);
             defer span.deinit();
             span.debug("Setting write buffer ({d} bytes) for internal stream ID: {}", .{ data.len, self.id });
 
@@ -285,7 +285,7 @@ pub fn Stream(T: type) type {
         /// Prepare the stream to write a message with a length prefix.
         /// Will allocate a new buffer containing the length prefix + message data.
         pub fn setMessageBuffer(self: *Stream(T), message: []const u8) !void {
-            const span = trace.span(.stream_set_message_buffer);
+            const span = trace.span(@src(), .stream_set_message_buffer);
             defer span.deinit();
             span.debug("Setting message buffer ({d} bytes) for internal stream ID: {}", .{ message.len, self.id });
 
@@ -315,7 +315,7 @@ pub fn Stream(T: type) type {
         }
 
         pub fn flush(self: *Stream(T)) !void {
-            const span = trace.span(.stream_flush_internal);
+            const span = trace.span(@src(), .stream_flush_internal);
             defer span.deinit();
             span.debug("Flushing internal stream ID: {}", .{self.id});
             if (lsquic.lsquic_stream_flush(self.lsquic_stream) != 0) {
@@ -325,7 +325,7 @@ pub fn Stream(T: type) type {
         }
 
         pub fn shutdown(self: *Stream(T), how: c_int) !void {
-            const span = trace.span(.stream_shutdown_internal);
+            const span = trace.span(@src(), .stream_shutdown_internal);
             defer span.deinit();
             const direction = switch (how) {
                 0 => "read",
@@ -341,7 +341,7 @@ pub fn Stream(T: type) type {
         }
 
         pub fn close(self: *Stream(T)) !void {
-            const span = trace.span(.stream_close_internal);
+            const span = trace.span(@src(), .stream_close_internal);
             defer span.deinit();
             span.debug("Closing internal stream ID: {}", .{self.id});
             // This signals intent to close; onStreamClosed callback handles final cleanup.
@@ -355,7 +355,7 @@ pub fn Stream(T: type) type {
             _: ?*anyopaque, // ea_stream_if_ctx (unused)
             maybe_lsquic_stream: ?*lsquic.lsquic_stream_t,
         ) callconv(.C) [*c]lsquic.lsquic_stream_ctx_t {
-            const span = trace.span(.on_stream_created);
+            const span = trace.span(@src(), .on_stream_created);
             defer span.deinit();
 
             span.debug("onStreamCreated triggered", .{});
@@ -406,7 +406,7 @@ pub fn Stream(T: type) type {
             maybe_lsquic_stream: ?*lsquic.lsquic_stream_t,
             maybe_stream_ctx: ?*lsquic.lsquic_stream_ctx_t,
         ) callconv(.C) void {
-            const span = trace.span(.on_stream_read);
+            const span = trace.span(@src(), .on_stream_read);
             defer span.deinit();
 
             const stream_ctx = maybe_stream_ctx orelse {
@@ -584,7 +584,7 @@ pub fn Stream(T: type) type {
 
         /// Process reading message-based data
         fn processMessageRead(stream: *Stream(T)) !void {
-            const span = trace.span(.process_message_read);
+            const span = trace.span(@src(), .process_message_read);
             defer span.deinit();
 
             // Initialize message reading if idle
@@ -762,7 +762,7 @@ pub fn Stream(T: type) type {
             maybe_lsquic_stream: ?*lsquic.lsquic_stream_t,
             maybe_stream_ctx: ?*lsquic.lsquic_stream_ctx_t,
         ) callconv(.C) void {
-            const span = trace.span(.on_stream_write);
+            const span = trace.span(@src(), .on_stream_write);
             defer span.deinit();
 
             _ = maybe_lsquic_stream; // Unused in this context
@@ -872,7 +872,7 @@ pub fn Stream(T: type) type {
             _: ?*lsquic.lsquic_stream_t,
             maybe_stream_ctx: ?*lsquic.lsquic_stream_ctx_t,
         ) callconv(.C) void {
-            const span = trace.span(.on_stream_closed);
+            const span = trace.span(@src(), .on_stream_closed);
             defer span.deinit();
             span.debug("LSQUIC stream closed callback received", .{});
 

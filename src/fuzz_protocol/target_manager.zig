@@ -43,7 +43,7 @@ pub fn FuzzTargetInThread(comptime IOExecutor: type) type {
         /// Clean up target manager resources
         pub fn join(self: *Self) void {
             if (self.target_thread) |thread| {
-                const span = trace.span(.target_manager_stop);
+                const span = trace.span(@src(), .target_manager_stop);
                 defer span.deinit();
 
                 thread.join();
@@ -55,7 +55,7 @@ pub fn FuzzTargetInThread(comptime IOExecutor: type) type {
 
         /// Start target server in background thread
         pub fn start(self: *Self) !void {
-            const span = trace.span(.target_manager_start);
+            const span = trace.span(@src(), .target_manager_start);
             defer span.deinit();
             span.debug("Starting target server at: {s}", .{self.socket_path});
 

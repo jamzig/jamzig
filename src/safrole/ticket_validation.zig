@@ -25,7 +25,7 @@ pub fn processTicketExtrinsic(
 ) Error![]types.TicketBody {
     const function_zone = tracy.ZoneN(@src(), "process_ticket_extrinsic");
     defer function_zone.End();
-    const span = trace.span(.process_ticket_extrinsic);
+    const span = trace.span(@src(), .process_ticket_extrinsic);
     defer span.deinit();
 
     span.debug("Processing ticket extrinsic", .{});
@@ -136,7 +136,7 @@ fn verifyTicketEnvelope(
     n2: types.Entropy,
     extrinsic: []const types.TicketEnvelope,
 ) ![]types.TicketBody {
-    const span = trace.span(.verify_ticket_envelope);
+    const span = trace.span(@src(), .verify_ticket_envelope);
     defer span.deinit();
 
     const tracy_zone = tracy.ZoneN(@src(), "verify_envelope");

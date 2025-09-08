@@ -10,7 +10,7 @@ const trace = @import("tracing").scoped(.network);
 
 /// Builds the ALPN identifier string for JAMSNP
 pub fn buildAlpnIdentifier(allocator: std.mem.Allocator, chain_genesis_hash: []const u8, is_builder: bool) ![]u8 {
-    const span = trace.span(.build_alpn_identifier);
+    const span = trace.span(@src(), .build_alpn_identifier);
     defer span.deinit();
     span.debug("Building ALPN identifier", .{});
     span.trace("Chain genesis hash: {s}, is_builder: {}", .{ std.fmt.fmtSliceHexLower(chain_genesis_hash), is_builder });
@@ -37,7 +37,7 @@ pub fn buildAlpnIdentifier(allocator: std.mem.Allocator, chain_genesis_hash: []c
 /// Generate an alternative name by encoding the public key in base32 with 'e' prefix
 /// Returns a newly allocated string that must be freed by the caller
 pub fn generateAltName(result: *[Base32.encodeLen(32) + 1]u8, pubkey: []const u8) void {
-    const span = trace.span(.alt_name_generation);
+    const span = trace.span(@src(), .alt_name_generation);
     defer span.deinit();
 
     // Prefix with an e
@@ -54,7 +54,7 @@ pub const X509Certificate = struct {
     /// - Have a single alternative name: DNS name "e" followed by base32 encoded public key
     /// - Use the peer's Ed25519 key
     fn create(keypair: std.crypto.sign.Ed25519.KeyPair) *ssl.X509 {
-        const span = trace.span(.create_certificate);
+        const span = trace.span(@src(), .create_certificate);
         defer span.deinit();
         span.debug("Creating X509 certificate with Ed25519 key", .{});
         span.trace("Public key: {s}", .{std.fmt.fmtSliceHexLower(&keypair.public_key.bytes)});
@@ -213,7 +213,7 @@ pub fn configureSSLContext(
     is_builder: bool,
     alpn_id: []const u8,
 ) !*ssl.SSL_CTX {
-    const span = trace.span(.configure_ssl_context);
+    const span = trace.span(@src(), .configure_ssl_context);
     defer span.deinit();
     span.debug("Configuring SSL context for JAMSNP", .{});
     span.trace("Parameters - is_client: {}, is_builder: {}, chain_genesis_hash: {s}", .{ is_client, is_builder, std.fmt.fmtSliceHexLower(chain_genesis_hash) });
@@ -249,7 +249,7 @@ pub fn configureSSLContext(
     span.trace("Configured Ed25519 as the signature algorithm", .{});
 
     // Create certificate with the required format
-    const cert_span = span.child(.create_cert);
+    const cert_span = span.child(@src(), .create_cert);
     defer cert_span.deinit();
     cert_span.trace("Creating X509 certificate", .{});
 
@@ -258,7 +258,7 @@ pub fn configureSSLContext(
     cert_span.trace("Created X509 certificate", .{});
 
     // Create EVP_PKEY from the raw private key bytes in the keypair
-    const pkey_span = span.child(.create_pkey);
+    const pkey_span = span.child(@src(), .create_pkey);
     defer pkey_span.deinit();
     pkey_span.trace("Creating EVP_PKEY from Ed25519 private key", .{});
 
@@ -296,7 +296,7 @@ pub fn configureSSLContext(
     span.trace("Verified private key matches certificate public key", .{});
 
     // Set certificate verification
-    const verify_span = span.child(.cert_verification);
+    const verify_span = span.child(@src(), .cert_verification);
     defer verify_span.deinit();
 
     if (is_client) {
@@ -312,7 +312,7 @@ pub fn configureSSLContext(
     }
 
     // Set ALPN
-    const alpn_span = span.child(.configure_alpn);
+    const alpn_span = span.child(@src(), .configure_alpn);
     defer alpn_span.deinit();
 
     alpn_span.trace("Using provided ALPN identifier: {s}", .{alpn_id});
@@ -342,7 +342,7 @@ pub fn configureSSLContext(
         // Server selects from offered protocols
         const select_cb = struct {
             pub fn callback(_: ?*ssl.SSL, out: [*c][*c]const u8, outlen: [*c]u8, in: [*c]const u8, inlen: c_uint, arg: ?*anyopaque) callconv(.C) c_int {
-                const callback_span = trace.span(.alpn_select_callback);
+                const callback_span = trace.span(@src(), .alpn_select_callback);
                 defer callback_span.deinit();
 
                 const supported_proto: [*:0]const u8 = @ptrCast(@alignCast(arg));
@@ -389,7 +389,7 @@ pub fn configureSSLContext(
 }
 
 fn ssl_info_callback(ssl_handle: ?*const ssl.SSL, where_val: c_int, ret: c_int) callconv(.C) void {
-    const span = trace.span(.ssl_info_callback);
+    const span = trace.span(@src(), .ssl_info_callback);
     defer span.deinit();
 
     // Get state string only if handle is not null (can be null in early stages)

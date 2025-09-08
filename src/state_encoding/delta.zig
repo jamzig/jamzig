@@ -11,7 +11,7 @@ const trace = @import("tracing").scoped(.codec);
 
 /// Encodes base service account data: C(255, s) ↦ a_c ⌢ E_8(a_b, a_g, a_m, a_l) ⌢ E_4(a_i)
 pub fn encodeServiceAccountBase(params: Params, account: *const ServiceAccount, writer: anytype) !void {
-    const span = trace.span(.encode_service_account_base);
+    const span = trace.span(@src(), .encode_service_account_base);
     defer span.deinit();
     span.debug("Starting service account base encoding", .{});
 
@@ -51,7 +51,7 @@ const state_dictionary = @import("../state_dictionary.zig");
 
 /// Encodes preimage lookup:  E(↕[E_4(x) | x <− t])
 pub fn encodePreimageLookup(lookup: PreimageLookup, writer: anytype) !void {
-    const span = trace.span(.encode_preimage_lookup);
+    const span = trace.span(@src(), .encode_preimage_lookup);
     defer span.deinit();
     span.debug("Starting preimage lookup encoding", .{});
 

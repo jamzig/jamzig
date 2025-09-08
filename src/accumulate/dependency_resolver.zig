@@ -57,7 +57,7 @@ pub fn DependencyResolver(comptime params: Params) type {
             reports: []types.WorkReport,
             current_slot_in_epoch: u32,
         ) !PreparedReports {
-            const span = trace.span(.prepare_reports_for_accumulation);
+            const span = trace.span(@src(), .prepare_reports_for_accumulation);
             defer span.deinit();
 
             var map_buffer = try std.ArrayList(types.WorkReportHash).initCapacity(self.allocator, 32);
@@ -116,7 +116,7 @@ pub fn DependencyResolver(comptime params: Params) type {
             queued: *Queued(WorkReportAndDeps),
             resolved_reports: []types.WorkReportHash,
         ) void {
-            const span = trace.span(.process_queue_updates);
+            const span = trace.span(@src(), .process_queue_updates);
             defer span.deinit();
 
             span.debug("Starting queue updates with {d} queued items and {d} resolved reports", .{ queued.items.len, resolved_reports.len });
@@ -165,7 +165,7 @@ pub fn DependencyResolver(comptime params: Params) type {
             queued: *Queued(WorkReportAndDeps),
             accumulatable: *Accumulatable(types.WorkReport),
         ) !void {
-            const span = trace.span(.resolve_accumulatable_reports);
+            const span = trace.span(@src(), .resolve_accumulatable_reports);
             defer span.deinit();
 
             span.debug("Starting accumulation queue processing with {d} queued items", .{queued.items.len});
@@ -177,7 +177,7 @@ pub fn DependencyResolver(comptime params: Params) type {
             // Iteratively resolve dependencies
             var iteration: usize = 0;
             while (true) {
-                const iter_span = span.child(.iteration);
+                const iter_span = span.child(@src(), .iteration);
                 defer iter_span.deinit();
                 iteration += 1;
 
@@ -222,7 +222,7 @@ pub fn DependencyResolver(comptime params: Params) type {
             accumulatable_buffer: *Accumulatable(types.WorkReport),
             queued: *Queued(WorkReportAndDeps),
         ) !PartitionResult {
-            const span = trace.span(.partition_reports);
+            const span = trace.span(@src(), .partition_reports);
             defer span.deinit();
 
             span.debug("Partitioning {d} reports into immediate and queued", .{reports.len});
@@ -261,7 +261,7 @@ pub fn DependencyResolver(comptime params: Params) type {
             queued: *Queued(WorkReportAndDeps),
             xi: *state.Xi(params.epoch_length),
         ) !FilterResult {
-            const span = trace.span(.filter_accumulated_reports);
+            const span = trace.span(@src(), .filter_accumulated_reports);
             defer span.deinit();
 
             span.debug("Filtering already accumulated reports from {d} queued items", .{queued.items.len});
@@ -285,7 +285,7 @@ pub fn DependencyResolver(comptime params: Params) type {
 
                 var deps_resolved: usize = 0;
                 {
-                    const dep_span = span.child(.check_dependencies);
+                    const dep_span = span.child(@src(), .check_dependencies);
                     defer dep_span.deinit();
 
                     const keys = queued_item.dependencies.keys();
@@ -324,7 +324,7 @@ pub fn DependencyResolver(comptime params: Params) type {
             queued: *Queued(WorkReportAndDeps),
             current_slot_in_epoch: u32,
         ) !Queued(WorkReportAndDeps) {
-            const span = trace.span(.build_pending_reports_queue);
+            const span = trace.span(@src(), .build_pending_reports_queue);
             defer span.deinit();
 
             span.debug("Building initial set of pending reports", .{});

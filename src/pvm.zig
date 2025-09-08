@@ -106,7 +106,7 @@ pub const PVM = struct {
 
     // Single step invocation
     pub fn singleStepInvocation(context: *ExecutionContext) Error!SingleStepResult {
-        const span = trace.span(.execute_step);
+        const span = trace.span(@src(), .execute_step);
         defer span.deinit();
 
         const pc_before = context.pc;
@@ -152,7 +152,7 @@ pub const PVM = struct {
     pub fn basicInvocation(
         context: *ExecutionContext,
     ) Error!BasicInvocationResult {
-        const span = trace.span(.basic_invocation);
+        const span = trace.span(@src(), .basic_invocation);
         defer span.deinit();
         while (true) {
             const step_result = try singleStepInvocation(context);
@@ -184,7 +184,7 @@ pub const PVM = struct {
 
     // Host call invocation invocation
     pub fn hostcallInvocation(context: *ExecutionContext, call_ctx: *anyopaque) Error!HostCallInvocationResult {
-        const span = trace.span(.host_call_invocation);
+        const span = trace.span(@src(), .host_call_invocation);
         defer span.deinit();
 
         switch (try basicInvocation(context)) {

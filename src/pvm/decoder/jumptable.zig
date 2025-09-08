@@ -6,7 +6,7 @@ pub const JumpTable = struct {
     indices: []u32,
 
     pub fn init(allocator: std.mem.Allocator, item_length: usize, bytes: []const u8) !JumpTable {
-        const span = trace.span(.jump_table_init);
+        const span = trace.span(@src(), .jump_table_init);
         defer span.deinit();
 
         // Length of jump table should be a multiple of item length!"

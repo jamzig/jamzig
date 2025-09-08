@@ -42,7 +42,8 @@ pub const Span = struct {
         depth = self.saved_depth;
     }
 
-    pub fn child(self: *const Span, operation: @Type(.enum_literal)) Span {
+    pub inline fn child(self: *const Span, src: std.builtin.SourceLocation, operation: @Type(.enum_literal)) Span {
+        _ = src; // Not used in regular tracing, only Tracy
         return Span.init(self.scope, @tagName(operation));
     }
 
@@ -132,7 +133,8 @@ pub const TracingScope = struct {
         };
     }
 
-    pub fn span(comptime self: *const Self, operation: @Type(.enum_literal)) Span {
+    pub inline fn span(comptime self: *const Self, src: std.builtin.SourceLocation, operation: @Type(.enum_literal)) Span {
+        _ = src; // Not used in regular tracing, only Tracy
         return Span.init(self.name, @tagName(operation));
     }
 };

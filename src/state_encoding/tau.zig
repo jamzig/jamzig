@@ -4,7 +4,7 @@ const types = @import("../types.zig");
 const trace = @import("tracing").scoped(.codec);
 
 pub fn encode(tau: types.TimeSlot, writer: anytype) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Encoding timeslot", .{});
     span.trace("Timeslot value: {d}", .{tau});

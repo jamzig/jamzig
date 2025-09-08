@@ -35,7 +35,7 @@ pub const Server = struct {
         connection_id: ConnectionId,
 
         pub fn sendData(self: *StreamHandle, data: []const u8) !void {
-            const span = trace.span(.stream_send_data);
+            const span = trace.span(@src(), .stream_send_data);
             defer span.deinit();
 
             span.debug("Stream {d}: Sending data ({d} bytes)", .{ self.stream_id, data.len });
@@ -46,7 +46,7 @@ pub const Server = struct {
         /// Send a message with length prefix to the stream.
         /// The message will be prefixed with a 4-byte little-endian u32 length.
         pub fn sendMessage(self: *StreamHandle, message: []const u8) !void {
-            const span = trace.span(.stream_send_message);
+            const span = trace.span(@src(), .stream_send_message);
             defer span.deinit();
 
             span.debug("Stream {d}: Sending message ({d} bytes)", .{ self.stream_id, message.len });
@@ -98,7 +98,7 @@ pub const Server = struct {
         }
 
         pub fn wantRead(self: *StreamHandle, want: bool) !void {
-            const span = trace.span(.stream_want_read_api);
+            const span = trace.span(@src(), .stream_want_read_api);
             defer span.deinit();
 
             span.debug("Stream {d}: Setting wantRead={}", .{ self.stream_id, want });
@@ -120,7 +120,7 @@ pub const Server = struct {
         }
 
         pub fn wantWrite(self: *StreamHandle, want: bool) !void {
-            const span = trace.span(.stream_want_write_api);
+            const span = trace.span(@src(), .stream_want_write_api);
             defer span.deinit();
 
             span.debug("Stream {d}: Setting wantWrite={}", .{ self.stream_id, want });
@@ -142,7 +142,7 @@ pub const Server = struct {
         }
 
         pub fn flush(self: *StreamHandle) !void {
-            const span = trace.span(.stream_flush_api);
+            const span = trace.span(@src(), .stream_flush_api);
             defer span.deinit();
 
             span.debug("Stream {d}: Flushing", .{self.stream_id});
@@ -163,7 +163,7 @@ pub const Server = struct {
         }
 
         pub fn shutdown(self: *StreamHandle, how: c_int) !void {
-            const span = trace.span(.stream_shutdown_api);
+            const span = trace.span(@src(), .stream_shutdown_api);
             defer span.deinit();
 
             span.debug("Stream {d}: Shutting down (how={d})", .{ self.stream_id, how });
@@ -185,7 +185,7 @@ pub const Server = struct {
         }
 
         pub fn close(self: *StreamHandle) !void {
-            const span = trace.span(.stream_close_api);
+            const span = trace.span(@src(), .stream_close_api);
             defer span.deinit();
 
             span.debug("Stream {d}: Closing", .{self.stream_id});
@@ -209,7 +209,7 @@ pub const Server = struct {
     // --- API Methods ---
 
     pub fn listen(self: *Server, address: []const u8, port: u16) !void {
-        const span = trace.span(.listen);
+        const span = trace.span(@src(), .listen);
         defer span.deinit();
 
         span.debug("Starting server listen on {s}:{d}", .{ address, port });
@@ -223,7 +223,7 @@ pub const Server = struct {
         callback: ?CommandCallback(anyerror!network.EndPoint),
         context: ?*anyopaque,
     ) !void {
-        const span = trace.span(.listen_with_callback);
+        const span = trace.span(@src(), .listen_with_callback);
         defer span.deinit();
 
         span.debug("Starting server listen with callback on {s}:{d}", .{ address, port });
@@ -235,7 +235,7 @@ pub const Server = struct {
     }
 
     pub fn disconnectClient(self: *Server, connection_id: ConnectionId) !void {
-        const span = trace.span(.disconnect_client_api);
+        const span = trace.span(@src(), .disconnect_client_api);
         defer span.deinit();
 
         span.debug("API: Disconnecting client: {}", .{connection_id});
@@ -248,7 +248,7 @@ pub const Server = struct {
         callback: ?CommandCallback(anyerror!void),
         context: ?*anyopaque,
     ) !void {
-        const span = trace.span(.disconnect_client_with_callback);
+        const span = trace.span(@src(), .disconnect_client_with_callback);
         defer span.deinit();
 
         span.debug("API: Disconnecting client with callback: {}", .{connection_id});
@@ -261,7 +261,7 @@ pub const Server = struct {
 
     /// Server initiates a stream to a client
     pub fn createStream(self: *Server, connection_id: ConnectionId) !void {
-        const span = trace.span(.create_stream_api);
+        const span = trace.span(@src(), .create_stream_api);
         defer span.deinit();
 
         span.debug("API: Creating stream for connection: {}", .{connection_id});
@@ -277,7 +277,7 @@ pub const Server = struct {
         callback: ?CommandCallback(anyerror!StreamId), // Change T to anyerror!void?
         context: ?*anyopaque,
     ) !void {
-        const span = trace.span(.create_stream_with_callback);
+        const span = trace.span(@src(), .create_stream_with_callback);
         defer span.deinit();
 
         span.debug("API: Creating stream with callback for connection: {}", .{connection_id});
@@ -289,7 +289,7 @@ pub const Server = struct {
     }
 
     pub fn shutdown(self: *Server) !void {
-        const span = trace.span(.server_shutdown);
+        const span = trace.span(@src(), .server_shutdown);
         defer span.deinit();
 
         span.debug("API: Server shutdown requested", .{});
@@ -297,7 +297,7 @@ pub const Server = struct {
     }
 
     pub fn pushCommand(self: *Server, command: ServerThread.Command) !void {
-        const span = trace.span(.push_command);
+        const span = trace.span(@src(), .push_command);
         defer span.deinit();
         span.debug("Pushing command: {s}", .{@tagName(command)});
 
@@ -312,7 +312,7 @@ pub const Server = struct {
 
     /// Tries to pop an event from the event queue without blocking.
     pub fn pollEvent(self: *Server) ?Event {
-        const span = trace.span(.poll_event);
+        const span = trace.span(@src(), .poll_event);
         defer span.deinit();
 
         const event = self.thread.event_queue.pop();
@@ -326,7 +326,7 @@ pub const Server = struct {
 
     /// Pops an event from the event queue, blocking until one is available.
     pub fn waitEvent(self: *Server) Event {
-        const span = trace.span(.wait_event);
+        const span = trace.span(@src(), .wait_event);
         defer span.deinit();
 
         span.debug("Waiting for event", .{});
@@ -337,7 +337,7 @@ pub const Server = struct {
 
     /// Pops an event from the event queue, blocking until one is available or timeout occurs.
     pub fn timedWaitEvent(self: *Server, timeout_ms: u64) ?Event {
-        const span = trace.span(.timed_wait_event);
+        const span = trace.span(@src(), .timed_wait_event);
         defer span.deinit();
 
         span.debug("Waiting for event with timeout: {d}ms", .{timeout_ms});

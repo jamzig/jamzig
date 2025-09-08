@@ -35,8 +35,8 @@ pub const TracingScope = struct {
         };
     }
 
-    pub fn span(comptime self: *const Self, operation: @Type(.enum_literal)) Span {
-        return Span.init(self.name, @tagName(operation));
+    pub inline fn span(comptime self: *const Self, src: std.builtin.SourceLocation, operation: @Type(.enum_literal)) Span {
+        return Span.init(src, self.name, @tagName(operation));
     }
 };
 
@@ -46,19 +46,19 @@ pub const Span = struct {
     tracy_zone: tracy.ZoneCtx,
     saved_depth: usize,
 
-    pub fn init(scope: []const u8, operation: [:0]const u8) Span {
+    pub inline fn init(src: std.builtin.SourceLocation, scope: []const u8, operation: [:0]const u8) Span {
         const current_depth = depth;
         depth += 1;
         return Span{
             .scope = scope,
             .operation = operation,
-            .tracy_zone = tracy.ZoneN(@src(), operation),
+            .tracy_zone = tracy.ZoneN(src, operation),
             .saved_depth = current_depth,
         };
     }
 
-    pub fn child(self: *const Span, operation: @Type(.enum_literal)) Span {
-        return Span.init(self.scope, @tagName(operation));
+    pub inline fn child(self: *const Span, src: std.builtin.SourceLocation, operation: @Type(.enum_literal)) Span {
+        return Span.init(src, self.scope, @tagName(operation));
     }
 
     pub fn deinit(self: *const Span) void {

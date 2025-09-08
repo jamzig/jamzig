@@ -29,7 +29,7 @@ pub const DeltaSnapshot = struct {
 
     /// Initialize a new DeltaSnapshot from an existing Delta state
     pub fn init(original: *const Delta) DeltaSnapshot {
-        const span = trace.span(.init);
+        const span = trace.span(@src(), .init);
         defer span.deinit();
         span.debug("Initializing DeltaSnapshot from original Delta", .{});
 
@@ -46,7 +46,7 @@ pub const DeltaSnapshot = struct {
 
     /// Free all resources used by the snapshot
     pub fn deinit(self: *DeltaSnapshot) void {
-        const span = trace.span(.deinit);
+        const span = trace.span(@src(), .deinit);
         defer span.deinit();
         span.debug("Deinitializing DeltaSnapshot", .{});
         span.trace("Modified services count: {d}", .{self.modified_services.count()});
@@ -70,7 +70,7 @@ pub const DeltaSnapshot = struct {
     /// Get a read-only reference to a service
     /// Returns null if the service doesn't exist or has been deleted
     pub fn getReadOnly(self: *const DeltaSnapshot, id: ServiceId) ?*const ServiceAccount {
-        const span = trace.span(.get_read_only);
+        const span = trace.span(@src(), .get_read_only);
         defer span.deinit();
         span.debug("Getting read-only reference for service ID: {d}", .{id});
 
@@ -101,7 +101,7 @@ pub const DeltaSnapshot = struct {
 
     /// Check if a service exists in this snapshot
     pub fn contains(self: *const DeltaSnapshot, id: ServiceId) bool {
-        const span = trace.span(.contains);
+        const span = trace.span(@src(), .contains);
         defer span.deinit();
         span.debug("Checking if service ID: {d} exists", .{id});
 
@@ -121,7 +121,7 @@ pub const DeltaSnapshot = struct {
     /// This will create a copy of the service if it exists in the original state
     /// Returns null if the service doesn't exist
     pub fn getMutable(self: *DeltaSnapshot, id: ServiceId) !?*ServiceAccount {
-        const span = trace.span(.get_mutable);
+        const span = trace.span(@src(), .get_mutable);
         defer span.deinit();
         span.debug("Getting mutable reference for service ID: {d}", .{id});
 
@@ -140,7 +140,7 @@ pub const DeltaSnapshot = struct {
 
         // Check if it exists in the original state
         if (self.original.getAccount(id)) |account| {
-            const clone_span = span.child(.clone_service);
+            const clone_span = span.child(@src(), .clone_service);
             defer clone_span.deinit();
 
             clone_span.debug("Creating copy from original state", .{});
@@ -162,7 +162,7 @@ pub const DeltaSnapshot = struct {
 
     /// Create a new service in this snapshot
     pub fn createService(self: *DeltaSnapshot, id: ServiceId) !*ServiceAccount {
-        const span = trace.span(.create_service);
+        const span = trace.span(@src(), .create_service);
         defer span.deinit();
         span.debug("Creating new service with ID: {d}", .{id});
 
@@ -191,7 +191,7 @@ pub const DeltaSnapshot = struct {
 
     /// Mark a service for deletion
     pub fn removeService(self: *DeltaSnapshot, id: ServiceId) !bool {
-        const span = trace.span(.remove_service);
+        const span = trace.span(@src(), .remove_service);
         defer span.deinit();
         span.debug("Marking service for deletion, ID: {d}", .{id});
 
@@ -215,7 +215,7 @@ pub const DeltaSnapshot = struct {
 
     /// Get the set of all service IDs that have been modified or deleted
     pub fn getChangedServiceIds(self: *const DeltaSnapshot) ![]ServiceId {
-        const span = trace.span(.get_changed_service_ids);
+        const span = trace.span(@src(), .get_changed_service_ids);
         defer span.deinit();
         span.debug("Getting list of changed service IDs", .{});
 
@@ -249,7 +249,7 @@ pub const DeltaSnapshot = struct {
 
     /// Check if the snapshot has any changes
     pub fn hasChanges(self: *const DeltaSnapshot) bool {
-        const span = trace.span(.has_changes);
+        const span = trace.span(@src(), .has_changes);
         defer span.deinit();
 
         const has_modified = self.modified_services.count() > 0;
@@ -264,7 +264,7 @@ pub const DeltaSnapshot = struct {
 
     /// Apply all changes from this snapshot to the destination Delta
     pub fn commit(self: *DeltaSnapshot) !void {
-        const span = trace.span(.commit);
+        const span = trace.span(@src(), .commit);
         defer span.deinit();
         span.debug("Committing changes to original Delta", .{});
         span.trace("Modified services: {d}, deleted services: {d}", .{ self.modified_services.count(), self.deleted_services.count() });
@@ -273,7 +273,7 @@ pub const DeltaSnapshot = struct {
 
         // First handle deleted services
         {
-            const delete_span = span.child(.handle_deletions);
+            const delete_span = span.child(@src(), .handle_deletions);
             defer delete_span.deinit();
             delete_span.debug("Processing {d} service deletions", .{self.deleted_services.count()});
 
@@ -291,7 +291,7 @@ pub const DeltaSnapshot = struct {
 
         // Then apply modified services
         {
-            const modify_span = span.child(.handle_modifications);
+            const modify_span = span.child(@src(), .handle_modifications);
             defer modify_span.deinit();
             modify_span.debug("Processing {d} service modifications", .{self.modified_services.count()});
 
@@ -326,7 +326,7 @@ pub const DeltaSnapshot = struct {
 
     /// Create a new DeltaSnapshot from this DeltaSnapshot (used for checkpoints)
     pub fn checkpoint(self: *const DeltaSnapshot) !DeltaSnapshot {
-        const span = trace.span(.checkpoint);
+        const span = trace.span(@src(), .checkpoint);
         defer span.deinit();
         span.debug("Creating checkpoint from DeltaSnapshot", .{});
 
@@ -335,7 +335,7 @@ pub const DeltaSnapshot = struct {
 
         // Copy all modified services
         {
-            const copy_span = span.child(.copy_modified);
+            const copy_span = span.child(@src(), .copy_modified);
             defer copy_span.deinit();
             copy_span.debug("Copying {d} modified services", .{self.modified_services.count()});
 
@@ -353,7 +353,7 @@ pub const DeltaSnapshot = struct {
 
         // Copy all deleted services
         {
-            const copy_span = span.child(.copy_deleted);
+            const copy_span = span.child(@src(), .copy_deleted);
             defer copy_span.deinit();
             copy_span.debug("Copying {d} deleted services", .{self.deleted_services.count()});
 

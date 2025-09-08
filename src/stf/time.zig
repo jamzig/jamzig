@@ -14,7 +14,7 @@ pub fn transition(
     stx: *StateTransition(params),
     header_slot: types.TimeSlot,
 ) !void {
-    const span = trace.span(.transition_time);
+    const span = trace.span(@src(), .transition_time);
     defer span.deinit();
     span.debug("Starting time transition", .{});
 

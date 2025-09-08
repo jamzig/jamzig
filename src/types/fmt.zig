@@ -28,7 +28,7 @@ pub fn IndentedWriter(comptime T: type) type {
         }
 
         pub fn indentedWrite(self: *Self, bytes: []const u8) Error!usize {
-            const span = trace.span(.indented_write);
+            const span = trace.span(@src(), .indented_write);
             defer span.deinit();
             span.debug("Writing {d} bytes with indent level {d}", .{ bytes.len, self.indent_level });
 
@@ -58,14 +58,14 @@ pub fn IndentedWriter(comptime T: type) type {
         }
 
         pub fn indent(self: *Self) void {
-            const span = trace.span(.indent);
+            const span = trace.span(@src(), .indent);
             defer span.deinit();
             self.indent_level += 1;
             span.debug("Increased indent to {d}", .{self.indent_level});
         }
 
         pub fn outdent(self: *Self) void {
-            const span = trace.span(.outdent);
+            const span = trace.span(@src(), .outdent);
             defer span.deinit();
             if (self.indent_level > 0) {
                 self.indent_level -= 1;
@@ -86,7 +86,7 @@ pub fn isHexFormattedType(comptime T: type) bool {
 }
 
 pub fn formatHex(value: anytype, writer: anytype) !void {
-    const span = trace.span(.format_hex);
+    const span = trace.span(@src(), .format_hex);
     defer span.deinit();
     span.debug("Formatting hex value of type {s} (len: {d})", .{ @typeName(@TypeOf(value)), value.len });
 
@@ -222,7 +222,7 @@ fn formatContainer(comptime T: type, value: anytype, writer: anytype, options: O
                     @panic("Need and allocator in options to be able to sort hash fields");
                 }
 
-                const span = trace.span(.sort_hash_keys);
+                const span = trace.span(@src(), .sort_hash_keys);
                 defer span.deinit();
                 span.debug("Sorting hash map keys", .{});
 
@@ -316,7 +316,7 @@ fn formatContainer(comptime T: type, value: anytype, writer: anytype, options: O
 }
 
 pub fn formatValue(value: anytype, writer: anytype, options: Options) !void {
-    const span = trace.span(.format_value);
+    const span = trace.span(@src(), .format_value);
     defer span.deinit();
 
     const T = @TypeOf(value);
@@ -332,7 +332,7 @@ pub fn formatValue(value: anytype, writer: anytype, options: Options) !void {
 
     switch (type_info) {
         .@"struct" => |info| {
-            const struct_span = span.child(.struct_format);
+            const struct_span = span.child(@src(), .struct_format);
             defer struct_span.deinit();
             struct_span.debug("Formatting struct with {d} fields", .{info.fields.len});
 
@@ -360,7 +360,7 @@ pub fn formatValue(value: anytype, writer: anytype, options: Options) !void {
             writer.context.outdent();
         },
         .@"union" => |_| {
-            const union_span = span.child(.union_format);
+            const union_span = span.child(@src(), .union_format);
             defer union_span.deinit();
             union_span.debug("Formatting union of type {s}", .{@typeName(T)});
 
@@ -384,7 +384,7 @@ pub fn formatValue(value: anytype, writer: anytype, options: Options) !void {
             writer.context.outdent();
         },
         .pointer => |ptr| {
-            const ptr_span = span.child(.pointer_format);
+            const ptr_span = span.child(@src(), .pointer_format);
             defer ptr_span.deinit();
             ptr_span.debug("Formatting pointer of type {s}", .{@typeName(T)});
 
@@ -434,7 +434,7 @@ pub fn formatValue(value: anytype, writer: anytype, options: Options) !void {
             }
         },
         .array => |arr| {
-            const arr_span = span.child(.array_format);
+            const arr_span = span.child(@src(), .array_format);
             defer arr_span.deinit();
             arr_span.debug("Formatting array of type {s}[{d}]", .{ @typeName(arr.child), arr.len });
 
@@ -454,7 +454,7 @@ pub fn formatValue(value: anytype, writer: anytype, options: Options) !void {
             }
         },
         .optional => |_| {
-            const opt_span = span.child(.optional_format);
+            const opt_span = span.child(@src(), .optional_format);
             defer opt_span.deinit();
             opt_span.debug("Formatting optional of type {s}", .{@typeName(T)});
 

@@ -47,7 +47,7 @@ pub fn invoke(
     gas_limit: types.Gas,
     accumulation_operands: []const AccumulationOperand, // O
 ) !AccumulationResult(params) {
-    const span = trace.span(.invoke);
+    const span = trace.span(@src(), .invoke);
     defer span.deinit();
     span.debug("Starting accumulation invocation for service {d}", .{service_id});
     span.debug("Time slot: {d}, Gas limit: {d}, Operand count: {d}", .{ context.time.current_slot, gas_limit, accumulation_operands.len });
@@ -147,7 +147,7 @@ pub fn invoke(
     span.debug("Retrieved service code with metadata, total length: {d} bytes", .{code_preimage.len});
 
     span.debug("Starting PVM machine invocation", .{});
-    const pvm_span = span.child(.pvm_invocation);
+    const pvm_span = span.child(@src(), .pvm_invocation);
     defer pvm_span.deinit();
 
     // Accumulation Host Function Context Domains

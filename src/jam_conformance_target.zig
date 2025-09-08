@@ -44,7 +44,7 @@ fn showHelp(params: anytype) !void {
 }
 
 pub fn main() !void {
-    const span = trace.span(.main);
+    const span = trace.span(@src(), .main);
     defer span.deinit();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

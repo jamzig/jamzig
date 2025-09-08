@@ -36,8 +36,9 @@ pub const TracingScope = struct {
         };
     }
 
-    pub fn span(comptime self: *const Self, operation: @Type(.enum_literal)) Span {
+    pub inline fn span(comptime self: *const Self, src: std.builtin.SourceLocation, operation: @Type(.enum_literal)) Span {
         _ = self;
+        _ = src;
         _ = operation;
         return Span{};
     }
@@ -55,8 +56,9 @@ pub const Span = struct {
         return Self{};
     }
 
-    pub fn child(self: *const Self, operation: @Type(.enum_literal)) Span {
+    pub inline fn child(self: *const Self, src: std.builtin.SourceLocation, operation: @Type(.enum_literal)) Span {
         _ = self;
+        _ = src;
         _ = operation;
         return Span{};
     }

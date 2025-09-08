@@ -28,7 +28,7 @@ pub fn decode(
     context: *DecodingContext,
     reader: anytype,
 ) !Phi(params.core_count, params.max_authorizations_queue_items) {
-    const span = trace.span(.decode);
+    const span = trace.span(@src(), .decode);
     defer span.deinit();
 
     span.debug("starting phi state decoding for {d} cores with queue length {d}", .{ params.core_count, params.max_authorizations_queue_items });

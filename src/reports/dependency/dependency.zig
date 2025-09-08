@@ -18,7 +18,7 @@ pub fn validateDependencyCount(
     comptime params: @import("../../jam_params.zig").Params,
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.check_dependencies);
+    const span = trace.span(@src(), .check_dependencies);
     defer span.deinit();
     span.debug("Checking total dependencies", .{});
 
@@ -43,7 +43,7 @@ pub fn validatePrerequisites(
     guarantee: types.ReportGuarantee,
     guarantees: types.GuaranteesExtrinsic,
 ) !void {
-    const span = trace.span(.validate_prerequisites);
+    const span = trace.span(@src(), .validate_prerequisites);
     defer span.deinit();
 
     span.debug("Validating {d} prerequisites", .{guarantee.report.context.prerequisites.len});
@@ -51,7 +51,7 @@ pub fn validatePrerequisites(
     const beta: *const state.Beta = try stx.ensure(.beta_prime);
 
     for (guarantee.report.context.prerequisites, 0..) |prereq, i| {
-        const single_prereq_span = span.child(.validate_prerequisite);
+        const single_prereq_span = span.child(@src(), .validate_prerequisite);
         defer single_prereq_span.deinit();
 
         single_prereq_span.debug("Checking prerequisite {d}: {s}", .{ i, std.fmt.fmtSliceHexLower(&prereq) });
@@ -60,7 +60,7 @@ pub fn validatePrerequisites(
 
         // First check in recent blocks
         {
-            const blocks_span = single_prereq_span.child(.check_recent_blocks);
+            const blocks_span = single_prereq_span.child(@src(), .check_recent_blocks);
             defer blocks_span.deinit();
 
             blocks_span.debug("Searching in {d} recent blocks", .{beta.recent_history.blocks.items.len});
@@ -86,7 +86,7 @@ pub fn validatePrerequisites(
 
         // If not found in blocks, check current guarantees
         if (!found_prereq) {
-            const guarantees_span = single_prereq_span.child(.check_current_guarantees);
+            const guarantees_span = single_prereq_span.child(@src(), .check_current_guarantees);
             defer guarantees_span.deinit();
 
             guarantees_span.debug("Searching in {d} current guarantees", .{guarantees.data.len});
@@ -124,7 +124,7 @@ pub fn validateSegmentRootLookup(
     guarantee: types.ReportGuarantee,
     guarantees: types.GuaranteesExtrinsic,
 ) !void {
-    const span = trace.span(.validate_segment_roots);
+    const span = trace.span(@src(), .validate_segment_roots);
     defer span.deinit();
 
     span.debug("Validating {d} segment root lookups", .{guarantee.report.segment_root_lookup.len});
@@ -132,7 +132,7 @@ pub fn validateSegmentRootLookup(
     const beta: *const state.Beta = try stx.ensure(.beta_prime);
 
     for (guarantee.report.segment_root_lookup, 0..) |segment, i| {
-        const lookup_span = span.child(.validate_segment_lookup);
+        const lookup_span = span.child(@src(), .validate_segment_lookup);
         defer lookup_span.deinit();
 
         lookup_span.debug("Validating segment lookup {d}: package hash {s}", .{
@@ -148,7 +148,7 @@ pub fn validateSegmentRootLookup(
 
         // First check recent blocks
         {
-            const blocks_span = lookup_span.child(.check_recent_blocks);
+            const blocks_span = lookup_span.child(@src(), .check_recent_blocks);
             defer blocks_span.deinit();
 
             blocks_span.debug("Searching in {d} recent blocks", .{beta.recent_history.blocks.items.len});
@@ -196,7 +196,7 @@ pub fn validateSegmentRootLookup(
 
         // If not found in blocks, check current guarantees
         if (!found_package) {
-            const guarantees_span = lookup_span.child(.check_current_guarantees);
+            const guarantees_span = lookup_span.child(@src(), .check_current_guarantees);
             defer guarantees_span.deinit();
 
             guarantees_span.debug("Searching in {d} current guarantees", .{guarantees.data.len});

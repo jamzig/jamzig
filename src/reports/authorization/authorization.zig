@@ -17,7 +17,7 @@ pub fn validateCoreAuthorization(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_authorization);
+    const span = trace.span(@src(), .validate_authorization);
     defer span.deinit();
 
     span.debug("Checking authorization for core {d} with hash {s}", .{

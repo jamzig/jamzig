@@ -8,7 +8,7 @@ const RestartBehavior = @import("../target.zig").RestartBehavior;
 const trace = @import("tracing").scoped(.fuzz_protocol);
 
 test "target_manager_initialization" {
-    const span = trace.span(.test_target_manager_init);
+    const span = trace.span(@src(), .test_target_manager_init);
     defer span.deinit();
 
     const allocator = testing.allocator;

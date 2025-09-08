@@ -17,7 +17,7 @@ pub fn convertToAlpha(
     _: std.mem.Allocator,
     test_state: jamtestvectors.State(params),
 ) !state.Alpha(params.core_count, params.max_authorizations_pool_items) {
-    const span = trace.span(.convert_to_alpha);
+    const span = trace.span(@src(), .convert_to_alpha);
     defer span.deinit();
     span.debug("Converting test state to Alpha instance", .{});
 
@@ -46,7 +46,7 @@ pub fn convertToPhi(
     allocator: std.mem.Allocator,
     test_state: jamtestvectors.State(params),
 ) !state.Phi(params.core_count, params.max_authorizations_queue_items) {
-    const span = trace.span(.convert_to_phi);
+    const span = trace.span(@src(), .convert_to_phi);
     defer span.deinit();
     span.debug("Converting test state to Phi instance", .{});
 
@@ -72,7 +72,7 @@ pub fn convertToAuthorizerList(
     allocator: std.mem.Allocator,
     input: jamtestvectors.Input,
 ) ![]@import("../authorizations.zig").CoreAuthorizer {
-    const span = trace.span(.convert_to_authorizers);
+    const span = trace.span(@src(), .convert_to_authorizers);
     defer span.deinit();
     span.debug("Converting input to authorizer list ({d} items)", .{input.auths.len});
 
@@ -109,7 +109,7 @@ pub fn buildTransientFromTestState(
     allocator: std.mem.Allocator,
     test_state: jamtestvectors.State(params),
 ) !state.JamState(params) {
-    const span = trace.span(.build_transient);
+    const span = trace.span(@src(), .build_transient);
     defer span.deinit();
     span.debug("Building complete transient state from test data", .{});
 

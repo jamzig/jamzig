@@ -31,7 +31,7 @@ pub fn processAuthorizations(
         std.debug.assert(params.max_authorizations_queue_items > 0);
     }
 
-    const span = trace.span(.process_authorizations);
+    const span = trace.span(@src(), .process_authorizations);
     defer span.deinit();
 
     span.debug("Processing authorizations for slot {d}", .{stx.time.current_slot});
@@ -63,12 +63,12 @@ fn processInputAuthorizers(
     // Preconditions
     std.debug.assert(authorizers.len <= params.core_count);
 
-    const process_span = parent_span.child(.process_authorizers);
+    const process_span = parent_span.child(@src(), .process_authorizers);
     defer process_span.deinit();
     process_span.debug("Processing {d} input authorizers", .{authorizers.len});
 
     for (authorizers, 0..) |authorizer, i| {
-        const auth_span = process_span.child(.authorizer);
+        const auth_span = process_span.child(@src(), .authorizer);
         defer auth_span.deinit();
 
         const core = authorizer.core;
@@ -90,7 +90,7 @@ fn processInputAuthorizers(
         if (is_authorized) {
             auth_span.debug("Auth already in pool for core {d}, removing", .{core});
 
-            const remove_span = auth_span.child(.remove_authorizer);
+            const remove_span = auth_span.child(@src(), .remove_authorizer);
             defer remove_span.deinit();
             alpha_prime.removeAuthorizer(core, auth_hash);
             remove_span.debug("Successfully removed authorizer from pool", .{});
@@ -116,7 +116,7 @@ fn processAuthorizationRotation(
         std.debug.assert(params.core_count > 0);
     }
 
-    const authorization_rotation_span = parent_span.child(.rotation);
+    const authorization_rotation_span = parent_span.child(@src(), .rotation);
     defer authorization_rotation_span.deinit();
     authorization_rotation_span.debug("Processing authorization rotation across {d} cores", .{params.core_count});
 
@@ -144,7 +144,7 @@ fn rotateAuthorizationForCore(
     // Preconditions
     std.debug.assert(core_index < params.core_count);
 
-    const core_span = parent_span.child(.core);
+    const core_span = parent_span.child(@src(), .core);
     defer core_span.deinit();
     core_span.debug("Processing core {d}", .{core_index});
 
@@ -159,7 +159,7 @@ fn rotateAuthorizationForCore(
     const selected_auth = queue_items[auth_index];
     core_span.debug("Adding auth from queue to pool: {s}", .{std.fmt.fmtSliceHexLower(&selected_auth)});
 
-    const add_span = core_span.child(.add_authorizer);
+    const add_span = core_span.child(@src(), .add_authorizer);
     defer add_span.deinit();
 
     try addAuthorizerToPool(params, alpha_prime, core_index, selected_auth);
@@ -213,7 +213,7 @@ pub fn verifyAuthorizationsExtrinsicPre(
     // Preconditions
     std.debug.assert(authorizers.len <= params.core_count);
 
-    const span = trace.span(.verify_pre);
+    const span = trace.span(@src(), .verify_pre);
     defer span.deinit();
 
     span.debug("Pre-verification of authorizations for slot {d}", .{slot});
@@ -245,7 +245,7 @@ pub fn verifyAuthorizationsExtrinsicPost(
     std.debug.assert(alpha_prime.pools.len == params.core_count);
     std.debug.assert(phi_prime.queue.len == params.core_count);
 
-    const span = trace.span(.verify_post);
+    const span = trace.span(@src(), .verify_post);
     defer span.deinit();
 
     span.debug("Post-verification of authorizations", .{});

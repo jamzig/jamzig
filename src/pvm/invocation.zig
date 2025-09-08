@@ -35,7 +35,7 @@ pub fn machineInvocation(
     host_calls_config: *const PVM.HostCallsConfig,
     host_call_ctx: *anyopaque,
 ) PVM.Error!MachineInvocationResult {
-    const span = trace.span(.machine_invocation);
+    const span = trace.span(@src(), .machine_invocation);
     defer span.deinit();
     span.debug("Starting machine invocation with {d} gas", .{gas});
 

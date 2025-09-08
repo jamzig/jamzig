@@ -22,7 +22,7 @@ pub fn StreamHandle(T: type) type {
 
         // Helper function to push a command to the mailbox and notify the thread
         fn pushCommand(self: *@This(), command: T.Command) !void {
-            const span = trace.span(.push_command);
+            const span = trace.span(@src(), .push_command);
             defer span.deinit();
 
             _ = self.thread.mailbox.push(command, .{ .instant = {} });
@@ -32,7 +32,7 @@ pub fn StreamHandle(T: type) type {
         }
 
         pub fn sendData(self: *@This(), data: []const u8) !void {
-            const span = trace.span(.send_data);
+            const span = trace.span(@src(), .send_data);
             defer span.deinit();
             span.debug("Sending data to stream", .{});
             span.trace("Connection ID: {d}, Stream ID: {d}, Data length: {d}", .{ self.connection_id, self.stream_id, data.len });
@@ -44,7 +44,7 @@ pub fn StreamHandle(T: type) type {
         /// Send a message with length prefix to the stream.
         /// The message will be prefixed with a 4-byte little-endian u32 length.
         pub fn sendMessage(self: *@This(), message: []const u8) !void {
-            const span = trace.span(.send_message);
+            const span = trace.span(@src(), .send_message);
             defer span.deinit();
             span.debug("Sending message to stream", .{});
             span.trace("Connection ID: {}, Stream ID: {}, Message length: {d}", .{ self.connection_id, self.stream_id, message.len });
@@ -60,7 +60,7 @@ pub fn StreamHandle(T: type) type {
             callback: ?CommandCallback(anyerror!void),
             context: ?*anyopaque,
         ) !void {
-            const span = trace.span(.send_message_with_callback);
+            const span = trace.span(@src(), .send_message_with_callback);
             defer span.deinit();
             span.debug("Sending message with callback to stream", .{});
             span.trace("Connection ID: {}, Stream ID: {}, Message length: {d}", .{ self.connection_id, self.stream_id, message.len });
@@ -88,7 +88,7 @@ pub fn StreamHandle(T: type) type {
             callback: ?CommandCallback(anyerror!void),
             context: ?*anyopaque,
         ) !void {
-            const span = trace.span(.send_data_with_callback);
+            const span = trace.span(@src(), .send_data_with_callback);
             defer span.deinit();
             span.debug("Sending data with callback to stream", .{});
             span.trace("Connection ID: {d}, Stream ID: {d}, Data length: {d}", .{ self.connection_id, self.stream_id, data.len });
@@ -112,7 +112,7 @@ pub fn StreamHandle(T: type) type {
         }
 
         pub fn wantRead(self: *@This(), want: bool) !void {
-            const span = trace.span(.want_read);
+            const span = trace.span(@src(), .want_read);
             defer span.deinit();
             span.debug("Setting want_read={} for stream", .{want});
             span.trace("Connection ID: {d}, Stream ID: {d}", .{ self.connection_id, self.stream_id });
@@ -126,7 +126,7 @@ pub fn StreamHandle(T: type) type {
             callback: ?CommandCallback(anyerror!void),
             context: ?*anyopaque,
         ) !void {
-            const span = trace.span(.want_read_with_callback);
+            const span = trace.span(@src(), .want_read_with_callback);
             defer span.deinit();
             span.debug("Setting want_read={} with callback for stream", .{want});
             span.trace("Connection ID: {d}, Stream ID: {d}, Has callback: {}", .{ self.connection_id, self.stream_id, callback != null });
@@ -147,7 +147,7 @@ pub fn StreamHandle(T: type) type {
         }
 
         pub fn wantWrite(self: *@This(), want: bool) !void {
-            const span = trace.span(.want_write);
+            const span = trace.span(@src(), .want_write);
             defer span.deinit();
             span.debug("Setting want_write={} for stream", .{want});
             span.trace("Connection ID: {d}, Stream ID: {d}", .{ self.connection_id, self.stream_id });
@@ -161,7 +161,7 @@ pub fn StreamHandle(T: type) type {
             callback: ?CommandCallback(void),
             context: ?*anyopaque,
         ) !void {
-            const span = trace.span(.want_write_with_callback);
+            const span = trace.span(@src(), .want_write_with_callback);
             defer span.deinit();
             span.debug("Setting want_write={} with callback for stream", .{want});
             span.trace("Connection ID: {d}, Stream ID: {d}, Has callback: {}", .{ self.connection_id, self.stream_id, callback != null });
@@ -182,7 +182,7 @@ pub fn StreamHandle(T: type) type {
         }
 
         pub fn flush(self: *@This()) !void {
-            const span = trace.span(.flush);
+            const span = trace.span(@src(), .flush);
             defer span.deinit();
             span.debug("Flushing stream", .{});
             span.trace("Connection ID: {d}, Stream ID: {d}", .{ self.connection_id, self.stream_id });
@@ -195,7 +195,7 @@ pub fn StreamHandle(T: type) type {
             callback: ?CommandCallback(void),
             context: ?*anyopaque,
         ) !void {
-            const span = trace.span(.flush_with_callback);
+            const span = trace.span(@src(), .flush_with_callback);
             defer span.deinit();
             span.debug("Flushing stream with callback", .{});
             span.trace("Connection ID: {d}, Stream ID: {d}, Has callback: {}", .{ self.connection_id, self.stream_id, callback != null });
@@ -215,7 +215,7 @@ pub fn StreamHandle(T: type) type {
         }
 
         pub fn shutdown(self: *@This(), how: c_int) !void {
-            const span = trace.span(.shutdown);
+            const span = trace.span(@src(), .shutdown);
             defer span.deinit();
             span.debug("Shutting down stream", .{});
             span.trace("Connection ID: {d}, Stream ID: {d}, How: {d}", .{ self.connection_id, self.stream_id, how });
@@ -229,7 +229,7 @@ pub fn StreamHandle(T: type) type {
             callback: ?CommandCallback(void),
             context: ?*anyopaque,
         ) !void {
-            const span = trace.span(.shutdown_with_callback);
+            const span = trace.span(@src(), .shutdown_with_callback);
             defer span.deinit();
             span.debug("Shutting down stream with callback", .{});
             span.trace("Connection ID: {d}, Stream ID: {d}, How: {d}, Has callback: {}", .{ self.connection_id, self.stream_id, how, callback != null });
@@ -250,7 +250,7 @@ pub fn StreamHandle(T: type) type {
         }
 
         pub fn close(self: *@This()) !void {
-            const span = trace.span(.close);
+            const span = trace.span(@src(), .close);
             defer span.deinit();
             span.debug("Closing stream", .{});
             span.trace("Connection ID: {d}, Stream ID: {d}", .{ self.connection_id, self.stream_id });
@@ -263,7 +263,7 @@ pub fn StreamHandle(T: type) type {
             callback: ?CommandCallback(void),
             context: ?*anyopaque,
         ) !void {
-            const span = trace.span(.close_with_callback);
+            const span = trace.span(@src(), .close_with_callback);
             defer span.deinit();
             span.debug("Closing stream with callback", .{});
             span.trace("Connection ID: {d}, Stream ID: {d}, Has callback: {}", .{ self.connection_id, self.stream_id, callback != null });

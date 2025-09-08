@@ -27,7 +27,7 @@ pub fn stateTransition(
     current_state: *const JamState(params),
     block: *const Block,
 ) !*StateTransition(params) {
-    const span = trace.span(.state_transition);
+    const span = trace.span(@src(), .state_transition);
     defer span.deinit();
 
     const tracy_zone = tracy.ZoneN(@src(), "stf_state_transition");

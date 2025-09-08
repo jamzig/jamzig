@@ -20,7 +20,7 @@ const trace = @import("tracing").scoped(.fuzz_protocol);
 const FUZZ_PARAMS = jam_params.TINY_PARAMS;
 
 test "fuzzer_initialization" {
-    const span = trace.span(.test_fuzzer_init);
+    const span = trace.span(@src(), .test_fuzzer_init);
     defer span.deinit();
 
     const allocator = testing.allocator;
@@ -39,7 +39,7 @@ test "fuzzer_initialization" {
 }
 
 test "fuzzer_basic_cycle" {
-    const span = trace.span(.fuzzer_basic_cycle_test);
+    const span = trace.span(@src(), .fuzzer_basic_cycle_test);
     defer span.deinit();
 
     const allocator = testing.allocator;

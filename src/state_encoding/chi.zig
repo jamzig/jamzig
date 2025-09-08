@@ -13,7 +13,7 @@ pub fn encode(
     chi: *const state.Chi(params.core_count),
     writer: anytype,
 ) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting Chi state encoding", .{});
 
@@ -39,7 +39,7 @@ pub fn encode(
     // Encode X_g with ordered keys
     // TODO: this could be a method in encoder, map encoder which orders
     // the keys
-    const map_span = span.child(.map_encode);
+    const map_span = span.child(@src(), .map_encode);
     defer map_span.deinit();
     map_span.debug("Encoding always_accumulate map", .{});
 
@@ -61,7 +61,7 @@ pub fn encode(
 
     for (keys.items) |key| {
         const value = chi.always_accumulate.get(key).?;
-        const entry_span = map_span.child(.entry);
+        const entry_span = map_span.child(@src(), .entry);
         defer entry_span.deinit();
         entry_span.debug("Encoding map entry", .{});
         entry_span.trace("key: {d}, value: {d}", .{ key, value });

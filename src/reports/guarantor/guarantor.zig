@@ -19,7 +19,7 @@ pub const Error = error{
 
 /// Validates that guarantors are sorted and unique
 pub fn validateSortedAndUnique(guarantee: types.ReportGuarantee) !void {
-    const span = trace.span(.signatures_sorted_unique);
+    const span = trace.span(@src(), .signatures_sorted_unique);
     defer span.deinit();
 
     span.debug("Validating {d} guarantor signatures are sorted and unique", .{guarantee.signatures.len});
@@ -42,7 +42,7 @@ pub fn validateSortedAndUnique(guarantee: types.ReportGuarantee) !void {
 
 /// Validates signature count is within acceptable range
 pub fn validateSignatureCount(guarantee: types.ReportGuarantee) !void {
-    const span = trace.span(.validate_signature_count);
+    const span = trace.span(@src(), .validate_signature_count);
     defer span.deinit();
 
     span.debug("Checking signature count: {d} must be either 2 or 3", .{guarantee.signatures.len});
@@ -68,7 +68,7 @@ pub fn validateGuarantorAssignmentsWithPrebuilt(
     assignments: *const @import("../../guarantor_assignments.zig").GuarantorAssignmentResult,
 ) !void {
     _ = params; // Currently unused but kept for consistency
-    const span = trace.span(.validate_assignments_prebuilt);
+    const span = trace.span(@src(), .validate_assignments_prebuilt);
     defer span.deinit();
     span.debug("Validating guarantor assignments for {d} signatures using pre-built assignments", .{guarantee.signatures.len});
 

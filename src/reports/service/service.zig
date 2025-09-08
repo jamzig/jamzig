@@ -19,13 +19,13 @@ pub fn validateServices(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_services);
+    const span = trace.span(@src(), .validate_services);
     defer span.deinit();
     span.debug("Validating {d} service results", .{guarantee.report.results.len});
 
     const delta: *const state.Delta = try stx.ensure(.delta);
     for (guarantee.report.results, 0..) |result, i| {
-        const result_span = span.child(.validate_service_result);
+        const result_span = span.child(@src(), .validate_service_result);
         defer result_span.deinit();
 
         result_span.debug("Validating service ID {d} for result {d}", .{ result.service_id, i });

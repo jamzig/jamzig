@@ -24,7 +24,7 @@ pub fn GasCalculator(comptime params: Params) type {
         /// let g = max(G_T, G_A ⋅ C + ∑_{x∈V(χ_g)}(x))
         pub fn calculateGasLimit(self: Self, chi: *state.Chi(params.core_count)) u64 {
             _ = self;
-            const span = trace.span(.calculate_gas_limit);
+            const span = trace.span(@src(), .calculate_gas_limit);
             defer span.deinit();
 
             // Start with the total gas allocation for accumulation
@@ -70,7 +70,7 @@ pub fn GasCalculator(comptime params: Params) type {
             work_reports: []const types.WorkReport,
         ) !std.AutoHashMap(types.ServiceId, u64) {
             _ = self;
-            const span = trace.span(.calculate_service_gas_limits);
+            const span = trace.span(@src(), .calculate_service_gas_limits);
             defer span.deinit();
 
             var service_gas = std.AutoHashMap(types.ServiceId, u64).init(span.allocator);

@@ -14,7 +14,7 @@ pub fn validateGasLimits(
     comptime params: @import("../../jam_params.zig").Params,
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_gas);
+    const span = trace.span(@src(), .validate_gas);
     defer span.deinit();
     span.debug("Validating gas limits for {d} results", .{guarantee.report.results.len});
 

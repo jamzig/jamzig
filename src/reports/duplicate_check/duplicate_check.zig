@@ -18,7 +18,7 @@ pub fn checkDuplicatePackageInBatch(
     comptime params: @import("../../jam_params.zig").Params,
     guarantees: types.GuaranteesExtrinsic,
 ) !void {
-    const span = trace.span(.check_duplicate_package_in_batch);
+    const span = trace.span(@src(), .check_duplicate_package_in_batch);
     defer span.deinit();
 
     span.debug("Starting duplicate check for {d} guarantees", .{guarantees.data.len});
@@ -61,7 +61,7 @@ pub fn checkDuplicatePackageInRecentHistory(
     guarantee: types.ReportGuarantee,
     guarantees: types.GuaranteesExtrinsic,
 ) !void {
-    const span = trace.span(.check_duplicate_package_in_recent_history);
+    const span = trace.span(@src(), .check_duplicate_package_in_recent_history);
     defer span.deinit();
 
     const package_hash = guarantee.report.package_spec.hash;
@@ -73,7 +73,7 @@ pub fn checkDuplicatePackageInRecentHistory(
     const blocks = beta.recent_history.blocks;
     span.debug("Comparing against {d} blocks", .{blocks.items.len});
     for (blocks.items, 0..) |block, block_idx| {
-        const block_span = span.child(.check_block);
+        const block_span = span.child(@src(), .check_block);
         defer block_span.deinit();
 
         block_span.debug("Checking block {d} with {d} reports", .{

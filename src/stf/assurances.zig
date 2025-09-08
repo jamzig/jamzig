@@ -30,7 +30,7 @@ pub fn transition(
     extrinsic: types.AssurancesExtrinsic,
     parent_hash: types.HeaderHash,
 ) !AssuranceResult {
-    const span = trace.span(.assurances);
+    const span = trace.span(@src(), .assurances);
     defer span.deinit();
 
     const kappa = try stx.ensure(.kappa);

@@ -111,7 +111,7 @@ pub fn processDisputesExtrinsic(
     std.debug.assert(core_count > 0);
     std.debug.assert(validator_count > 0);
 
-    const span = trace.span(.process_disputes);
+    const span = trace.span(@src(), .process_disputes);
     defer span.deinit();
     span.debug("Processing disputes extrinsic with {d} validators", .{validator_count});
     span.debug("Verdicts count: {d}, Culprits: {d}, Faults: {d}", .{
@@ -122,7 +122,7 @@ pub fn processDisputesExtrinsic(
 
     // Process verdicts
     for (extrinsic.verdicts, 0..) |verdict, i| {
-        const verdict_span = span.child(.process_verdict);
+        const verdict_span = span.child(@src(), .process_verdict);
         defer verdict_span.deinit();
         verdict_span.debug("Processing verdict {d} of {d}", .{ i + 1, extrinsic.verdicts.len });
         verdict_span.trace("Target hash: {s}", .{std.fmt.fmtSliceHexLower(&verdict.target)});
@@ -150,12 +150,12 @@ pub fn processDisputesExtrinsic(
     psi_prime.punish_set.clearRetainingCapacity();
 
     // Process culprits
-    const culprits_span = span.child(.process_culprits);
+    const culprits_span = span.child(@src(), .process_culprits);
     defer culprits_span.deinit();
     culprits_span.debug("Processing {d} culprits", .{extrinsic.culprits.len});
 
     for (extrinsic.culprits, 0..) |culprit, i| {
-        const culprit_span = culprits_span.child(.culprit);
+        const culprit_span = culprits_span.child(@src(), .culprit);
         defer culprit_span.deinit();
         culprit_span.debug("Processing culprit {d} of {d}", .{ i + 1, extrinsic.culprits.len });
         culprit_span.trace("Public key: {s}", .{std.fmt.fmtSliceHexLower(&culprit.key)});
@@ -163,12 +163,12 @@ pub fn processDisputesExtrinsic(
     }
 
     // Process faults
-    const faults_span = span.child(.process_faults);
+    const faults_span = span.child(@src(), .process_faults);
     defer faults_span.deinit();
     faults_span.debug("Processing {d} faults", .{extrinsic.faults.len});
 
     for (extrinsic.faults, 0..) |fault, i| {
-        const fault_span = faults_span.child(.fault);
+        const fault_span = faults_span.child(@src(), .fault);
         defer fault_span.deinit();
         fault_span.debug("Processing fault {d} of {d}", .{ i + 1, extrinsic.faults.len });
         fault_span.trace("Public key: {s}", .{std.fmt.fmtSliceHexLower(&fault.key)});
@@ -323,7 +323,7 @@ pub fn verifyDisputesExtrinsicPre(
     std.debug.assert(lambda.len == validator_count);
     std.debug.assert(current_epoch >= 0);
 
-    const span = trace.span(.verify_pre);
+    const span = trace.span(@src(), .verify_pre);
     defer span.deinit();
     span.debug("Starting pre-verification of disputes extrinsic", .{});
     span.debug("Validator count: {d}, Current epoch: {d}", .{ validator_count, current_epoch });
@@ -428,7 +428,7 @@ pub fn verifyDisputesExtrinsicPost(
     extrinsic: DisputesExtrinsic,
     posterior_state: *const Psi,
 ) VerificationError!void {
-    const span = trace.span(.verify_post);
+    const span = trace.span(@src(), .verify_post);
     defer span.deinit();
     span.debug("Starting post-verification of disputes extrinsic", .{});
     span.debug("Verdicts: {d}, Culprits: {d}, Faults: {d}", .{
@@ -472,7 +472,7 @@ fn verifyOrderedUnique(
     compareFn: fn (U, U) std.math.Order,
     errortype: VerificationError,
 ) !void {
-    const span = trace.span(.verify_ordered);
+    const span = trace.span(@src(), .verify_ordered);
     defer span.deinit();
     span.debug("Verifying ordered uniqueness for {d} items", .{items.len});
     span.trace("Item type: {s}", .{@typeName(T)});

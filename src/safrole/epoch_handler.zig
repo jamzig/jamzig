@@ -21,7 +21,7 @@ pub fn handleEpochTransition(
     const handle_epoch_transition_zone = tracy.ZoneN(@src(), "handle_epoch_transition");
     defer handle_epoch_transition_zone.End();
 
-    const span = trace.span(.transition_epoch);
+    const span = trace.span(@src(), .transition_epoch);
     defer span.deinit();
     span.debug("Starting epoch transition", .{});
 
@@ -132,7 +132,7 @@ fn buildBandersnatchRingRoot(
     allocator: std.mem.Allocator,
     gamma_k: types.GammaK,
 ) !types.GammaZ {
-    const span = trace.span(.bandersnatch_ring_root);
+    const span = trace.span(@src(), .bandersnatch_ring_root);
     defer span.deinit();
     const tracy_zone = tracy.ZoneN(@src(), "build_ring_root");
     defer tracy_zone.End();
@@ -163,7 +163,7 @@ pub fn entropyBasedKeySelector(
     epoch_length: u32,
     kappa: types.Kappa,
 ) ![]types.BandersnatchPublic {
-    const span = trace.span(.gamma_s_fallback);
+    const span = trace.span(@src(), .gamma_s_fallback);
     defer span.deinit();
     const tracy_zone = tracy.ZoneN(@src(), "entropy_key_selection");
     defer tracy_zone.End();

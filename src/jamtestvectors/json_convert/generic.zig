@@ -170,14 +170,14 @@ fn getTypeNameInfo(comptime T: type) struct { typeNameWithoutPath: []const u8, g
 /// This a generic function to free an generic converted object using the allocator.
 pub fn free(allocator: Allocator, obj: anytype) void {
     const T = @TypeOf(obj);
-    const span = trace.span(.free);
+    const span = trace.span(@src(), .free);
     defer span.deinit();
 
     span.debug("Freeing object of type: {s}", .{@typeName(T)});
 
     switch (@typeInfo(T)) {
         .@"struct" => |structInfo| {
-            const struct_span = span.child(.struct_fields);
+            const struct_span = span.child(@src(), .struct_fields);
             defer struct_span.deinit();
 
             inline for (structInfo.fields) |field| {
@@ -187,7 +187,7 @@ pub fn free(allocator: Allocator, obj: anytype) void {
         },
         .pointer => |ptrInfo| {
             if (ptrInfo.size == .slice) {
-                const slice_span = span.child(.slice);
+                const slice_span = span.child(@src(), .slice);
                 defer slice_span.deinit();
 
                 slice_span.debug("Freeing slice elements", .{});
@@ -197,7 +197,7 @@ pub fn free(allocator: Allocator, obj: anytype) void {
                 slice_span.debug("Freeing slice", .{});
                 allocator.free(obj);
             } else if (ptrInfo.size == .One) {
-                const ptr_span = span.child(.single_pointer);
+                const ptr_span = span.child(@src(), .single_pointer);
                 defer ptr_span.deinit();
 
                 ptr_span.debug("Freeing single pointer", .{});
@@ -208,7 +208,7 @@ pub fn free(allocator: Allocator, obj: anytype) void {
             }
         },
         .optional => {
-            const opt_span = span.child(.optional);
+            const opt_span = span.child(@src(), .optional);
             defer opt_span.deinit();
 
             if (obj) |value| {
@@ -219,7 +219,7 @@ pub fn free(allocator: Allocator, obj: anytype) void {
             }
         },
         .array => {
-            const arr_span = span.child(.array);
+            const arr_span = span.child(@src(), .array);
             defer arr_span.deinit();
 
             arr_span.debug("Freeing array elements", .{});
@@ -230,7 +230,7 @@ pub fn free(allocator: Allocator, obj: anytype) void {
         },
         .@"union" => |unionInfo| {
             if (unionInfo.tag_type) |_| {
-                const union_span = span.child(.tagged_union);
+                const union_span = span.child(@src(), .tagged_union);
                 defer union_span.deinit();
 
                 union_span.debug("Freeing tagged union", .{});

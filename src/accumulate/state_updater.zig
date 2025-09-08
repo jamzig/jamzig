@@ -43,7 +43,7 @@ pub fn StateUpdater(comptime params: Params) type {
             map_buffer: *std.ArrayList(types.WorkReportHash),
             time: TimeInfo,
         ) !void {
-            const span = trace.span(.update_theta_state);
+            const span = trace.span(@src(), .update_theta_state);
             defer span.deinit();
 
             span.debug("Updating theta pending reports for epoch length {d}", .{params.epoch_length});
@@ -94,7 +94,7 @@ pub fn StateUpdater(comptime params: Params) type {
             queued: *Queued(WorkReportAndDeps),
             resolved_reports: []types.WorkReportHash,
         ) void {
-            const span = trace.span(.process_queue_updates);
+            const span = trace.span(@src(), .process_queue_updates);
             defer span.deinit();
 
             span.debug("Processing queue updates with {d} queued items and {d} resolved reports", .{ 
@@ -145,7 +145,7 @@ pub fn StateUpdater(comptime params: Params) type {
             theta: *state.Theta,
             accumulation_outputs: anytype, // HashSet(ServiceAccumulationOutput)
         ) !void {
-            const span = trace.span(.update_accumulation_outputs);
+            const span = trace.span(@src(), .update_accumulation_outputs);
             defer span.deinit();
 
             span.debug("Updating theta with {d} accumulation outputs", .{accumulation_outputs.count()});

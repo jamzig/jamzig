@@ -6,19 +6,19 @@ const Eta = @import("../types.zig").Eta;
 const trace = @import("tracing").scoped(.codec);
 
 pub fn encode(self: *const Eta, writer: anytype) !void {
-    const span = trace.span(.encode_entropy_pool);
+    const span = trace.span(@src(), .encode_entropy_pool);
     defer span.deinit();
 
     span.debug("Starting Eta encoding", .{});
     span.trace("Eta buffer length: {d}", .{self.len});
 
     // First pass encoding
-    const first_pass_span = span.child(.first_pass);
+    const first_pass_span = span.child(@src(), .first_pass);
     defer first_pass_span.deinit();
 
     first_pass_span.debug("Starting entropy encoding", .{});
     for (self, 0..) |entropy_item, i| {
-        const item_span = first_pass_span.child(.entropy_item);
+        const item_span = first_pass_span.child(@src(), .entropy_item);
         defer item_span.deinit();
 
         item_span.debug("Processing entropy item {d}", .{i});

@@ -18,7 +18,7 @@ pub fn reconstructServiceAccountBase(
     key: types.StateKey,
     value: []const u8,
 ) !void {
-    const span = trace.span(.reconstruct_service_account_base);
+    const span = trace.span(@src(), .reconstruct_service_account_base);
     defer span.deinit();
     span.debug("Starting service account base reconstruction", .{});
     span.trace("Key: {any}, Value length: {d}", .{ std.fmt.fmtSliceHexLower(&key), value.len });
@@ -40,7 +40,7 @@ pub fn reconstructStorageData(
     delta: *state.Delta,
     dict_entry: state_dictionary.DictEntry,
 ) !void {
-    const span = trace.span(.reconstruct_storage_data);
+    const span = trace.span(@src(), .reconstruct_storage_data);
     defer span.deinit();
     span.debug("Starting storage entry reconstruction", .{});
     span.trace("Key: {any}, Value length: {d}", .{ std.fmt.fmtSliceHexLower(&dict_entry.key), dict_entry.value.len });

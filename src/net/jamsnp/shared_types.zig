@@ -190,7 +190,7 @@ pub fn CallbackArg(T: type) type {
 }
 
 pub fn invokeCallback(T: type, callback_handlers: *const CallbackHandlers, args: CallbackArg(T)) void {
-    const span = trace.span(.invoke_callback);
+    const span = trace.span(@src(), .invoke_callback);
     defer span.deinit();
 
     const active_tag = std.meta.activeTag(args);

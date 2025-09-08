@@ -5,7 +5,7 @@ const codec = @import("../codec.zig");
 const trace = @import("tracing").scoped(.codec);
 
 pub fn encode(set: *const types.ValidatorSet, writer: anytype) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting validator set encoding", .{});
     span.trace("Validator set length: {d}", .{set.items().len});

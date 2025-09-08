@@ -37,7 +37,7 @@ pub fn processAccumulationReports(
     stx: *state_delta.StateTransition(params),
     reports: []types.WorkReport,
 ) !ProcessAccumulationResult {
-    const span = trace.span(.process_accumulate_reports);
+    const span = trace.span(@src(), .process_accumulate_reports);
     defer span.deinit();
 
     span.debug("Starting accumulation process with {d} reports", .{reports.len});

@@ -48,7 +48,7 @@ pub const Client = struct {
         callback: ?CommandCallback(anyerror!ConnectionId),
         context: ?*anyopaque,
     ) !void {
-        const span = trace.span(.connect_with_callback);
+        const span = trace.span(@src(), .connect_with_callback);
         defer span.deinit();
         span.debug("Connect requested to endpoint: {}", .{endpoint});
 
@@ -105,7 +105,7 @@ pub const Client = struct {
         callback: ?CommandCallback(anyerror!StreamId), // Callback returns StreamId
         context: ?*anyopaque,
     ) !void {
-        const span = trace.span(.create_stream_with_callback);
+        const span = trace.span(@src(), .create_stream_with_callback);
         defer span.deinit();
         span.debug("Create stream requested on connection: {}", .{connection_id});
 
@@ -133,7 +133,7 @@ pub const Client = struct {
         callback: ?CommandCallback(anyerror!void),
         context: ?*anyopaque,
     ) !void {
-        const span = trace.span(.destroy_stream_with_callback);
+        const span = trace.span(@src(), .destroy_stream_with_callback);
         defer span.deinit();
         span.debug("Destroy stream requested: connection={} stream={}", .{ stream.connection_id, stream.stream_id });
 
@@ -151,7 +151,7 @@ pub const Client = struct {
     }
 
     pub fn pushCommand(self: *Client, command: ClientThread.Command) !void {
-        const span = trace.span(.push_command);
+        const span = trace.span(@src(), .push_command);
         defer span.deinit();
         span.debug("Pushing command: {s}", .{@tagName(command)});
 
@@ -167,7 +167,7 @@ pub const Client = struct {
     // --- Client API Methods ---
 
     pub fn shutdown(self: *Client) !void {
-        const span = trace.span(.client_shutdown);
+        const span = trace.span(@src(), .client_shutdown);
         defer span.deinit();
         span.debug("Shutting down client", .{});
 

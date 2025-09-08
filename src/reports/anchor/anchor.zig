@@ -20,7 +20,7 @@ pub fn validateAnchor(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_anchor);
+    const span = trace.span(@src(), .validate_anchor);
     defer span.deinit();
 
     const beta: *const state.Beta = try stx.ensure(.beta_prime);

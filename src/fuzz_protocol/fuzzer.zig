@@ -63,7 +63,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Initialize fuzzer with deterministic seed and target socket path
         pub fn create(executor: *IOExecutor, allocator: std.mem.Allocator, seed: u64, socket_path: []const u8) !*Self {
-            const span = trace.span(.fuzzer_init);
+            const span = trace.span(@src(), .fuzzer_init);
             defer span.deinit();
 
             span.debug("Initializing fuzzer with seed: {d}, socket: {s}", .{ seed, socket_path });
@@ -122,7 +122,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Clean up all fuzzer resources
         pub fn destroy(self: *Self) void {
-            const span = trace.span(.fuzzer_deinit);
+            const span = trace.span(@src(), .fuzzer_deinit);
             defer span.deinit();
 
             // Ensure socket is closed before destroying
@@ -141,7 +141,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Connect to target socket
         pub fn connectToTarget(self: *Self) !void {
-            const span = trace.span(.connect_target);
+            const span = trace.span(@src(), .connect_target);
             defer span.deinit();
             span.debug("Connecting to target socket: {s}", .{self.socket_path});
 
@@ -153,7 +153,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Disconnect from target
         pub fn disconnect(self: *Self) void {
-            const span = trace.span(.disconnect_target);
+            const span = trace.span(@src(), .disconnect_target);
             defer span.deinit();
 
             if (self.socket) |socket| {
@@ -168,7 +168,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Perform handshake with target
         pub fn performHandshake(self: *Self) !void {
-            const span = trace.span(.fuzzer_handshake);
+            const span = trace.span(@src(), .fuzzer_handshake);
             defer span.deinit();
             span.debug("Performing handshake with target", .{});
 
@@ -205,7 +205,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Set state on target
         pub fn setState(self: *Self, header: types.Header, state: messages.State) !messages.StateRootHash {
-            const span = trace.span(.fuzzer_set_state);
+            const span = trace.span(@src(), .fuzzer_set_state);
             defer span.deinit();
             span.debug("Setting state on target with {d} key-value pairs", .{state.items.len});
 
@@ -232,7 +232,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Send block to target for processing
         pub fn sendBlock(self: *Self, block: *const types.Block) !messages.StateRootHash {
-            const span = trace.span(.fuzzer_send_block);
+            const span = trace.span(@src(), .fuzzer_send_block);
             defer span.deinit();
             span.debug("Sending block to target", .{});
             span.trace("{s}", .{types.fmt.format(block)});
@@ -260,7 +260,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Get state from target by header hash
         pub fn getState(self: *Self, header_hash: messages.HeaderHash) !messages.State {
-            const span = trace.span(.fuzzer_get_state);
+            const span = trace.span(@src(), .fuzzer_get_state);
             defer span.deinit();
             span.debug("Getting state from target for header: {s}", .{std.fmt.fmtSliceHexLower(&header_hash)});
 
@@ -287,7 +287,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Process block locally and return state root
         pub fn processBlockLocally(self: *Self, block: types.Block) !messages.StateRootHash {
-            const span = trace.span(.fuzzer_process_local);
+            const span = trace.span(@src(), .fuzzer_process_local);
             defer span.deinit();
             span.debug("Processing block locally", .{});
 
@@ -320,7 +320,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Run a complete fuzzing cycle with optional shutdown check
         pub fn runFuzzCycleWithShutdown(self: *Self, num_blocks: usize, should_shutdown: ?*const fn () bool) !report.FuzzResult {
-            const span = trace.span(.fuzzer_run_cycle);
+            const span = trace.span(@src(), .fuzzer_run_cycle);
             defer span.deinit();
             span.debug("Starting fuzz cycle with {d} blocks", .{num_blocks});
 
@@ -366,7 +366,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
                     }
                 }
 
-                const block_span = span.child(.process_block);
+                const block_span = span.child(@src(), .process_block);
                 defer block_span.deinit();
 
                 block_span.debug("Processing block {d}/{d}", .{ block_num + 1, num_blocks });
@@ -477,7 +477,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         /// Run trace mode - replay W3F format traces from a directory
         pub fn runTraceMode(self: *Self, trace_dir: []const u8) !report.FuzzResult {
-            const span = trace.span(.fuzzer_run_trace_mode);
+            const span = trace.span(@src(), .fuzzer_run_trace_mode);
             defer span.deinit();
             span.debug("Starting trace mode from directory: {s}", .{trace_dir});
 
@@ -617,7 +617,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
         }
 
         pub fn endSession(self: *Self) void {
-            const span = trace.span(.fuzzer_end_session);
+            const span = trace.span(@src(), .fuzzer_end_session);
             defer span.deinit();
             span.debug("Ending fuzzer session", .{});
 

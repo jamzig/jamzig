@@ -145,7 +145,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             current_state_root: types.StateRoot,
             extrinsics: *const types.Extrinsic,
         ) !ValidationResult {
-            const span = trace.span(.validate_header);
+            const span = trace.span(@src(), .validate_header);
             defer span.deinit();
 
             // Ensure state is initialized (only debugbuilds)
@@ -244,7 +244,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             current_state_root: types.StateRoot,
             extrinsics: *const types.Extrinsic,
         ) !void {
-            const span = trace.span(.validate_structural);
+            const span = trace.span(@src(), .validate_structural);
             defer span.deinit();
 
             // Validate parent hash
@@ -297,7 +297,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             state: *const JamState(params),
             header: *const types.Header,
         ) !void {
-            const span = trace.span(.validate_timing);
+            const span = trace.span(@src(), .validate_timing);
             defer span.deinit();
 
             const tau = state.tau.?;
@@ -324,7 +324,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             header: *const types.Header,
         ) !types.BandersnatchPublic {
             _ = self;
-            const span = trace.span(.validate_author);
+            const span = trace.span(@src(), .validate_author);
             defer span.deinit();
 
             // Determine which validator set to use based on epoch transition
@@ -354,7 +354,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             header: *const types.Header,
         ) !void {
             _ = self;
-            const span = trace.span(.validate_marker_timing);
+            const span = trace.span(@src(), .validate_marker_timing);
             defer span.deinit();
 
             const tau = state.tau.?;
@@ -402,7 +402,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             state: *const JamState(params),
             header: *const types.Header,
         ) !TicketResolution {
-            const span = trace.span(.resolve_tickets);
+            const span = trace.span(@src(), .resolve_tickets);
             defer span.deinit();
 
             const time = params.Time().init(state.tau.?, header.slot);
@@ -454,7 +454,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
 
         /// Unified seal validation
         fn validateSeal(self: *Self, ctx: SealContext) !void {
-            const span = trace.span(.validate_seal);
+            const span = trace.span(@src(), .validate_seal);
             defer span.deinit();
 
             // Serialize unsigned header
@@ -553,7 +553,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
         ) !void {
             _ = self;
             _ = sealed_with_tickets;
-            const span = trace.span(.validate_entropy_source);
+            const span = trace.span(@src(), .validate_entropy_source);
             defer span.deinit();
 
             // Parse seal signature to get VRF output
