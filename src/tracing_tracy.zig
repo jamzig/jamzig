@@ -110,16 +110,22 @@ pub const Span = struct {
     }
 
     inline fn log(self: *const Span, level: LogLevel, comptime fmt: []const u8, args: anytype) void {
-        const cfg = getConfig();
-        const scope_level = cfg.findScope(self.scope) orelse cfg.default_level;
+        _ = self;
+        _ = level;
+        _ = fmt;
+        _ = args;
+        // NOTE: not logging messages here. In Tracy mode, we only use zones.
 
-        if (@intFromEnum(level) < @intFromEnum(scope_level)) {
-            return;
-        }
-
-        var message_buf: [1024]u8 = undefined;
-        const message = std.fmt.bufPrint(&message_buf, fmt, args) catch "formatting error";
-        tracy.Message(message);
+        // const cfg = getConfig();
+        // const scope_level = cfg.findScope(self.scope) orelse cfg.default_level;
+        //
+        // if (@intFromEnum(level) < @intFromEnum(scope_level)) {
+        //     return;
+        // }
+        //
+        // var message_buf: [1024]u8 = undefined;
+        // const message = std.fmt.bufPrint(&message_buf, fmt, args) catch "formatting error";
+        // tracy.Message(message);
     }
 };
 
