@@ -430,7 +430,10 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var executor = try io.ThreadPoolExecutor.init(allocator);
+    // const ExecutorType = io.SequentialExecutor;
+    const ExecutorType = io.ThreadPoolExecutor;
+
+    var executor = try ExecutorType.init(allocator);
     defer executor.deinit();
 
     // Parse command line arguments for iteration count and optional trace filter
@@ -462,5 +465,5 @@ pub fn main() !void {
         .trace_filter = trace_filter,
     };
 
-    try benchmarkBlockImportWithConfig(io.ThreadPoolExecutor, allocator, config, &executor);
+    try benchmarkBlockImportWithConfig(ExecutorType, allocator, config, &executor);
 }
