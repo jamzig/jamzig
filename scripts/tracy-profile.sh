@@ -18,7 +18,7 @@ TRACY_PORT=8086
 DEFAULT_ITERATIONS=100
 
 # Default options
-ENABLE_TRACING=false
+ENABLE_TRACING=true
 ITERATIONS=$DEFAULT_ITERATIONS
 TRACE_FILTER=""
 
@@ -32,31 +32,22 @@ USAGE:
 
 ARGUMENTS:
     iterations          Number of benchmark iterations (default: $DEFAULT_ITERATIONS)
-    trace_name         Specific trace to run (e.g., safrole, fallback) 
+    trace_name         Specific trace to run (e.g., safrole, fallback)
 
 OPTIONS:
-    --enable-tracing    Enable Tracy tracing integration (routes all trace logs to Tracy)
-                       Automatically enables all common scopes at debug level
+    --disable-tracing   Disable Tracy tracing integration (performance zones only)
     --help             Show this help message
 
 EXAMPLES:
-    # Basic profiling (performance zones only)
+    # Default: Performance profiling + tracing integration
     $0 100 safrole
-    
-    # Enable tracing integration (all common scopes at debug level)
-    $0 --enable-tracing 50 safrole
-    
-    # All traces with comprehensive tracing
-    $0 --enable-tracing 25
 
-WHAT GETS TRACED (when --enable-tracing is used):
-    All common scopes automatically enabled at debug level:
-    - stf: STF (State Transition Function) operations  
-    - accumulate: Block accumulation and work package processing
-    - safrole: BABE-style consensus and validator selection
-    - pvm: PolkaVM execution environment
-    - services: Service account management
-    
+    # Sampling only
+    $0 --disable-tracing 50 safrole
+
+    # All traces with comprehensive profiling + tracing (default)
+    $0 25
+
 OUTPUT:
     Tracy files are saved to: profiles/captures/
     Open with: tracy-profiler path/to/file.tracy
@@ -67,8 +58,8 @@ EOF
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --enable-tracing)
-            ENABLE_TRACING=true
+        --disable-tracing)
+            ENABLE_TRACING=false
             shift
             ;;
         --help|-h)
@@ -128,10 +119,7 @@ echo "🔧 JamZig Tracy Profiling Script"
 echo "=================================="
 echo "Mode: Performance profiling$(if [[ "$ENABLE_TRACING" == true ]]; then echo " + trace routing"; fi)"
 echo "Iterations: $ITERATIONS"
-echo "Trace filter: ${TRACE_FILTER:-'all traces'}"
-if [[ "$ENABLE_TRACING" == true ]]; then
-    echo "Tracing: All common scopes at debug level"
-fi
+
 echo "Output file: $(basename "$TRACY_FILE")"
 echo "Tracy port: $TRACY_PORT"
 echo ""
@@ -142,12 +130,12 @@ cd "$PROJECT_ROOT"
 # Step 1: Build JamZig with Tracy enabled
 BUILD_FLAGS="-Denable-tracy=true"
 if [[ "$ENABLE_TRACING" == true ]]; then
-    BUILD_FLAGS="$BUILD_FLAGS -Dtracing-mode=tracy -Dtracing-scope=stf=debug,accumulate=debug,safrole=debug,pvm=debug,services=debug"
-    
+    BUILD_FLAGS="$BUILD_FLAGS -Dtracing-mode=tracy"
     echo "📦 Building JamZig with Tracy profiling + tracing enabled..."
     echo "   Build flags: $BUILD_FLAGS"
 else
     echo "📦 Building JamZig with Tracy profiling enabled..."
+    echo "   Build flags: $BUILD_FLAGS"
 fi
 
 if ! zig build $BUILD_FLAGS > build.log 2>&1; then
