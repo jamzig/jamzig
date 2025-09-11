@@ -134,13 +134,13 @@ pub const Program = struct {
         defer mask_span.deinit();
         mask_span.debug("Mask length: {d} bytes", .{mask_length_in_bytes});
 
-        for (program.mask, 0..) |byte, i| {
+        for (program.mask) |byte| {
             // For each byte, show its bits
             var bit_str: [8]u8 = undefined;
             for (0..8) |bit| {
                 bit_str[bit] = if ((byte >> @intCast(7 - bit)) & 1 == 1) '1' else '0';
             }
-            mask_span.debug("Mask[{d:0>2}]: 0b{s} (0x{x:0>2})", .{ i, bit_str, byte });
+            // mask_span.debug("Mask[{d:0>2}]: 0b{s} (0x{x:0>2})", .{ i, bit_str, byte });
         }
 
         // Create a safe decoder for validation
