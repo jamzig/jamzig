@@ -12,6 +12,7 @@ const state_dict = @import("state_dictionary.zig");
 const io = @import("io.zig");
 const jam_params = @import("jam_params.zig");
 const Params = jam_params.Params;
+const tracy = @import("tracy");
 
 const BenchmarkConfig = struct {
     iterations: u32 = 100,
@@ -530,7 +531,13 @@ fn parseArgs(allocator: std.mem.Allocator) !BenchmarkConfig {
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+
+    // TracyAllocator is a no-op when Tracy is disabled
+    var tracy_alloc = tracy.TracyAllocator.init(gpa.allocator());
+    const allocator = tracy_alloc.allocator();
+
+    const ctx = tracy.ZoneS(@src(), 10);
+    defer ctx.End();
 
     var config = parseArgs(allocator) catch |err| switch (err) {
         error.InvalidArguments => std.process.exit(1),

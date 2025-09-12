@@ -414,7 +414,7 @@ pub fn build(b: *std.Build) !void {
         .name = "bench-target-trace",
         .root_source_file = b.path("src/bench_target_trace.zig"),
         .target = target,
-        .optimize = .ReleaseFast,
+        .optimize = optimize,
     });
 
     bench_target_trace.root_module.addOptions("build_options", bench_build_options);
