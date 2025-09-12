@@ -18,6 +18,7 @@ TRACY_PORT=8086
 DEFAULT_ITERATIONS=100
 
 # Default options
+BENCHMARK_EXECUTABLE="bench-block-import"
 ENABLE_TRACING=true
 ITERATIONS=$DEFAULT_ITERATIONS
 TRACE_FILTER=""
@@ -36,11 +37,15 @@ ARGUMENTS:
 
 OPTIONS:
     --disable-tracing   Disable Tracy tracing integration (performance zones only)
+    --target           Profile bench-target-trace instead of bench-block-import
     --help             Show this help message
 
 EXAMPLES:
-    # Default: Performance profiling + tracing integration
+    # Default: Performance profiling + tracing integration (block import)
     $0 100 safrole
+
+    # Profile target implementation instead
+    $0 --target 50 safrole
 
     # Sampling only
     $0 --disable-tracing 50 safrole
@@ -60,6 +65,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --disable-tracing)
             ENABLE_TRACING=false
+            shift
+            ;;
+        --target)
+            BENCHMARK_EXECUTABLE="bench-target-trace"
             shift
             ;;
         --help|-h)
@@ -107,11 +116,17 @@ if [[ "$ENABLE_TRACING" == true ]]; then
     PROFILE_TYPE="profiling+tracing"
 fi
 
+# Extract benchmark type for filename
+BENCHMARK_TYPE="block-import"
+if [[ "$BENCHMARK_EXECUTABLE" == "bench-target-trace" ]]; then
+    BENCHMARK_TYPE="target-trace"
+fi
+
 if [ -n "$TRACE_FILTER" ]; then
-    TRACY_FILE="$PROFILES_DIR/jamzig-${TRACE_FILTER}-${PROFILE_TYPE}-${TIMESTAMP}.tracy"
+    TRACY_FILE="$PROFILES_DIR/jamzig-${BENCHMARK_TYPE}-${TRACE_FILTER}-${PROFILE_TYPE}-${TIMESTAMP}.tracy"
     BENCHMARK_ARGS="$ITERATIONS $TRACE_FILTER"
 else
-    TRACY_FILE="$PROFILES_DIR/jamzig-all-traces-${PROFILE_TYPE}-${TIMESTAMP}.tracy"
+    TRACY_FILE="$PROFILES_DIR/jamzig-${BENCHMARK_TYPE}-all-traces-${PROFILE_TYPE}-${TIMESTAMP}.tracy"
     BENCHMARK_ARGS="$ITERATIONS"
 fi
 
@@ -197,13 +212,13 @@ if [[ "$ENABLE_TRACING" == true ]]; then
 else
     echo "🚀 Running benchmark with Tracy profiling..."
 fi
-echo "   Benchmark: zig build bench-block-import -- $BENCHMARK_ARGS"
+echo "   Benchmark: zig-out/bin/$BENCHMARK_EXECUTABLE $BENCHMARK_ARGS"
 echo ""
 echo "⏱️  Benchmark in progress... (Press Ctrl+C to stop)"
 
 # Run the benchmark and capture its exit code
 set +e  # Don't exit on benchmark failure, we still want to save the tracy file
-./zig-out/bin/bench-block-import $BENCHMARK_ARGS
+zig-out/bin/$BENCHMARK_EXECUTABLE $BENCHMARK_ARGS
 BENCHMARK_EXIT_CODE=$?
 set -e
 
