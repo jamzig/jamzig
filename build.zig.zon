@@ -1,7 +1,7 @@
 .{
     .name = .jamzig,
     .version = "0.1.0",
-    .fingerprint = 0x4b3c352fa1870e81,
+    .fingerprint = 0x4b3c352f81cc6a1c,
     .dependencies = .{
         .pretty = .{
             .url = "https://github.com/timfayz/pretty/archive/v0.10.4.tar.gz",
