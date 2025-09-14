@@ -10,7 +10,6 @@ const jamstate = @import("../state.zig");
 const state_merklization = @import("../state_merklization.zig");
 const types = @import("../types.zig");
 const block_import = @import("../block_import.zig");
-const auxiliary = @import("../auxiliary.zig");
 const io = @import("../io.zig");
 
 const trace = @import("tracing").scoped(.fuzz_protocol);
@@ -44,7 +43,6 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         // State management
         current_state: ?jamstate.JamState(messages.FUZZ_PARAMS) = null,
         current_state_root: ?messages.StateRootHash = null,
-        auxiliary: auxiliary.Auxiliary = auxiliary.Auxiliary.Empty,
         server_state: ServerState = .initial,
 
         // Block importer
@@ -69,9 +67,6 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         pub fn deinit(self: *Self) void {
             // Deinit JAM state
             if (self.current_state) |*s| s.deinit(self.allocator);
-
-            // Deinit auxiliary data
-            self.auxiliary.deinit(self.allocator);
 
             // Clean up socket file if it exists
             std.fs.deleteFileAbsolute(self.socket_path) catch |err| {
@@ -271,9 +266,8 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
                     span.debug("Processing Initialize with {d} key-value pairs, ancestry length: {d}", .{ initialize.keyvals.items.len, initialize.ancestry.items.len });
 
-                    // Clear current state and auxiliary data
+                    // Clear current state
                     if (self.current_state) |*s| s.deinit(self.allocator);
-                    self.auxiliary.deinit(self.allocator);
 
                     // Reconstruct JAM state from fuzz protocol state
                     self.current_state = try state_converter.fuzzStateToJamState(
@@ -282,15 +276,13 @@ pub fn TargetServer(comptime IOExecutor: type) type {
                         initialize.keyvals,
                     );
 
-                    // Build ancestry from provided items
-                    var ancestry = auxiliary.Ancestry.init(self.allocator);
-                    for (initialize.ancestry.items) |item| {
-                        try ancestry.addHeader(item.header_hash, item.slot);
+                    // Initialize and populate ancestry from provided items
+                    try self.current_state.?.initAncestry(self.allocator);
+                    if (self.current_state.?.ancestry) |*ancestry| {
+                        for (initialize.ancestry.items) |item| {
+                            try ancestry.addHeader(item.header_hash, item.slot);
+                        }
                     }
-
-                    self.auxiliary = .{
-                        .ancestry = ancestry,
-                    };
 
                     self.current_state_root = try self.computeStateRoot();
                     self.server_state = .ready;
@@ -304,12 +296,11 @@ pub fn TargetServer(comptime IOExecutor: type) type {
                     span.debug("Processing ImportBlock", .{});
                     span.trace("{}", .{types.fmt.format(block)});
 
-                    // Use unified block importer with validation and auxiliary data
+                    // Use unified block importer with validation
                     var result = self.block_importer.importBlockWithCachedRoot(
                         &self.current_state.?,
                         self.current_state_root.?, // CACHED value (required)
                         &block,
-                        &self.auxiliary,
                     ) catch |err| {
                         span.err("Failed to import block: {s}. Sending error response.", .{@errorName(err)});
                         // Allocate error message string

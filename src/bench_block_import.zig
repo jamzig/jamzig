@@ -236,7 +236,6 @@ fn executeBenchmarkBatch(comptime IOExecutor: type, context: BenchmarkContext(IO
             &jam_state,
             cached_state_root,
             transition.block(),
-            &.{},
         );
 
         try result.commit();

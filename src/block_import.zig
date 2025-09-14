@@ -66,7 +66,6 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             self: *Self,
             current_state: *const JamState(params),
             block: *const types.Block,
-            auxiliary: *const stf.AuxiliaryData,
         ) !ImportResult {
             const span = trace.span(@src(), .import_block_building_root);
             defer span.deinit();
@@ -78,7 +77,6 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
                 current_state,
                 current_state_root,
                 block,
-                auxiliary,
             );
         }
 
@@ -88,7 +86,6 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             current_state: *const JamState(params),
             cached_state_root: types.StateRoot,
             block: *const types.Block,
-            auxiliary: *const stf.AuxiliaryData,
         ) !ImportResult {
             const span = trace.span(@src(), .import_block_with_cached_root);
             defer span.deinit();
@@ -109,15 +106,21 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
 
             // Step 2: Apply state transition
             const state_transition =
-                try stf.stateTransitionWithAuxData(
+                try stf.stateTransition(
                     IOExecutor,
                     self.executor,
                     params,
                     self.allocator,
                     current_state,
                     block,
-                    auxiliary,
                 );
+
+            // Step 3: After successful import, add block header to ancestry_prime (if ancestry exists)
+            if (state_transition.hasBase(.ancestry)) {
+                const ancestry_prime = try state_transition.ensure(.ancestry_prime);
+                const block_hash = try block.header.header_hash(params, self.allocator);
+                try ancestry_prime.addHeader(block_hash, block.header.slot);
+            }
 
             return ImportResult{
                 .state_transition = state_transition,

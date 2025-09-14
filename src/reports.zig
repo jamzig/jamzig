@@ -1,7 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
 const state = @import("state.zig");
-const auxiliary = @import("auxiliary.zig");
 const crypto = std.crypto;
 
 const recent_blocks = @import("recent_blocks.zig");

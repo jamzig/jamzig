@@ -214,7 +214,6 @@ pub fn runTracesInDir(
         var import_result = importer.importBlockBuildingRoot(
             &current_state.?,
             state_transition.block(),
-            &.{},
         ) catch |err| {
             // Check if this is expected for a no-op block
             if (is_no_op_block) {
@@ -276,7 +275,6 @@ pub fn runTracesInDir(
             var retry_result = importer.importBlockBuildingRoot(
                 &current_state.?,
                 state_transition.block(),
-                &.{},
             ) catch |retry_err| {
                 if (!config.quiet) {
                     std.debug.print("\n=== Detailed trace above shows failure context ===\n", .{});

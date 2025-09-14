@@ -1,12 +1,11 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
-const auxiliary = @import("../../auxiliary.zig");
 const tracing = @import("tracing");
 
 const trace = tracing.scoped(.reports);
 const StateTransition = @import("../../state_delta.zig").StateTransition;
-const Ancestry = auxiliary.Ancestry;
+const Ancestry = state.Ancestry;
 
 /// Error types for anchor validation
 pub const Error = error{
@@ -81,7 +80,7 @@ pub fn validateAnchor(
         return Error.AnchorNotRecent;
     }
 
-    // Now do ancestry check if not found in recent history
+    // Now do ancestry check, if we defined it
 
     {
         const av_span = span.child(@src(), .ancestry_validation);
@@ -90,7 +89,7 @@ pub fn validateAnchor(
         av_span.debug("Anchor not found in recent history, checking ancestry", .{});
 
         // Fall back to ancestry for older blocks
-        if (stx.aux.ancestry) |anc| {
+        if (stx.base.ancestry) |anc| {
             if (anc.lookupTimeslot(guarantee.report.context.anchor)) |timeslot| {
                 if (guarantee.report.context.lookup_anchor_slot != timeslot) {
                     av_span.err("Anchor timeslot mismatch in ancestry - expected(ancestry): {d}, got: {d}", .{
@@ -104,8 +103,7 @@ pub fn validateAnchor(
                 return Error.AnchorNotInAncestry;
             }
         } else {
-            av_span.debug("No auxiliary ancestry available for anchor validation", .{});
+            av_span.debug("No ancestry available for anchor validation", .{});
         }
     }
 }
-

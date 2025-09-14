@@ -3,7 +3,6 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const time = @import("time.zig");
 const Params = @import("jam_params.zig").Params;
-const AuxiliaryData = @import("auxiliary.zig").Auxiliary;
 
 pub const Error = error{
     UninitializedBaseField,
@@ -41,9 +40,6 @@ pub fn StateTransition(comptime params: Params) type {
         base: *const state.JamState(params),
         prime: state.JamState(params),
 
-        // Auciliary data
-        aux: *const AuxiliaryData = &.{},
-
         // Intermediate states
         beta_dagger: ?state.Beta = null,
         delta_double_dagger: ?state.Delta = null,
@@ -63,24 +59,14 @@ pub fn StateTransition(comptime params: Params) type {
             };
         }
 
-        pub fn createWithAuxData(
-            allocator: std.mem.Allocator,
-            base_state: *const state.JamState(params),
-            aux: *const AuxiliaryData,
-            transition_time: params.Time(),
-        ) !*Self {
-            const ptr = try allocator.create(Self);
-            ptr.* = try Self.init(allocator, base_state, transition_time);
-            ptr.*.aux = aux;
-            return ptr;
-        }
-
         pub fn create(
             allocator: std.mem.Allocator,
             base_state: *const state.JamState(params),
             transition_time: params.Time(),
         ) !*Self {
-            return try Self.createWithAuxData(allocator, base_state, &AuxiliaryData.Empty, transition_time);
+            const ptr = try allocator.create(Self);
+            ptr.* = try Self.init(allocator, base_state, transition_time);
+            return ptr;
         }
 
         /// Returns base or prime value. Creates prime by cloning base if needed.
@@ -198,6 +184,18 @@ pub fn StateTransition(comptime params: Params) type {
                     &@field(self.base, base_name);
                 return &field_ptr.*.?;
             }
+        }
+
+        /// Check if a field is initialized (non-null) in base state
+        pub fn hasBase(self: *const Self, comptime field: STAccessors(State)) bool {
+            const name = @tagName(field);
+            const base_name = if (comptime std.mem.endsWith(u8, name, "_prime"))
+                name[0 .. name.len - 6]
+            else
+                name;
+
+            const base_field = @field(self.base, base_name);
+            return base_field != null;
         }
 
         fn cloneField(self: *Self, field: anytype) Error!@TypeOf(field.?) {

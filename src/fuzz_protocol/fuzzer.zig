@@ -110,7 +110,6 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             var import_result = try fuzzer.block_importer.importBlockBuildingRoot(
                 fuzzer.current_jam_state,
                 &genesis_block,
-                &.{},
             );
             defer import_result.deinit();
 
@@ -324,7 +323,6 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             var import_result = try self.block_importer.importBlockBuildingRoot(
                 self.current_jam_state,
                 &block,
-                &.{}, // TODO: auxiliary data
             );
             defer import_result.deinit();
 
