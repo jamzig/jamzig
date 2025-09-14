@@ -3,6 +3,7 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const time = @import("time.zig");
 const Params = @import("jam_params.zig").Params;
+const AuxiliaryData = @import("auxiliary.zig").Auxiliary;
 
 pub const Error = error{
     UninitializedBaseField,
@@ -40,6 +41,9 @@ pub fn StateTransition(comptime params: Params) type {
         base: *const state.JamState(params),
         prime: state.JamState(params),
 
+        // Auciliary data
+        aux: *const AuxiliaryData = &.{},
+
         // Intermediate states
         beta_dagger: ?state.Beta = null,
         delta_double_dagger: ?state.Delta = null,
@@ -59,14 +63,24 @@ pub fn StateTransition(comptime params: Params) type {
             };
         }
 
+        pub fn createWithAuxData(
+            allocator: std.mem.Allocator,
+            base_state: *const state.JamState(params),
+            aux: *const AuxiliaryData,
+            transition_time: params.Time(),
+        ) !*Self {
+            const ptr = try allocator.create(Self);
+            ptr.* = try Self.init(allocator, base_state, transition_time);
+            ptr.*.aux = aux;
+            return ptr;
+        }
+
         pub fn create(
             allocator: std.mem.Allocator,
             base_state: *const state.JamState(params),
             transition_time: params.Time(),
         ) !*Self {
-            const ptr = try allocator.create(Self);
-            ptr.* = try Self.init(allocator, base_state, transition_time);
-            return ptr;
+            return try Self.createWithAuxData(allocator, base_state, &AuxiliaryData.Empty, transition_time);
         }
 
         /// Returns base or prime value. Creates prime by cloning base if needed.
@@ -283,7 +297,7 @@ pub fn STBaseType(comptime T: anytype, comptime field: anytype) type {
     // Convert string to field enum
     @setEvalBranchQuota(8000);
     const field_enum = std.meta.stringToEnum(std.meta.FieldEnum(T), base_name) //
-    orelse @compileError("Invalid field name: " ++ base_name);
+        orelse @compileError("Invalid field name: " ++ base_name);
 
     return std.meta.Child(std.meta.fieldInfo(T, field_enum).type);
 }

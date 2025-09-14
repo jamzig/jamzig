@@ -232,7 +232,12 @@ fn executeBenchmarkBatch(comptime IOExecutor: type, context: BenchmarkContext(IO
 
         const start = std.time.nanoTimestamp();
 
-        var result = try importer.importBlockWithCachedRoot(&jam_state, cached_state_root, transition.block());
+        var result = try importer.importBlockWithCachedRoot(
+            &jam_state,
+            cached_state_root,
+            transition.block(),
+            &.{},
+        );
 
         try result.commit();
         result.deinit();

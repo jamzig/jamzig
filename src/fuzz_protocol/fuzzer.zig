@@ -110,6 +110,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             var import_result = try fuzzer.block_importer.importBlockBuildingRoot(
                 fuzzer.current_jam_state,
                 &genesis_block,
+                &.{},
             );
             defer import_result.deinit();
 
@@ -206,6 +207,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
         }
 
         /// Initialize state on target (v1)
+        /// REFACTOR: rename this to initializeTarget
         pub fn setState(self: *Self, header: types.Header, state: messages.State) !messages.StateRootHash {
             const span = trace.span(@src(), .fuzzer_initialize_state);
             defer span.deinit();
@@ -215,11 +217,32 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
                 return error.HandshakeNotComplete;
             }
 
-            // Send Initialize message (v1) - no ancestry for now
+            // Extract ancestry from current JAM state's Beta component
+            var ancestry_items = std.ArrayList(messages.AncestryItem).init(self.allocator);
+            defer ancestry_items.deinit();
+
+            if (self.current_jam_state.beta) |beta| {
+                span.debug("Extracting {d} recent blocks as ancestry", .{beta.recent_history.blocks.items.len});
+                for (beta.recent_history.blocks.items) |block| {
+                    // Note: We need timeslot from somewhere - for now we'll skip blocks without timeslot
+                    // In the future we might need to track timeslots in BlockInfo
+                    try ancestry_items.append(.{
+                        .slot = header.slot, // Use current block's slot as approximation
+                        .header_hash = block.header_hash,
+                    });
+                }
+            }
+
+            var ancestry = messages.Ancestry{
+                .items = try ancestry_items.toOwnedSlice(),
+            };
+            defer ancestry.deinit(self.allocator);
+
+            // Send Initialize message (v1) with ancestry
             try self.sendMessage(.{ .initialize = .{
                 .header = header,
                 .keyvals = state,
-                .ancestry = messages.Ancestry.Empty,
+                .ancestry = ancestry,
             } });
 
             // Receive StateRoot response
@@ -301,6 +324,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             var import_result = try self.block_importer.importBlockBuildingRoot(
                 self.current_jam_state,
                 &block,
+                &.{}, // TODO: auxiliary data
             );
             defer import_result.deinit();
 

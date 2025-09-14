@@ -7,6 +7,7 @@ const state = @import("state.zig");
 const state_delta = @import("state_delta.zig");
 const tracing = @import("tracing");
 const tracy = @import("tracy");
+const auxiliary = @import("auxiliary.zig");
 
 // Type aliases
 const Allocator = std.mem.Allocator;
@@ -15,6 +16,7 @@ const JamState = state.JamState;
 const Block = types.Block;
 const Header = types.Header;
 const StateTransition = state_delta.StateTransition;
+pub const AuxiliaryData = auxiliary.Auxiliary;
 
 // Tracing setup
 const trace = tracing.scoped(.stf);
@@ -26,6 +28,28 @@ pub fn stateTransition(
     allocator: Allocator,
     current_state: *const JamState(params),
     block: *const Block,
+) !*StateTransition(params) {
+    const aux = AuxiliaryData.Empty;
+    defer aux.deinit(allocator);
+    return stateTransitionWithAuxData(
+        IOExecutor,
+        io_executor,
+        params,
+        allocator,
+        current_state,
+        block,
+        &aux,
+    );
+}
+
+pub fn stateTransitionWithAuxData(
+    comptime IOExecutor: type,
+    io_executor: *IOExecutor,
+    comptime params: Params,
+    allocator: Allocator,
+    current_state: *const JamState(params),
+    block: *const Block,
+    aux: *const AuxiliaryData,
 ) !*StateTransition(params) {
     const span = trace.span(@src(), .state_transition);
     defer span.deinit();
@@ -41,7 +65,7 @@ pub fn stateTransition(
         current_state.tau.?,
         block.header.slot,
     );
-    var stx = try StateTransition(params).create(allocator, current_state, transition_time);
+    var stx = try StateTransition(params).createWithAuxData(allocator, current_state, aux, transition_time);
     errdefer stx.destroy(allocator);
 
     try time.transition(

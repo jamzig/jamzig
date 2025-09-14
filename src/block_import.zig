@@ -66,6 +66,7 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             self: *Self,
             current_state: *const JamState(params),
             block: *const types.Block,
+            auxiliary: *const stf.AuxiliaryData,
         ) !ImportResult {
             const span = trace.span(@src(), .import_block_building_root);
             defer span.deinit();
@@ -77,6 +78,7 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
                 current_state,
                 current_state_root,
                 block,
+                auxiliary,
             );
         }
 
@@ -86,6 +88,7 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             current_state: *const JamState(params),
             cached_state_root: types.StateRoot,
             block: *const types.Block,
+            auxiliary: *const stf.AuxiliaryData,
         ) !ImportResult {
             const span = trace.span(@src(), .import_block_with_cached_root);
             defer span.deinit();
@@ -106,13 +109,14 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
 
             // Step 2: Apply state transition
             const state_transition =
-                try stf.stateTransition(
+                try stf.stateTransitionWithAuxData(
                     IOExecutor,
                     self.executor,
                     params,
                     self.allocator,
                     current_state,
                     block,
+                    auxiliary,
                 );
 
             return ImportResult{
