@@ -115,6 +115,13 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
                     block,
                 );
 
+            // Step 3: After successful import, add block header to ancestry_prime (if ancestry exists)
+            if (state_transition.hasBase(.ancestry)) {
+                const ancestry_prime = try state_transition.ensure(.ancestry_prime);
+                const block_hash = try block.header.header_hash(params, self.allocator);
+                try ancestry_prime.addHeader(block_hash, block.header.slot);
+            }
+
             return ImportResult{
                 .state_transition = state_transition,
                 .sealed_with_tickets = validation_result.sealed_with_tickets,

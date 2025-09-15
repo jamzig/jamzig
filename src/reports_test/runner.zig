@@ -59,13 +59,13 @@ pub fn validateAndProcessGuaranteeExtrinsic(
     defer empty_accumulate_stats.deinit();
     var empty_transfer_stats = std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.TransferServiceStats).init(allocator);
     defer empty_transfer_stats.deinit();
-    
+
     const accumulate_result = @import("../accumulate.zig").ProcessAccumulationResult{
         .accumulate_root = [_]u8{0} ** 32,
         .accumulation_stats = empty_accumulate_stats,
         .transfer_stats = empty_transfer_stats,
     };
-    
+
     try stats.transitionWithInput(
         params,
         &stx,
@@ -115,7 +115,7 @@ pub fn runReportTest(comptime params: Params, allocator: std.mem.Allocator, test
                     .insufficient_guarantees => error.InsufficientGuarantees,
                     .out_of_order_guarantee => error.OutOfOrderGuarantee,
                     .not_sorted_or_unique_guarantors => error.NotSortedOrUniqueGuarantors,
-                    .wrong_assignment => error.WrongAssignment,
+                    .wrong_assignment => error.InvalidGuarantorAssignment,
                     .core_engaged => error.CoreEngaged,
                     .anchor_not_recent => error.AnchorNotRecent,
                     .bad_service_id => error.BadServiceId,

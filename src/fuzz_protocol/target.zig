@@ -26,7 +26,7 @@ pub const RestartBehavior = enum {
 pub const ServerState = enum {
     /// Initial state, no connection established
     initial,
-    /// Handshake completed, ready to receive SetState
+    /// Handshake completed, ready to receive Initialize
     handshake_complete,
     /// State initialized, ready for block operations
     ready,
@@ -48,6 +48,11 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         // Block importer
         block_importer: block_import.BlockImporter(IOExecutor, messages.FUZZ_PARAMS),
 
+        // Fork handling state
+        last_block_hash: ?types.Hash = null,
+        parent_block_hash: ?types.Hash = null,
+        pending_result: ?block_import.BlockImporter(IOExecutor, messages.FUZZ_PARAMS).ImportResult = null,
+
         // Server management
         restart_behavior: RestartBehavior = .restart_on_disconnect,
 
@@ -67,6 +72,9 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         pub fn deinit(self: *Self) void {
             // Deinit JAM state
             if (self.current_state) |*s| s.deinit(self.allocator);
+
+            // Clean up pending result
+            if (self.pending_result) |*result| result.deinit();
 
             // Clean up socket file if it exists
             std.fs.deleteFileAbsolute(self.socket_path) catch |err| {
@@ -240,25 +248,31 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
             switch (message) {
                 .peer_info => |peer_info| {
-                    span.debug("Processing PeerInfo from: {s}", .{peer_info.name});
+                    span.debug("Processing PeerInfo v{d} from: {s}", .{ peer_info.fuzz_version, peer_info.app_name });
+                    span.debug("Remote features: 0x{x}", .{peer_info.fuzz_features});
 
-                    // Respond with our own peer info, need to allocate
-                    // as we are moving ownership to calling scope which will deinit
+                    // Calculate negotiated features (intersection)
+                    const negotiated_features = peer_info.fuzz_features & version.DEFAULT_FUZZ_FEATURES;
+                    span.debug("Negotiated features: 0x{x}", .{negotiated_features});
+
+                    // Respond with our own peer info
                     const our_peer_info = try messages.PeerInfo.buildFromStaticString(
                         self.allocator,
-                        version.TARGET_NAME,
-                        version.FUZZ_TARGET_VERSION,
+                        version.FUZZ_PROTOCOL_VERSION,
+                        version.DEFAULT_FUZZ_FEATURES,
                         version.PROTOCOL_VERSION,
+                        version.FUZZ_TARGET_VERSION,
+                        version.TARGET_NAME,
                     );
 
                     self.server_state = .handshake_complete;
                     return messages.Message{ .peer_info = our_peer_info };
                 },
 
-                .set_state => |set_state| {
+                .initialize => |initialize| {
                     if (self.server_state != .handshake_complete and self.server_state != .ready) return error.HandshakeNotComplete;
 
-                    span.debug("Processing SetState with {d} key-value pairs", .{set_state.state.items.len});
+                    span.debug("Processing Initialize with {d} key-value pairs, ancestry length: {d}", .{ initialize.keyvals.items.len, initialize.ancestry.items.len });
 
                     // Clear current state
                     if (self.current_state) |*s| s.deinit(self.allocator);
@@ -267,8 +281,16 @@ pub fn TargetServer(comptime IOExecutor: type) type {
                     self.current_state = try state_converter.fuzzStateToJamState(
                         messages.FUZZ_PARAMS,
                         self.allocator,
-                        set_state.state,
+                        initialize.keyvals,
                     );
+
+                    // Initialize and populate ancestry from provided items
+                    try self.current_state.?.initAncestry(self.allocator);
+                    if (self.current_state.?.ancestry) |*ancestry| {
+                        for (initialize.ancestry.items) |item| {
+                            try ancestry.addHeader(item.header_hash, item.slot);
+                        }
+                    }
 
                     self.current_state_root = try self.computeStateRoot();
                     self.server_state = .ready;
@@ -282,20 +304,71 @@ pub fn TargetServer(comptime IOExecutor: type) type {
                     span.debug("Processing ImportBlock", .{});
                     span.trace("{}", .{types.fmt.format(block)});
 
-                    // Use unified block importer with validation
+                    // Calculate current block hash for fork tracking
+                    const block_hash = try block.header.header_hash(messages.FUZZ_PARAMS, self.allocator);
+
+                    // Fork detection: check if this block's parent matches the last block
+                    const is_fork = if (self.last_block_hash) |last| blk: {
+                        if (std.mem.eql(u8, &block.header.parent, &last)) {
+                            // Sequential block - continues from last block
+                            span.debug("Sequential block detected", .{});
+                            break :blk false;
+                        } else if (self.parent_block_hash) |parent| {
+                            if (std.mem.eql(u8, &block.header.parent, &parent)) {
+                                // Fork - sibling of last block
+                                span.debug("Fork detected: block is sibling of last block", .{});
+                                break :blk true;
+                            } else {
+                                // Invalid - parent doesn't match last or parent
+                                span.err("Invalid block parent: expected {s} or {s}, got {s}", .{
+                                    std.fmt.fmtSliceHexLower(&last),
+                                    std.fmt.fmtSliceHexLower(&parent),
+                                    std.fmt.fmtSliceHexLower(&block.header.parent),
+                                });
+                                const error_msg = try std.fmt.allocPrint(
+                                    self.allocator,
+                                    "Invalid parent hash: not last block or parent",
+                                    .{},
+                                );
+                                return messages.Message{ .@"error" = error_msg };
+                            }
+                        } else {
+                            // No parent tracked yet, assume sequential
+                            break :blk false;
+                        }
+                    } else false;
+
+                    // Handle fork by discarding pending result (state stays at parent)
+                    if (is_fork) {
+                        if (self.pending_result) |*result| {
+                            result.deinit();
+                            self.pending_result = null;
+                        }
+                    } else if (self.pending_result) |*result| {
+                        // Sequential block - commit pending changes from previous block
+                        span.debug("Sequential block: committing pending changes", .{});
+                        try result.commit();
+                        result.deinit();
+                        self.pending_result = null;
+                        self.parent_block_hash = self.last_block_hash;
+                    }
+
+                    // Import new block without committing
                     var result = self.block_importer.importBlockWithCachedRoot(
                         &self.current_state.?,
                         self.current_state_root.?, // CACHED value (required)
                         &block,
                     ) catch |err| {
-                        std.debug.print("Failed to import block: {s}. State remains unchanged.\n", .{@errorName(err)});
-                        return messages.Message{ .state_root = self.current_state_root.? };
+                        span.err("Failed to import block: {s}. Sending error response.", .{@errorName(err)});
+                        // Allocate error message string
+                        const error_msg = try std.fmt.allocPrint(self.allocator, "Block import failed: {s}", .{@errorName(err)});
+                        return messages.Message{ .@"error" = error_msg };
                     };
-                    defer result.deinit();
 
                     span.debug("Block imported successfully, sealed with tickets: {}", .{result.sealed_with_tickets});
 
                     // SET TO TRUE to simulate a failing state transition
+                    // FIXME: remove when done
                     if (false) {
                         var pi_prime: *@import("../state.zig").Pi = result.state_transition.get(.pi_prime) catch |err| {
                             span.err("State transition failed: {s}", .{@errorName(err)});
@@ -304,13 +377,17 @@ pub fn TargetServer(comptime IOExecutor: type) type {
                         pi_prime.current_epoch_stats.items[0].blocks_produced += 1; // Increment epoch stats for testing
                     }
 
-                    // Merge the transition results into our current state
-                    try result.state_transition.mergePrimeOntoBase();
+                    // Compute state root from uncommitted transition
+                    const new_state_root = try result.state_transition.computeStateRoot(self.allocator);
 
-                    // Update our cached state root
-                    self.current_state_root = try self.computeStateRoot();
+                    // Store pending result for potential commit later
+                    self.pending_result = result;
+                    self.current_state_root = new_state_root;
+                    self.last_block_hash = block_hash;
 
-                    return messages.Message{ .state_root = self.current_state_root.? };
+                    span.debug("Block processed, state root: {s}", .{std.fmt.fmtSliceHexLower(&new_state_root)});
+
+                    return messages.Message{ .state_root = new_state_root };
                 },
 
                 .get_state => |header_hash| {

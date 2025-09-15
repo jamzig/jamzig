@@ -176,11 +176,13 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
                 return error.NotConnected;
             }
 
-            // Send fuzzer peer info
+            // Send fuzzer peer info (v1 format)
             const fuzzer_peer_info = messages.PeerInfo{
-                .name = "jamzig-fuzzer", // NOTE: static string here => no deinit
-                .version = version.FUZZ_TARGET_VERSION,
-                .protocol_version = version.PROTOCOL_VERSION,
+                .fuzz_version = version.FUZZ_PROTOCOL_VERSION,
+                .fuzz_features = version.DEFAULT_FUZZ_FEATURES,
+                .jam_version = version.PROTOCOL_VERSION,
+                .app_version = version.FUZZ_TARGET_VERSION,
+                .app_name = "jamzig-fuzzer", // NOTE: static string here => no deinit
             };
 
             // REFACTOR: I see  a pattern here, send message and waiting for a response. Seperate this
@@ -193,7 +195,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
             switch (response) {
                 .peer_info => |peer_info| {
-                    span.debug("Received peer info from: {s}", .{peer_info.name});
+                    span.debug("Received peer info from: {s}", .{peer_info.app_name});
                     // TODO: Validate protocol compatibility
                     self.state = .handshake_complete;
                 },
@@ -203,18 +205,44 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             span.debug("Handshake completed successfully", .{});
         }
 
-        /// Set state on target
+        /// Initialize state on target (v1)
+        /// REFACTOR: rename this to initializeTarget
         pub fn setState(self: *Self, header: types.Header, state: messages.State) !messages.StateRootHash {
-            const span = trace.span(@src(), .fuzzer_set_state);
+            const span = trace.span(@src(), .fuzzer_initialize_state);
             defer span.deinit();
-            span.debug("Setting state on target with {d} key-value pairs", .{state.items.len});
+            span.debug("Initializing state on target with {d} key-value pairs", .{state.items.len});
 
             if (self.state != .handshake_complete) {
                 return error.HandshakeNotComplete;
             }
 
-            // Send SetState message
-            try self.sendMessage(.{ .set_state = .{ .header = header, .state = state } });
+            // Extract ancestry from current JAM state's Beta component
+            var ancestry_items = std.ArrayList(messages.AncestryItem).init(self.allocator);
+            defer ancestry_items.deinit();
+
+            if (self.current_jam_state.beta) |beta| {
+                span.debug("Extracting {d} recent blocks as ancestry", .{beta.recent_history.blocks.items.len});
+                for (beta.recent_history.blocks.items) |block| {
+                    // Note: We need timeslot from somewhere - for now we'll skip blocks without timeslot
+                    // In the future we might need to track timeslots in BlockInfo
+                    try ancestry_items.append(.{
+                        .slot = header.slot, // Use current block's slot as approximation
+                        .header_hash = block.header_hash,
+                    });
+                }
+            }
+
+            var ancestry = messages.Ancestry{
+                .items = try ancestry_items.toOwnedSlice(),
+            };
+            defer ancestry.deinit(self.allocator);
+
+            // Send Initialize message (v1) with ancestry
+            try self.sendMessage(.{ .initialize = .{
+                .header = header,
+                .keyvals = state,
+                .ancestry = ancestry,
+            } });
 
             // Receive StateRoot response
             var response = try self.readMessage();
