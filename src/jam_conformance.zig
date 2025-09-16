@@ -218,7 +218,7 @@ test "jam-conformance:traces" {
         defer sequential_executor.deinit();
 
         // Create embedded fuzzer
-        var fuzzer = try trace_runner.fuzzer_mod.createEmbeddedFuzzer(&sequential_executor, allocator, 0);
+        var fuzzer = try trace_runner.fuzzer_mod.createEmbeddedFuzzer(FUZZ_PARAMS, &sequential_executor, allocator, 0);
         defer fuzzer.destroy();
 
         // Connect and handshake with embedded target
@@ -405,7 +405,7 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
         }
 
         // Create embedded fuzzer for this trace directory
-        var fuzzer = trace_runner.fuzzer_mod.createEmbeddedFuzzer(&sequential_executor, allocator, 0) catch |err| {
+        var fuzzer = trace_runner.fuzzer_mod.createEmbeddedFuzzer(FUZZ_PARAMS, &sequential_executor, allocator, 0) catch |err| {
             std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ Failed to create fuzzer: {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, @errorName(err) });
             stats_entry.value_ptr.failed += 1;
             total_failed += 1;

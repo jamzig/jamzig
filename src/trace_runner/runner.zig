@@ -18,8 +18,9 @@ const trace = tracing.scoped(.trace_runner);
 
 // Type aliases for common configurations
 const EmbeddedFuzzer = fuzzer_mod.Fuzzer(
+    jam_params.TINY_PARAMS,
     io.SequentialExecutor,
-    embedded_target.EmbeddedTarget(io.SequentialExecutor),
+    embedded_target.EmbeddedTarget(jam_params.TINY_PARAMS, io.SequentialExecutor),
 );
 
 // Trace processing result types
@@ -352,10 +353,8 @@ pub fn runTracesInDir(
     allocator: std.mem.Allocator,
     test_dir: []const u8,
 ) !TraceRunResult {
-    _ = params; // Unused, we use messages.FUZZ_PARAMS internally
-
     // Create embedded fuzzer
-    var fuzzer = try fuzzer_mod.createEmbeddedFuzzer(executor, allocator, 0);
+    var fuzzer = try fuzzer_mod.createEmbeddedFuzzer(params, executor, allocator, 0);
     defer fuzzer.destroy();
 
     // Connect and handshake
