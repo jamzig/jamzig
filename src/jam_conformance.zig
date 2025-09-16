@@ -10,7 +10,6 @@ const io = @import("io.zig");
 
 // Use FUZZ_PARAMS for consistency with fuzz protocol testing
 const FUZZ_PARAMS = jam_params.TINY_PARAMS;
-const RunConfig = trace_runner.RunConfig;
 
 // Skipped tests configuration
 const SkippedTest = struct {
