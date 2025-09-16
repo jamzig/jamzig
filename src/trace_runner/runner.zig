@@ -1,19 +1,337 @@
 const std = @import("std");
 const testing = std.testing;
 
-pub const trace_runner = @import("parsers.zig");
-pub const state_transitions = @import("state_transitions.zig");
+const trace_runner = @import("parsers.zig");
+const state_transitions = @import("state_transitions.zig");
+pub const fuzzer_mod = @import("../fuzz_protocol/fuzzer.zig");
+const embedded_target = @import("../fuzz_protocol/embedded_target.zig");
+const messages = @import("../fuzz_protocol/messages.zig");
+const state_converter = @import("../fuzz_protocol/state_converter.zig");
 
 const types = @import("../types.zig");
 const state = @import("../state.zig");
-const state_dict = @import("../state_dictionary.zig");
 const jam_params = @import("../jam_params.zig");
-const block_import = @import("../block_import.zig");
 const io = @import("../io.zig");
 
 const tracing = @import("tracing");
 const trace = tracing.scoped(.trace_runner);
 
+// Type aliases for common configurations
+const EmbeddedFuzzer = fuzzer_mod.Fuzzer(
+    io.SequentialExecutor,
+    embedded_target.EmbeddedTarget(io.SequentialExecutor),
+);
+
+// Trace processing result types
+pub const Success = struct { post_root: [32]u8 };
+pub const Fork = struct { expected_parent: [32]u8, actual_parent: [32]u8 };
+pub const NoOp = struct { error_name: []const u8 };
+pub const Mismatch = struct { expected_root: [32]u8, actual_root: [32]u8 };
+pub const ProcessError = struct { err: anyerror, context: []const u8 };
+
+pub const TraceResult = union(enum) {
+    success: Success,
+    fork: Fork,
+    no_op: NoOp,
+    mismatch: Mismatch,
+    @"error": ProcessError,
+};
+
+// Lazy-loading trace iterator
+pub const TraceIterator = struct {
+    allocator: std.mem.Allocator,
+    loader: trace_runner.Loader,
+    transitions: state_transitions.StateTransitions,
+    index: usize,
+
+    const Self = @This();
+
+    pub fn next(self: *Self) !?trace_runner.StateTransition {
+        const span = trace.span(@src(), .trace_iterator_next);
+        defer span.deinit();
+
+        if (self.index >= self.transitions.items().len) {
+            span.debug("Iterator exhausted", .{});
+            return null;
+        }
+
+        const transition_pair = self.transitions.items()[self.index];
+        self.index += 1;
+
+        span.debug("Loading transition {d}: {s}", .{ self.index, transition_pair.bin.name });
+
+        // Load and parse only when requested
+        return try self.loader.loadTestVector(self.allocator, transition_pair.bin.path);
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.transitions.deinit(self.allocator);
+        self.* = undefined;
+    }
+};
+
+// Create iterator for lazy trace loading
+pub fn traceIterator(
+    allocator: std.mem.Allocator,
+    loader: trace_runner.Loader,
+    dir: []const u8,
+) !TraceIterator {
+    const span = trace.span(@src(), .create_trace_iterator);
+    defer span.deinit();
+
+    // Collect state transition file pairs (but don't load content)
+    var transitions = try state_transitions.collectStateTransitions(dir, allocator);
+    span.debug("Found {d} transition files in {s}", .{ transitions.items().len, dir });
+
+    return TraceIterator{
+        .allocator = allocator,
+        .loader = loader,
+        .transitions = transitions,
+        .index = 0,
+    };
+}
+
+// Main trace processing function
+pub fn processTrace(
+    fuzzer: *EmbeddedFuzzer,
+    transition: trace_runner.StateTransition,
+    is_first: bool,
+) !TraceResult {
+    const span = trace.span(@src(), .process_trace);
+    defer span.deinit();
+
+    if (is_first) {
+        span.debug("Processing first trace - initializing state", .{});
+
+        // Initialize state from pre-state dictionary
+        var pre_dict = transition.preStateAsMerklizationDict(fuzzer.allocator) catch |err| {
+            span.err("Failed to get pre-state dictionary: {s}", .{@errorName(err)});
+            return TraceResult{ .@"error" = .{ .err = err, .context = "Failed to load pre-state dictionary" } };
+        };
+        defer pre_dict.deinit();
+
+        var fuzz_state = state_converter.dictionaryToFuzzState(fuzzer.allocator, &pre_dict) catch |err| {
+            span.err("Failed to convert dictionary to fuzz state: {s}", .{@errorName(err)});
+            return TraceResult{ .@"error" = .{ .err = err, .context = "Failed to convert pre-state to fuzz format" } };
+        };
+        defer fuzz_state.deinit(fuzzer.allocator);
+
+        // Get block header for setState call
+        const block = transition.block();
+
+        // Send state to embedded target
+        const actual_state_root = fuzzer.setState(block.*.header, fuzz_state) catch |err| {
+            span.err("Failed to set state on target: {s}", .{@errorName(err)});
+            return TraceResult{ .@"error" = .{ .err = err, .context = "Failed to initialize target state" } };
+        };
+
+        // Verify pre-state root matches
+        const expected_pre_root = transition.preStateRoot();
+        if (!std.mem.eql(u8, &expected_pre_root, &actual_state_root)) {
+            span.err("Pre-state root mismatch", .{});
+            return TraceResult{ .mismatch = .{
+                .expected_root = expected_pre_root,
+                .actual_root = actual_state_root,
+            } };
+        }
+
+        span.debug("State initialized successfully", .{});
+    }
+
+    // Import the block
+    const block = transition.block();
+    const target_state_root = fuzzer.sendBlock(block) catch |err| {
+        span.err("Failed to send block: {s}", .{@errorName(err)});
+        return TraceResult{ .@"error" = .{ .err = err, .context = "Failed to send block to target" } };
+    };
+
+    // Compare the target state root with the expected post-state root
+    const expected_post_root = transition.postStateRoot();
+    if (!std.mem.eql(u8, &expected_post_root, &target_state_root)) {
+        span.err("Post-state root mismatch", .{});
+        return TraceResult{ .mismatch = .{
+            .expected_root = expected_post_root,
+            .actual_root = target_state_root,
+        } };
+    }
+
+    span.debug("Block processed successfully", .{});
+    return TraceResult{ .success = .{ .post_root = target_state_root } };
+
+    // Note: We don't currently detect no-ops in this simplified version.
+    // The fuzzer's trace mode only detects when the state root doesn't change,
+    // but we don't have access to the previous state root in this function.
+}
+
+// Report generation types
+pub const Summary = struct {
+    total: usize,
+    success: usize,
+    forks: usize,
+    no_ops: usize,
+    mismatches: usize,
+    errors: usize,
+};
+
+pub const FailureDetail = struct {
+    index: usize,
+    trace_name: []const u8,
+    result: TraceResult,
+};
+
+pub const NoOpDetail = struct {
+    index: usize,
+    trace_name: []const u8,
+    error_name: []const u8,
+};
+
+pub const ConformanceReport = struct {
+    allocator: std.mem.Allocator,
+    summary: Summary,
+    failures: []FailureDetail,
+    no_op_blocks: []NoOpDetail,
+
+    const Self = @This();
+
+    pub fn format(self: *const Self) ![]u8 {
+        var output = std.ArrayList(u8).init(self.allocator);
+        defer output.deinit();
+
+        const writer = output.writer();
+
+        // Summary section
+        try writer.print("\n=== Conformance Test Results ===\n");
+        try writer.print("Total: {d} traces\n", .{self.summary.total});
+        try writer.print("Success: {d}\n", .{self.summary.success});
+        try writer.print("Forks: {d}\n", .{self.summary.forks});
+        try writer.print("No-ops: {d}\n", .{self.summary.no_ops});
+        try writer.print("Mismatches: {d}\n", .{self.summary.mismatches});
+        try writer.print("Errors: {d}\n", .{self.summary.errors});
+        try writer.print("\n");
+
+        // No-op blocks section
+        if (self.no_op_blocks.len > 0) {
+            try writer.print("=== No-op Blocks ===\n");
+            for (self.no_op_blocks) |no_op| {
+                try writer.print("[{d:3}] {s}: {s}\n", .{ no_op.index, no_op.trace_name, no_op.error_name });
+            }
+            try writer.print("\n");
+        }
+
+        // Failures section
+        if (self.failures.len > 0) {
+            try writer.print("=== Failures ===\n");
+            for (self.failures) |failure| {
+                try writer.print("[{d:3}] {s}: ", .{ failure.index, failure.trace_name });
+                switch (failure.result) {
+                    .mismatch => |mismatch| {
+                        try writer.print("State root mismatch\n");
+                        try writer.print("      Expected: {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.expected_root)});
+                        try writer.print("      Actual:   {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.actual_root)});
+                    },
+                    .fork => |fork| {
+                        try writer.print("Fork detected\n");
+                        try writer.print("      Expected parent: {s}\n", .{std.fmt.fmtSliceHexLower(&fork.expected_parent)});
+                        try writer.print("      Actual parent:   {s}\n", .{std.fmt.fmtSliceHexLower(&fork.actual_parent)});
+                    },
+                    .@"error" => |err_info| {
+                        try writer.print("Error: {s} - {s}\n", .{ @errorName(err_info.err), err_info.context });
+                    },
+                    else => try writer.print("Other failure\n"),
+                }
+            }
+            try writer.print("\n");
+        }
+
+        return try output.toOwnedSlice();
+    }
+
+    pub fn deinit(self: *Self) void {
+        for (self.failures) |failure| {
+            self.allocator.free(failure.trace_name);
+        }
+        self.allocator.free(self.failures);
+
+        for (self.no_op_blocks) |no_op| {
+            self.allocator.free(no_op.trace_name);
+            self.allocator.free(no_op.error_name);
+        }
+        self.allocator.free(self.no_op_blocks);
+
+        self.* = undefined;
+    }
+};
+
+// Generate comprehensive report from trace results
+pub fn generateReport(
+    allocator: std.mem.Allocator,
+    results: []TraceResult,
+    trace_names: [][]const u8,
+) !ConformanceReport {
+    const span = trace.span(@src(), .generate_report);
+    defer span.deinit();
+
+    var summary = Summary{
+        .total = results.len,
+        .success = 0,
+        .forks = 0,
+        .no_ops = 0,
+        .mismatches = 0,
+        .errors = 0,
+    };
+
+    var failures = std.ArrayList(FailureDetail).init(allocator);
+    var no_op_blocks = std.ArrayList(NoOpDetail).init(allocator);
+
+    for (results, 0..) |result, i| {
+        switch (result) {
+            .success => summary.success += 1,
+            .fork => {
+                summary.forks += 1;
+                try failures.append(.{
+                    .index = i,
+                    .trace_name = try allocator.dupe(u8, trace_names[i]),
+                    .result = result,
+                });
+            },
+            .no_op => |no_op| {
+                summary.no_ops += 1;
+                try no_op_blocks.append(.{
+                    .index = i,
+                    .trace_name = try allocator.dupe(u8, trace_names[i]),
+                    .error_name = try allocator.dupe(u8, no_op.error_name),
+                });
+            },
+            .mismatch => {
+                summary.mismatches += 1;
+                try failures.append(.{
+                    .index = i,
+                    .trace_name = try allocator.dupe(u8, trace_names[i]),
+                    .result = result,
+                });
+            },
+            .@"error" => {
+                summary.errors += 1;
+                try failures.append(.{
+                    .index = i,
+                    .trace_name = try allocator.dupe(u8, trace_names[i]),
+                    .result = result,
+                });
+            },
+        }
+    }
+
+    span.debug("Generated report - {d} total, {d} success, {d} failures", .{ summary.total, summary.success, failures.items.len });
+
+    return ConformanceReport{
+        .allocator = allocator,
+        .summary = summary,
+        .failures = try failures.toOwnedSlice(),
+        .no_op_blocks = try no_op_blocks.toOwnedSlice(),
+    };
+}
+
+// Legacy compatibility - kept for now to maintain existing imports
 pub const RunConfig = struct {
     quiet: bool = false,
 };
@@ -29,438 +347,3 @@ pub const RunResult = struct {
     }
 };
 
-const ForkStatus = enum {
-    continuous,
-    sibling_fork,
-    discontinuous,
-};
-
-const ProcessResult = union(enum) {
-    success: struct {
-        block_hash: [32]u8,
-        parent_hash: [32]u8,
-        sealed_with_tickets: bool,
-    },
-    no_op_handled: struct {
-        error_name: []const u8,
-    },
-    error_handled: struct {
-        error_name: []const u8,
-    },
-};
-
-/// Simplified trace runner that consolidates all state management and processing logic
-pub fn TraceRunner(comptime IOExecutor: type, comptime params: jam_params.Params) type {
-    return struct {
-        allocator: std.mem.Allocator,
-        importer: block_import.BlockImporter(IOExecutor, params),
-        loader: trace_runner.Loader,
-        config: RunConfig,
-
-        // State management
-        current_state: ?state.JamState(params) = null,
-        last_block_hash: ?[32]u8 = null,
-        last_parent_hash: ?[32]u8 = null,
-
-        // Result tracking
-        had_no_op_blocks: bool = false,
-        no_op_exceptions: std.ArrayList(u8),
-
-        const Self = @This();
-
-        pub fn init(
-            allocator: std.mem.Allocator,
-            executor: *IOExecutor,
-            loader: trace_runner.Loader,
-            config: RunConfig,
-        ) Self {
-            return .{
-                .allocator = allocator,
-                .importer = block_import.BlockImporter(IOExecutor, params).init(executor, allocator),
-                .loader = loader,
-                .config = config,
-                .no_op_exceptions = std.ArrayList(u8).init(allocator),
-            };
-        }
-
-        pub fn deinit(self: *Self) void {
-            if (self.current_state) |*cs| cs.deinit(self.allocator);
-            self.no_op_exceptions.deinit();
-            self.* = undefined;
-        }
-
-        /// Main entry point - run all transitions in the directory
-        pub fn runTransitions(self: *Self, test_dir: []const u8) !RunResult {
-            // Load all transitions
-            const offset = try getStartOffset(self.allocator);
-            var transitions = try state_transitions.collectStateTransitions(test_dir, self.allocator);
-            defer transitions.deinit(self.allocator);
-
-            if (!self.config.quiet) {
-                std.log.info("Collected {d} state transition vectors", .{transitions.items().len});
-                if (offset > 0) {
-                    std.log.info("Starting from offset: {d}", .{offset});
-                }
-            }
-
-            // Process each transition
-            for (transitions.items()[offset..], offset..) |transition_file, idx| {
-                if (shouldSkipTransition(transition_file.bin.name)) continue;
-
-                if (!self.config.quiet) {
-                    std.log.info("Processing block import {d}: {s}", .{ idx, transition_file.bin.name });
-                }
-
-                const result = try self.processTransition(transition_file);
-                self.updateTracking(result);
-            }
-
-            return self.buildResult();
-        }
-
-        /// Process a single state transition
-        fn processTransition(self: *Self, transition_file: state_transitions.StateTransitionPair) !ProcessResult {
-            // Load the test vector
-            var transition = try self.loader.loadTestVector(self.allocator, transition_file.bin.path);
-            defer transition.deinit(self.allocator);
-
-            // Check fork status
-            const fork_status = self.detectFork(transition.block().header.parent);
-
-            // Validate continuity
-            if (fork_status == .discontinuous) {
-                std.log.err("Trace continuity error - blocks are not continuous", .{});
-                return error.TraceContinuityError;
-            }
-
-            if (fork_status == .sibling_fork) {
-                std.log.warn("Fork detected - resetting to fork point", .{});
-            }
-
-            // Validate roots
-            try transition.validateRoots(self.allocator);
-
-            // Ensure state is initialized/reset if needed
-            try self.ensureState(&transition, fork_status);
-
-            // Validate pre-state root
-            const pre_state_root = try self.current_state.?.buildStateRoot(self.allocator);
-            const expected_pre = transition.preStateRoot();
-
-            if (!std.mem.eql(u8, &expected_pre, &pre_state_root)) {
-                std.log.err("Pre-state root mismatch", .{});
-                std.log.err("Expected: {s}", .{std.fmt.fmtSliceHexLower(&expected_pre)});
-                std.log.err("Actual: {s}", .{std.fmt.fmtSliceHexLower(&pre_state_root)});
-                try self.showStateDiff(&transition);
-                return error.PreStateRootMismatch;
-            }
-
-            // Log block info
-            self.logBlockInfo(transition.block());
-
-            // Check if this is a no-op block
-            const expected_post = transition.postStateRoot();
-            const is_no_op = std.mem.eql(u8, &expected_pre, &expected_post);
-
-            if (is_no_op) {
-                if (!self.config.quiet) {
-                    std.log.warn("No-Op Block Detected (pre_state == post_state)", .{});
-                }
-                return self.processNoOpBlock(&transition, expected_post);
-            } else {
-                return self.processNormalBlock(&transition, expected_post);
-            }
-        }
-
-        /// Process a normal (state-changing) block
-        fn processNormalBlock(self: *Self, transition: *const trace_runner.StateTransition, expected_post: [32]u8) !ProcessResult {
-            // Import the block with retry logic
-            var import_result = self.importBlockWithRetry(transition.block()) catch |err| {
-                std.log.err("Block import failed: {s}", .{@errorName(err)});
-                return error.BlockImportFailed;
-            };
-            defer import_result.deinit();
-
-            if (!self.config.quiet) {
-                std.log.debug("Block sealed with tickets: {}", .{import_result.sealed_with_tickets});
-            }
-
-            // Merge state changes
-            try import_result.state_transition.mergePrimeOntoBase();
-
-            // Validate post-state
-            try self.validatePostState(transition, expected_post);
-
-            const block_hash = try transition.block().header.header_hash(params, self.allocator);
-
-            return ProcessResult{
-                .success = .{
-                    .block_hash = block_hash,
-                    .parent_hash = transition.block().header.parent,
-                    .sealed_with_tickets = import_result.sealed_with_tickets,
-                },
-            };
-        }
-
-        /// Process a no-op block (no state changes expected)
-        fn processNoOpBlock(self: *Self, transition: *const trace_runner.StateTransition, expected_post: [32]u8) !ProcessResult {
-            // Try to import - we expect this to fail
-            var import_result = self.importer.importBlockBuildingRoot(
-                &self.current_state.?,
-                transition.block(),
-            ) catch |err| {
-                if (!self.config.quiet) {
-                    std.log.debug("Block import failed (expected for no-op): {s}", .{@errorName(err)});
-                }
-
-                // Verify state hasn't changed
-                const current_root = try self.current_state.?.buildStateRoot(self.allocator);
-
-                if (std.mem.eql(u8, &expected_post, &current_root)) {
-                    if (!self.config.quiet) {
-                        std.log.info("State correctly remained unchanged (no-op validated)", .{});
-                    }
-                    return ProcessResult{ .no_op_handled = .{ .error_name = @errorName(err) } };
-                } else {
-                    std.log.err("State was modified when it shouldn't have been!", .{});
-                    return error.UnexpectedStateChangeOnNoOpBlock;
-                }
-            };
-            defer import_result.deinit();
-
-            // If import succeeded, verify no state change occurred
-            const current_root = try self.current_state.?.buildStateRoot(self.allocator);
-
-            if (!std.mem.eql(u8, &expected_post, &current_root)) {
-                std.log.err("Block import succeeded but state changed for no-op block!", .{});
-                return error.NoOpBlockChangedState;
-            }
-
-            if (!self.config.quiet) {
-                std.log.info("No-op block processed successfully with no state changes", .{});
-            }
-            return ProcessResult{ .no_op_handled = .{ .error_name = "none" } };
-        }
-
-        /// Import block with retry and enhanced tracing on failure
-        fn importBlockWithRetry(
-            self: *Self,
-            block: *const types.Block,
-        ) !block_import.BlockImporter(IOExecutor, params).ImportResult {
-            return self.importer.importBlockBuildingRoot(
-                &self.current_state.?,
-                block,
-            ) catch {
-                // Retry with tracing enabled
-                if (!self.config.quiet) {
-                    std.log.debug("Retrying with debug tracing enabled...", .{});
-                }
-
-                try tracing.setScope("block_import", .trace);
-                defer tracing.disableScope("block_import");
-                try tracing.setScope("stf", .trace);
-                defer tracing.disableScope("stf");
-
-                return self.importer.importBlockBuildingRoot(
-                    &self.current_state.?,
-                    block,
-                ) catch |retry_err| {
-                    std.log.err("Error persists after retry: {s}", .{@errorName(retry_err)});
-                    return retry_err;
-                };
-            };
-        }
-
-        /// Detect fork status based on block parent hash
-        fn detectFork(self: *const Self, current_parent: [32]u8) ForkStatus {
-            if (self.last_block_hash) |last_hash| {
-                if (!std.mem.eql(u8, &last_hash, &current_parent)) {
-                    // Check if this is a sibling fork
-                    if (self.last_parent_hash) |last_parent| {
-                        if (std.mem.eql(u8, &last_parent, &current_parent)) {
-                            return .sibling_fork;
-                        }
-                    }
-                    return .discontinuous;
-                }
-            }
-            return .continuous;
-        }
-
-        /// Ensure state is initialized or reset as needed
-        fn ensureState(
-            self: *Self,
-            transition: *const trace_runner.StateTransition,
-            fork_status: ForkStatus,
-        ) !void {
-            const needs_init = self.current_state == null or fork_status == .sibling_fork;
-
-            if (needs_init) {
-                if (self.current_state) |*cs| cs.deinit(self.allocator);
-
-                var pre_state_dict = try transition.preStateAsMerklizationDict(self.allocator);
-                defer pre_state_dict.deinit();
-
-                self.current_state = try state_dict.reconstruct.reconstructState(
-                    params,
-                    self.allocator,
-                    &pre_state_dict,
-                );
-
-                // Validate reconstruction
-                var current_state_dict = try self.current_state.?.buildStateMerklizationDictionary(self.allocator);
-                defer current_state_dict.deinit();
-
-                var diff = try current_state_dict.diff(&pre_state_dict);
-                defer diff.deinit();
-
-                if (diff.has_changes()) {
-                    return error.GenesisStateDiff;
-                }
-            }
-        }
-
-        /// Validate post-state matches expected
-        fn validatePostState(
-            self: *Self,
-            transition: *const trace_runner.StateTransition,
-            expected_post: [32]u8,
-        ) !void {
-            var current_dict = try self.current_state.?.buildStateMerklizationDictionary(self.allocator);
-            defer current_dict.deinit();
-
-            var expected_dict = try transition.postStateAsMerklizationDict(self.allocator);
-            defer expected_dict.deinit();
-
-            var diff = try current_dict.diff(&expected_dict);
-            defer diff.deinit();
-
-            if (diff.has_changes()) {
-                std.log.err("Expected state difference detected", .{});
-                if (!self.config.quiet) {
-                    std.log.debug("{}", .{diff});
-                }
-                try self.showStateDiff(transition);
-                return error.UnexpectedStateDiff;
-            }
-
-            const state_root = try self.current_state.?.buildStateRoot(self.allocator);
-
-            if (std.mem.eql(u8, &expected_post, &state_root)) {
-                if (!self.config.quiet) {
-                    std.log.info("Post-state root matches: {s}", .{std.fmt.fmtSliceHexLower(&state_root)});
-                }
-            } else {
-                std.log.err("Post-state root mismatch!", .{});
-                std.log.err("Expected: {s}", .{std.fmt.fmtSliceHexLower(&expected_post)});
-                std.log.err("Actual: {s}", .{std.fmt.fmtSliceHexLower(&state_root)});
-                return error.PostStateRootMismatch;
-            }
-        }
-
-        /// Update internal tracking based on process result
-        fn updateTracking(self: *Self, result: ProcessResult) void {
-            switch (result) {
-                .success => |data| {
-                    self.last_block_hash = data.block_hash;
-                    self.last_parent_hash = data.parent_hash;
-                },
-                .no_op_handled => |data| {
-                    self.had_no_op_blocks = true;
-                    if (self.no_op_exceptions.items.len > 0) {
-                        self.no_op_exceptions.appendSlice(", ") catch {};
-                    }
-                    self.no_op_exceptions.appendSlice(data.error_name) catch {};
-                },
-                .error_handled => {},
-            }
-        }
-
-        /// Build final run result
-        fn buildResult(self: *Self) !RunResult {
-            return RunResult{
-                .had_no_op_blocks = self.had_no_op_blocks,
-                .no_op_exceptions = if (self.no_op_exceptions.items.len > 0)
-                    try self.no_op_exceptions.toOwnedSlice()
-                else
-                    "",
-            };
-        }
-
-        /// Log block information
-        fn logBlockInfo(self: *const Self, block: *const types.Block) void {
-            if (!self.config.quiet) {
-                std.log.debug("Extrinsic contents: tickets={d}, preimages={d}, guarantees={d}, assurances={d}, disputes(v={d},c={d},f={d})", .{
-                    block.extrinsic.tickets.data.len,
-                    block.extrinsic.preimages.data.len,
-                    block.extrinsic.guarantees.data.len,
-                    block.extrinsic.assurances.data.len,
-                    block.extrinsic.disputes.verdicts.len,
-                    block.extrinsic.disputes.culprits.len,
-                    block.extrinsic.disputes.faults.len,
-                });
-            }
-        }
-
-        /// Show state diff for debugging
-        fn showStateDiff(self: *Self, transition: *const trace_runner.StateTransition) !void {
-            var expected_dict = try transition.postStateAsMerklizationDict(self.allocator);
-            defer expected_dict.deinit();
-
-            var expected_state = try state_dict.reconstruct.reconstructState(params, self.allocator, &expected_dict);
-            defer expected_state.deinit(self.allocator);
-
-            var state_diff = try @import("../tests/state_diff.zig").JamStateDiff(params).build(
-                self.allocator,
-                &self.current_state.?,
-                &expected_state,
-            );
-            defer state_diff.deinit();
-
-            state_diff.printToStdErr();
-        }
-    };
-}
-
-/// Public entry point with configuration support
-pub fn runTracesInDirWithConfig(
-    comptime IOExecutor: type,
-    executor: *IOExecutor,
-    comptime params: jam_params.Params,
-    loader: trace_runner.Loader,
-    allocator: std.mem.Allocator,
-    test_dir: []const u8,
-    config: RunConfig,
-) !RunResult {
-    var runner = TraceRunner(IOExecutor, params).init(allocator, executor, loader, config);
-    defer runner.deinit();
-
-    return try runner.runTransitions(test_dir);
-}
-
-/// Public entry point - maintains backward compatibility
-pub fn runTracesInDir(
-    comptime IOExecutor: type,
-    executor: *IOExecutor,
-    comptime params: jam_params.Params,
-    loader: trace_runner.Loader,
-    allocator: std.mem.Allocator,
-    test_dir: []const u8,
-) !RunResult {
-    return runTracesInDirWithConfig(IOExecutor, executor, params, loader, allocator, test_dir, .{});
-}
-
-// Helper functions
-
-fn getStartOffset(allocator: std.mem.Allocator) !usize {
-    const offset_str = std.process.getEnvVarOwned(allocator, "OFFSET") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return 0,
-        else => return err,
-    };
-    defer allocator.free(offset_str);
-    return try std.fmt.parseInt(usize, offset_str, 10);
-}
-
-fn shouldSkipTransition(name: []const u8) bool {
-    return std.mem.eql(u8, name, "genesis.bin");
-}

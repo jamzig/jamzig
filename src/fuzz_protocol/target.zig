@@ -71,21 +71,34 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            // Deinit JAM state
+            const span = trace.span(@src(), .deinit);
+            defer span.deinit();
+
             if (self.current_state) |*s| s.deinit(self.allocator);
 
-            // Clean up pending result
             if (self.pending_result) |*result| result.deinit();
 
-            // Clean up socket file if it exists
-            std.fs.deleteFileAbsolute(self.socket_path) catch |err| {
-                // Log but don't fail on cleanup error
-                const inner_span = trace.span(@src(), .cleanup_error);
-                defer inner_span.deinit();
-                inner_span.err("Failed to delete socket file: {s}", .{@errorName(err)});
-            };
+            if (self.socket_path.len > 0 and std.fs.path.isAbsolute(self.socket_path)) {
+                const stat = std.fs.cwd().statFile(self.socket_path) catch |err| switch (err) {
+                    error.FileNotFound => {
+                        return;
+                    },
+                    else => {
+                        span.warn("Cannot stat socket file for cleanup: {s}", .{@errorName(err)});
+                        return;
+                    },
+                };
 
-            self.* = undefined; // Clear the struct
+                if (stat.kind == .unix_domain_socket) {
+                    std.fs.deleteFileAbsolute(self.socket_path) catch |err| {
+                        span.err("Failed to delete socket file: {s}", .{@errorName(err)});
+                    };
+                } else {
+                    span.warn("Path exists but is not a socket (kind={s}), not deleting: {s}", .{ @tagName(stat.kind), self.socket_path });
+                }
+            }
+
+            self.* = undefined;
         }
 
         /// Request server shutdown
