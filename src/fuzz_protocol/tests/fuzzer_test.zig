@@ -41,8 +41,8 @@ test "fuzzer_initialization" {
     // try testing.expectEqual(@as(?net.Stream, null), fuzzer.socket);
 }
 
-test "fuzzer_basic_cycle" {
-    const span = trace.span(@src(), .fuzzer_basic_cycle_test);
+test "fuzzer_socket_target_cycle" {
+    const span = trace.span(@src(), .fuzzer_socket_cycle_test);
     defer span.deinit();
 
     const allocator = testing.allocator;
@@ -81,4 +81,36 @@ test "fuzzer_basic_cycle" {
     // For now, we expect success since we're testing against our own target
     // In a real conformance test, there might be mismatches
     // span.debug("Fuzz cycle completed. Success: {}", .{result.isSuccess()});
+}
+
+test "fuzzer_embedded_target_cycle" {
+    const span = trace.span(@src(), .fuzzer_embedded_cycle_test);
+    defer span.deinit();
+
+    const allocator = testing.allocator;
+    const seed: u64 = 67890;
+
+    // Create executor for embedded target
+    var executor = try io.SequentialExecutor.init(allocator);
+    defer executor.deinit();
+
+    // Create embedded fuzzer (no socket, no background thread needed)
+    var fuzzer_instance = try fuzzer_mod.createEmbeddedFuzzer(&executor, allocator, seed);
+    defer fuzzer_instance.destroy();
+
+    // Connect to embedded target (sets state to .connected)
+    try fuzzer_instance.connectToTarget();
+
+    // Perform handshake (sets state to .handshake_complete)
+    try fuzzer_instance.performHandshake();
+
+    // Run a short fuzzing cycle
+    var result = try fuzzer_instance.runFuzzCycle(3);
+    defer result.deinit(allocator);
+
+    // Verify results - embedded target should work correctly
+    try testing.expectEqual(@as(usize, 3), result.blocks_processed);
+    try testing.expect(result.success);
+
+    span.debug("Embedded fuzz cycle completed successfully with {d} blocks", .{result.blocks_processed});
 }
