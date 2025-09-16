@@ -721,6 +721,18 @@ pub fn HostCalls(comptime params: Params) type {
                 span.debug("Manager granting {d} bytes of free storage", .{free_storage_offset});
             }
 
+            // WARN: We need to create the service account first, since there is a
+            // chance we are growing the underlying container which could move the items
+            // in memory. After we created we are ensured that the getMutable pointer will be valid
+            // for as long we are not adding to the container.
+
+            // Create the new service account first
+            span.debug("Creating new service account with ID: {d}", .{ctx_regular.new_service_id});
+            var new_account = ctx_regular.context.service_accounts.createService(ctx_regular.new_service_id) catch {
+                span.err("Failed to create new service account", .{});
+                return .{ .terminal = .panic };
+            };
+
             // Get the calling service account
             span.debug("Looking up calling service account: {d}", .{ctx_regular.service_id});
             const calling_service = ctx_regular.context.service_accounts.getMutable(ctx_regular.service_id) catch {
@@ -728,13 +740,6 @@ pub fn HostCalls(comptime params: Params) type {
                 return .{ .terminal = .panic };
             } orelse {
                 span.err("Calling service account not found, this should never happen", .{});
-                return .{ .terminal = .panic };
-            };
-
-            // Create the new service account first
-            span.debug("Creating new service account with ID: {d}", .{ctx_regular.new_service_id});
-            var new_account = ctx_regular.context.service_accounts.createService(ctx_regular.new_service_id) catch {
-                span.err("Failed to create new service account", .{});
                 return .{ .terminal = .panic };
             };
 
