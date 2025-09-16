@@ -4,8 +4,11 @@ const tracing = @import("tracing");
 const build_tuned_allocator = @import("build_tuned_allocator.zig");
 
 const io = @import("io.zig");
-const Fuzzer = @import("fuzz_protocol/fuzzer.zig").Fuzzer;
+const fuzzer_mod = @import("fuzz_protocol/fuzzer.zig");
+const socket_target = @import("fuzz_protocol/socket_target.zig");
 const report = @import("fuzz_protocol/report.zig");
+
+const SocketFuzzer = fuzzer_mod.Fuzzer(io.SequentialExecutor, socket_target.SocketTarget);
 const jam_params = @import("jam_params.zig");
 const jam_params_format = @import("jam_params_format.zig");
 const build_options = @import("build_options");
@@ -142,9 +145,10 @@ pub fn main() !void {
 
     // For our fuzzer we use a simple sequential executor
     var executor = try io.SequentialExecutor.init(allocator);
+    defer executor.deinit();
 
     // Create and run fuzzer
-    var fuzzer = try Fuzzer(io.SequentialExecutor).create(&executor, allocator, seed, socket_path);
+    var fuzzer = try fuzzer_mod.createSocketFuzzer(&executor, allocator, seed, socket_path);
     defer fuzzer.destroy();
 
     std.debug.print("Connecting to target at {s}...\n", .{socket_path});

@@ -10,10 +10,13 @@ const RestartBehavior = @import("../target.zig").RestartBehavior;
 
 const io = @import("../../io.zig");
 const fuzzer_mod = @import("../fuzzer.zig");
+const socket_target = @import("../socket_target.zig");
+const embedded_target = @import("../embedded_target.zig");
 const messages = @import("../messages.zig");
 const report = @import("../report.zig");
 
-const Fuzzer = fuzzer_mod.Fuzzer;
+const SocketFuzzer = fuzzer_mod.Fuzzer(io.SequentialExecutor, socket_target.SocketTarget);
+const EmbeddedFuzzer = fuzzer_mod.Fuzzer(io.SequentialExecutor, embedded_target.EmbeddedTarget(io.SequentialExecutor));
 
 const trace = @import("tracing").scoped(.fuzz_protocol);
 
@@ -29,8 +32,8 @@ test "fuzzer_initialization" {
 
     var executor = try io.SequentialExecutor.init(allocator);
 
-    var fuzzer = try Fuzzer(io.SequentialExecutor).create(&executor, allocator, seed, socket_path);
-    defer fuzzer.destroy();
+    var fuzzer_instance = try fuzzer_mod.createSocketFuzzer(&executor, allocator, seed, socket_path);
+    defer fuzzer_instance.destroy();
 
     // Verify initialization
     // try testing.expectEqual(seed, fuzzer.seed);
@@ -57,20 +60,20 @@ test "fuzzer_basic_cycle" {
     // Start the fuzz target
     try target_mgr.start();
 
-    var fuzzer = try Fuzzer(io.SequentialExecutor).create(&executor, allocator, seed, socket_path);
-    defer fuzzer.destroy();
+    var fuzzer_instance = try fuzzer_mod.createSocketFuzzer(&executor, allocator, seed, socket_path);
+    defer fuzzer_instance.destroy();
 
     // std.time.sleep(std.time.ns_per_s * 1); // Give some time for the target to start
 
-    try fuzzer.connectToTarget();
-    try fuzzer.performHandshake();
+    try fuzzer_instance.connectToTarget();
+    try fuzzer_instance.performHandshake();
 
     // Run a short fuzzing cycle (this is an integration test with background target)
-    var result = try fuzzer.runFuzzCycle(3);
+    var result = try fuzzer_instance.runFuzzCycle(3);
     defer result.deinit(allocator);
 
     // This will also stop the target manager
-    fuzzer.endSession();
+    fuzzer_instance.endSession();
 
     // Verify results
     // try testing.expectEqual(@as(usize, 3), result.blocks_processed);

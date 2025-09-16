@@ -5,6 +5,9 @@ const testing = std.testing;
 const messages = @import("messages.zig");
 const frame = @import("frame.zig");
 const target = @import("target.zig");
+const socket_target = @import("socket_target.zig");
+const embedded_target = @import("embedded_target.zig");
+const target_interface = @import("target_interface.zig");
 const state_converter = @import("state_converter.zig");
 const shared = @import("tests/shared.zig");
 const report = @import("report.zig");
@@ -37,8 +40,37 @@ const FuzzerState = enum {
     }
 };
 
+/// Type aliases for common Fuzzer configurations
+pub const SocketFuzzer = Fuzzer(io.SequentialExecutor, socket_target.SocketTarget);
+pub const EmbeddedFuzzer = Fuzzer(io.SequentialExecutor, embedded_target.EmbeddedTarget(io.SequentialExecutor));
+
+/// Helper factory functions for creating fuzzer instances with target initialization
+pub fn createSocketFuzzer(
+    executor: *io.SequentialExecutor,
+    allocator: std.mem.Allocator,
+    seed: u64,
+    socket_path: []const u8,
+) !*SocketFuzzer {
+    var target_instance = try socket_target.SocketTarget.init(allocator, .{ .socket_path = socket_path });
+    errdefer target_instance.deinit();
+
+    return SocketFuzzer.create(executor, allocator, seed, target_instance);
+}
+
+pub fn createEmbeddedFuzzer(
+    executor: *io.SequentialExecutor,
+    allocator: std.mem.Allocator,
+    seed: u64,
+) !*EmbeddedFuzzer {
+    var target_instance = try embedded_target.EmbeddedTarget(io.SequentialExecutor).init(allocator, executor, .{});
+    errdefer target_instance.deinit();
+
+    return EmbeddedFuzzer.create(executor, allocator, seed, target_instance);
+}
+
 /// Main Fuzzer implementation for JAM protocol conformance testing
-pub fn Fuzzer(comptime IOExecutor: type) type {
+/// Parameterized by IOExecutor for async operations and Target for communication
+pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type) type {
     return struct {
         allocator: std.mem.Allocator,
 
@@ -54,28 +86,29 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
         latest_block: ?types.Block = null,
 
         // Target communication
-        socket: ?net.Stream = null,
-        socket_path: []const u8,
+        target: Target,
 
         // REFACTOR: we also need to track the current block, as sometimes we need to use the header hash
         // of the block
         state: FuzzerState = .initial,
 
-        /// Initialize fuzzer with deterministic seed and target socket path
-        pub fn create(executor: *IOExecutor, allocator: std.mem.Allocator, seed: u64, socket_path: []const u8) !*Self {
+        /// Initialize fuzzer with deterministic seed and pre-initialized target
+        pub fn create(executor: *IOExecutor, allocator: std.mem.Allocator, seed: u64, target_instance: Target) !*Self {
             const span = trace.span(@src(), .fuzzer_init);
             defer span.deinit();
 
-            span.debug("Initializing fuzzer with seed: {d}, socket: {s}", .{ seed, socket_path });
+            span.debug("Initializing fuzzer with seed: {d}", .{seed});
 
             // Create fuzzer struct first to ensure stable addresses
             const fuzzer = try allocator.create(Self);
             errdefer allocator.destroy(fuzzer);
 
+            // Use the provided target instance
+
             // Initialize fields to safe defaults
             fuzzer.* = .{
                 .allocator = allocator,
-                .socket_path = socket_path,
+                .target = target_instance,
                 .prng = std.Random.DefaultPrng.init(seed),
                 .rng = undefined,
                 .seed = seed,
@@ -83,7 +116,6 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
                 .block_importer = undefined,
                 .current_jam_state = undefined,
                 .latest_block = null,
-                .socket = null,
                 .state = .initial,
             };
 
@@ -125,8 +157,8 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             const span = trace.span(@src(), .fuzzer_deinit);
             defer span.deinit();
 
-            // Ensure socket is closed before destroying
-            self.disconnect();
+            // Clean up target
+            self.target.deinit();
 
             // Clean up JAM components
             self.block_builder.deinit();
@@ -139,30 +171,34 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
         const Self = @This();
 
-        /// Connect to target socket
+        /// Connect to target (if supported)
         pub fn connectToTarget(self: *Self) !void {
             const span = trace.span(@src(), .connect_target);
             defer span.deinit();
-            span.debug("Connecting to target socket: {s}", .{self.socket_path});
 
-            self.socket = try std.net.connectUnixSocket(self.socket_path);
-            self.state = .connected;
-
-            span.debug("Connected to target successfully", .{});
+            if (@hasDecl(Target, "connectToTarget")) {
+                try self.target.connectToTarget();
+                self.state = .connected;
+                span.debug("Connected to target successfully", .{});
+            } else {
+                // Embedded targets are always "connected"
+                self.state = .connected;
+                span.debug("Embedded target ready", .{});
+            }
         }
 
-        /// Disconnect from target
+        /// Disconnect from target (if supported)
         pub fn disconnect(self: *Self) void {
             const span = trace.span(@src(), .disconnect_target);
             defer span.deinit();
 
-            if (self.socket) |socket| {
-                socket.close();
-                self.socket = null;
-                self.state = .connected; // Reset state to connected
+            if (@hasDecl(Target, "disconnect")) {
+                self.target.disconnect();
+                self.state = .initial;
                 span.debug("Disconnected from target", .{});
             } else {
-                span.debug("No active connection to disconnect", .{});
+                // Embedded targets don't need disconnection
+                span.debug("No disconnection needed for embedded target", .{});
             }
         }
 
@@ -187,10 +223,10 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
 
             // REFACTOR: I see  a pattern here, send message and waiting for a response. Seperate this
             // and also add a timeout. So if we do not get a repsonse in a certain time, we error out.
-            try self.sendMessage(.{ .peer_info = fuzzer_peer_info });
+            try self.target.sendMessage(.{ .peer_info = fuzzer_peer_info });
 
             // Receive target peer info
-            var response = try self.readMessage();
+            var response = try self.target.readMessage();
             defer response.deinit(self.allocator);
 
             switch (response) {
@@ -238,14 +274,14 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             defer ancestry.deinit(self.allocator);
 
             // Send Initialize message (v1) with ancestry
-            try self.sendMessage(.{ .initialize = .{
+            try self.target.sendMessage(.{ .initialize = .{
                 .header = header,
                 .keyvals = state,
                 .ancestry = ancestry,
             } });
 
             // Receive StateRoot response
-            var response = try self.readMessage();
+            var response = try self.target.readMessage();
             defer response.deinit(self.allocator);
 
             switch (response) {
@@ -270,10 +306,10 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             }
 
             // Send ImportBlock message, do not free message we do not own the block
-            try self.sendMessage(.{ .import_block = block.* });
+            try self.target.sendMessage(.{ .import_block = block.* });
 
             // Receive StateRoot response
-            var response = try self.readMessage();
+            var response = try self.target.readMessage();
             defer response.deinit(self.allocator);
 
             switch (response) {
@@ -295,10 +331,10 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             try self.state.assertReachedState(.state_initialized);
 
             // Send GetState message
-            try self.sendMessage(.{ .get_state = header_hash });
+            try self.target.sendMessage(.{ .get_state = header_hash });
 
             // Receive State response
-            var response = try self.readMessage();
+            var response = try self.target.readMessage();
             defer response.deinit(self.allocator);
 
             switch (response) {
@@ -655,26 +691,7 @@ pub fn Fuzzer(comptime IOExecutor: type) type {
             // Reset state
             self.state = .initial;
 
-            // Clear socket
-            self.socket = null;
-
             span.debug("Fuzzer session ended successfully", .{});
-        }
-
-        /// Helper to send a message via socket
-        fn sendMessage(self: *Self, message: messages.Message) !void {
-            const socket = self.socket orelse return error.NotConnected;
-            const encoded = try messages.encodeMessage(self.allocator, message);
-            defer self.allocator.free(encoded);
-            try frame.writeFrame(socket, encoded);
-        }
-
-        /// Helper to read a message from socket
-        fn readMessage(self: *Self) !messages.Message {
-            const socket = self.socket orelse return error.NotConnected;
-            const frame_data = try frame.readFrame(self.allocator, socket);
-            defer self.allocator.free(frame_data);
-            return messages.decodeMessage(self.allocator, frame_data);
         }
 
         /// Target thread main function
