@@ -10,7 +10,7 @@ const ring_vrf = @import("../ring_vrf.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("tracing").scoped(.epoch_handler);
+const trace = @import("tracing").scoped(.safrole);
 const tracy = @import("tracy");
 
 /// Transitions the epoch, handling validator rotation and state updates
@@ -187,6 +187,11 @@ pub fn entropyBasedKeySelector(
 }
 
 pub fn deriveKeyIndex(r: [32]u8, i: usize, keys_len: usize) usize {
+    const span = trace.span(@src(), .derive_key_index);
+    defer span.deinit();
+
+    span.debug("deriveKeyIndex called with r: {any}, i: {}, keys_len: {}", .{ std.fmt.fmtSliceHexLower(&r), i, keys_len });
+
     // Step 1: Encode the index i into 4 bytes (u32)
     var encoded_index: [4]u8 = undefined;
     std.mem.writeInt(u32, &encoded_index, @intCast(i), .little);
