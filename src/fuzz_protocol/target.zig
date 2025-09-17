@@ -328,6 +328,8 @@ pub fn TargetServer(comptime IOExecutor: type, comptime params: @import("../jam_
                     self.current_state_root = try self.computeStateRoot();
                     self.server_state = .ready;
 
+                    self.last_block_state_root = self.current_state_root;
+
                     return messages.Message{ .state_root = self.current_state_root.? };
                 },
 
@@ -337,11 +339,11 @@ pub fn TargetServer(comptime IOExecutor: type, comptime params: @import("../jam_
 
                     if (self.server_state != .ready) return error.StateNotReady;
 
-                    span.debug("Processing ImportBlock", .{});
-                    span.trace("{}", .{types.fmt.format(block)});
-
                     // Calculate current block hash for fork tracking
                     const block_hash = try block.header.header_hash(params, self.allocator);
+
+                    span.debug("Processing ImportBlock: block_hash={x}", .{std.fmt.fmtSliceHexLower(&block_hash)});
+                    span.trace("{}", .{types.fmt.format(block)});
 
                     // Fork detection: check if this block's parent matches the last block
                     import_block_span.debug("Fork detection: last_block_hash={?s}, last_block_parent={?s}, current_block_parent={s}", .{
@@ -395,6 +397,15 @@ pub fn TargetServer(comptime IOExecutor: type, comptime params: @import("../jam_
                         self.pending_result = null;
                     }
 
+                    if (!is_fork) {
+                        // Update last block's state root after committing
+                        self.last_block_state_root = self.current_state_root;
+                    }
+
+                    // Fork tracking
+                    self.last_block_hash = block_hash;
+                    self.last_block_parent = block.header.parent;
+
                     // Import new block without committing
                     var result = self.block_importer.importBlockWithCachedRoot(
                         &self.current_state.?,
@@ -408,11 +419,6 @@ pub fn TargetServer(comptime IOExecutor: type, comptime params: @import("../jam_
                     };
 
                     span.debug("Block imported successfully, sealed with tickets: {}", .{result.sealed_with_tickets});
-
-                    // Fork tracking
-                    self.last_block_hash = block_hash;
-                    self.last_block_parent = block.header.parent;
-                    self.last_block_state_root = self.current_state_root;
 
                     // Store pending result for potential commit later
                     self.pending_result = result;
