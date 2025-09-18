@@ -156,6 +156,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             defer tickets.deinit(self.allocator);
 
             // Phase: Author validation (needs ticket information)
+            // TODO: cleanup code
             const author_key =
                 try self.validateAuthorConstraints(state, header, eta_prime, tickets.tickets);
 
@@ -324,15 +325,15 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
 
             // Author validation depends on whether we're in ticket mode or fallback mode
             if (tickets) |ticket_list| {
-                // TICKET MODE: Author is determined by the winning ticket
+                // TICKET MODE: Author is self-declared via header.author_index
+                // The seal verification will prove they own the winning ticket
+                // (Only the ticket owner can produce a seal with matching ticket ID)
                 span.debug("Validating author in ticket mode", .{});
 
                 const winning_ticket = ticket_list[time.current_slot_in_epoch];
                 _ = winning_ticket;
 
-                // TODO: ...
-
-                span.debug("Ticket mode author validation passed: slot_in_epoch={d}, author={d}", .{ time.current_slot_in_epoch, header.author_index });
+                span.debug("Ticket mode: author claims index {d}, ownership verified via seal", .{header.author_index});
             } else {
                 // FALLBACK MODE: Author is determined by entropy-based derivation
                 span.debug("Validating author in fallback mode", .{});
