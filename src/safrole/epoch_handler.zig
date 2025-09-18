@@ -207,5 +207,8 @@ pub fn deriveKeyIndex(r: [32]u8, i: usize, keys_len: usize) usize {
     const decoded = std.mem.readInt(u32, &first_4_bytes, .little);
 
     // Step 5: Take the modulus over the length of the keys
-    return decoded % keys_len;
+    const result = decoded % keys_len;
+    span.debug("result: {d}", .{result});
+
+    return result;
 }
