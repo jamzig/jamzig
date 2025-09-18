@@ -12,6 +12,7 @@ const types = @import("../types.zig");
 const state = @import("../state.zig");
 const jam_params = @import("../jam_params.zig");
 const io = @import("../io.zig");
+const entropy_handler = @import("../safrole/epoch_handler.zig");
 
 const tracing = @import("tracing");
 const trace = tracing.scoped(.trace_runner);
@@ -22,6 +23,156 @@ const EmbeddedFuzzer = fuzzer_mod.Fuzzer(
     embedded_target.EmbeddedTarget(io.SequentialExecutor, jam_params.TINY_PARAMS),
     jam_params.TINY_PARAMS,
 );
+
+// Entropy validation function for debugging epoch 0 issues
+// NOTE: I checked the eta serializatoin adn deserialization against the format
+fn validateInitialEntropy(comptime params: jam_params.Params, fuzzer: *EmbeddedFuzzer, header: types.Header) !void {
+    const span = trace.span(@src(), .validate_initial_entropy);
+    defer span.deinit();
+
+    // Get the fuzz protocol state from the target
+    const header_hash = std.mem.asBytes(&header.parent);
+    var fuzz_state = try fuzzer.getState(header_hash.*);
+    defer fuzz_state.deinit(fuzzer.allocator);
+
+    // Convert fuzz state to JAM state
+    var target_state = try state_converter.fuzzStateToJamState(params, fuzzer.allocator, fuzz_state);
+    defer target_state.deinit(fuzzer.allocator);
+
+    const time = params.Time().init(target_state.tau.?, header.slot);
+
+    // Only validate for epoch 0
+    if (time.current_epoch != 0) {
+        span.debug("Skipping entropy validation - not epoch 0 (epoch={d})", .{time.current_epoch});
+        return;
+    }
+
+    span.debug("=== ENTROPY VALIDATION FOR EPOCH 0 ===", .{});
+
+    // Get entropy values
+    const eta = target_state.eta.?;
+    span.debug("Current eta values:", .{});
+    span.debug("  eta[0] (accumulator): {s}", .{std.fmt.fmtSliceHexLower(&eta[0])});
+    span.debug("  eta[1] (1 epoch ago): {s}", .{std.fmt.fmtSliceHexLower(&eta[1])});
+    span.debug("  eta[2] (2 epochs ago): {s}", .{std.fmt.fmtSliceHexLower(&eta[2])});
+    span.debug("  eta[3] (3 epochs ago): {s}", .{std.fmt.fmtSliceHexLower(&eta[3])});
+
+    // Show validator sets
+    span.debug("Validator set info:", .{});
+    span.debug("  kappa.len: {d}", .{target_state.kappa.?.len()});
+    span.debug("  gamma.k.len: {d}", .{target_state.gamma.?.k.len()});
+
+    // Generate fallback key sequence using different entropy values to debug
+    const entropy_options = [_]struct { name: []const u8, value: [32]u8 }{
+        .{ .name = "eta[0]", .value = eta[0] },
+        .{ .name = "eta[1]", .value = eta[1] },
+        .{ .name = "eta[2]", .value = eta[2] },
+        .{ .name = "eta[3]", .value = eta[3] },
+    };
+
+    for (entropy_options) |entropy_option| {
+        span.debug("Testing with {s}:", .{entropy_option.name});
+
+        // Compute expected author for first 12 slots
+        for (0..12) |slot| {
+            const expected_index = entropy_handler.deriveKeyIndex(entropy_option.value, slot, target_state.kappa.?.len());
+            span.debug("  Slot {d}: Expected author index = {d} (using {s})", .{ slot, expected_index, entropy_option.name });
+        }
+    }
+
+    // Show all validator sets and their relationships
+    span.debug("", .{});
+    span.debug("=== VALIDATOR SETS OVERVIEW ===", .{});
+
+    // Lambda (λ) - Archived validators
+    if (target_state.lambda) |lambda| {
+        span.debug("Lambda (archived validators): {d} validators", .{lambda.len()});
+    } else {
+        span.debug("Lambda: not set", .{});
+    }
+
+    // Kappa (κ) - Active validator set
+    if (target_state.kappa) |kappa| {
+        span.debug("Kappa (active validators): {d} validators", .{kappa.len()});
+    } else {
+        span.debug("Kappa: not set", .{});
+    }
+
+    // Gamma.k (γ.k) - Next epoch's validator set
+    if (target_state.gamma) |gamma| {
+        span.debug("Gamma.k (next epoch validators): {d} validators", .{gamma.k.len()});
+    } else {
+        span.debug("Gamma.k: not set", .{});
+    }
+
+    // Iota (ι) - Upcoming validator set (after gamma.k)
+    if (target_state.iota) |iota| {
+        span.debug("Iota (upcoming validators): {d} validators", .{iota.len()});
+    } else {
+        span.debug("Iota: not set", .{});
+    }
+
+    // Check if gamma.s contains keys (not tickets) and show their indices in all validator sets
+    if (target_state.gamma) |gamma| {
+        switch (gamma.s) {
+            .keys => |keys| {
+                span.debug("", .{});
+                span.debug("=== GAMMA.S.KEYS MAPPING ACROSS ALL VALIDATOR SETS ===", .{});
+                span.debug("Found {d} keys in gamma.s.keys", .{keys.len});
+
+                // For each key in gamma.s.keys, find its index in ALL validator sets
+                for (keys, 0..) |gamma_key, gamma_index| {
+                    span.debug("  gamma.s.keys[{d}]:", .{gamma_index});
+
+                    // Search in Lambda
+                    if (target_state.lambda) |lambda| {
+                        for (lambda.validators, 0..) |validator, index| {
+                            if (std.mem.eql(u8, &gamma_key, &validator.bandersnatch)) {
+                                span.debug("    -> Lambda index: {d}", .{index});
+                                break;
+                            }
+                        }
+                    }
+
+                    // Search in Kappa
+                    if (target_state.kappa) |kappa| {
+                        for (kappa.validators, 0..) |validator, index| {
+                            if (std.mem.eql(u8, &gamma_key, &validator.bandersnatch)) {
+                                span.debug("    -> Kappa index: {d}", .{index});
+                                break;
+                            }
+                        }
+                    }
+
+                    // Search in Gamma.k
+                    for (gamma.k.validators, 0..) |validator, index| {
+                        if (std.mem.eql(u8, &gamma_key, &validator.bandersnatch)) {
+                            span.debug("    -> Gamma.k index: {d}", .{index});
+                            break;
+                        }
+                    }
+
+                    // Search in Iota
+                    if (target_state.iota) |iota| {
+                        for (iota.validators, 0..) |validator, index| {
+                            if (std.mem.eql(u8, &gamma_key, &validator.bandersnatch)) {
+                                span.debug("    -> Iota index: {d}", .{index});
+                                break;
+                            }
+                        }
+                    }
+                }
+                span.debug("=== END GAMMA.S.KEYS MAPPING ===", .{});
+            },
+            .tickets => {
+                span.debug("", .{});
+                span.debug("(gamma.s contains tickets, not keys - skipping validator set mapping)", .{});
+            },
+        }
+    }
+
+    span.debug("=== END ENTROPY VALIDATION ===", .{});
+}
 
 // Trace processing result types
 pub const Success = struct { post_root: [32]u8 };
@@ -103,6 +254,7 @@ pub fn traceIterator(
 
 // Main trace processing function
 pub fn processTrace(
+    comptime params: jam_params.Params,
     fuzzer: *EmbeddedFuzzer,
     transition: trace_runner.StateTransition,
     is_first: bool,
@@ -146,6 +298,9 @@ pub fn processTrace(
         }
 
         span.debug("State initialized successfully", .{});
+
+        // Validate initial entropy for epoch 0 debugging
+        try validateInitialEntropy(params, fuzzer, block.*.header);
     }
 
     // Import the block
@@ -397,7 +552,7 @@ pub fn runTracesInDir(
         // Show progress
         std.debug.print("Processing trace {d}/{d}: {s}\n", .{ trace_count, total_traces, filename });
 
-        const result = try processTrace(fuzzer, transition, is_first);
+        const result = try processTrace(params, fuzzer, transition, is_first);
         try results.append(result);
 
         // Fail on errors or mismatches (keeps original behavior)

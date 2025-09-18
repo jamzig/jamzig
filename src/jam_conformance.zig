@@ -250,7 +250,7 @@ test "jam-conformance:traces" {
             const trace_name = try std.fmt.allocPrint(allocator, "trace_{d}", .{trace_index});
             try trace_names.append(trace_name);
 
-            const result = try trace_runner.processTrace(fuzzer, transition, is_first);
+            const result = try trace_runner.processTrace(FUZZ_PARAMS, fuzzer, transition, is_first);
             try results.append(result);
 
             // Stop on first error for individual trace test
@@ -463,7 +463,7 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
             const trace_name = try std.fmt.allocPrint(allocator, "trace_{d}", .{trace_idx});
             try trace_names.append(trace_name);
 
-            const result = trace_runner.processTrace(fuzzer, transition, is_first) catch |err| {
+            const result = trace_runner.processTrace(FUZZ_PARAMS, fuzzer, transition, is_first) catch |err| {
                 std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ Process failed: {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, @errorName(err) });
                 had_error = true;
                 break;
