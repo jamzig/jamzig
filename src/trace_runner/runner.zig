@@ -312,16 +312,23 @@ pub fn processTrace(
 
     // Import the block
     const block = transition.block();
-    const target_state_root = fuzzer.sendBlock(block) catch |err| {
-        // Block processing failed - check if this was expected (no-op) or an actual error
-        const error_name = @errorName(err);
-        if (is_expected_no_op) {
-            span.debug("Block validation failed as expected (no-op): {s}", .{error_name});
-            return TraceResult{ .no_op = .{ .error_name = error_name } };
-        } else {
-            span.err("Failed to send block: {s}", .{error_name});
-            return TraceResult{ .@"error" = .{ .err = err, .context = "Failed to send block to target" } };
-        }
+
+    // Send the block
+    var block_result = try fuzzer.sendBlock(block);
+    defer block_result.deinit(fuzzer.allocator);
+
+    const target_state_root = switch (block_result) {
+        .success => |root| root,
+        .import_error => |err_msg| {
+            // Block import error - check if this was expected (no-op) or an actual error
+            if (is_expected_no_op) {
+                span.debug("Block import failed as expected (no-op): {s}", .{err_msg});
+                return TraceResult{ .no_op = .{ .error_name = err_msg } };
+            } else {
+                span.err("Block import failed: {s}", .{err_msg});
+                return TraceResult{ .@"error" = .{ .err = error.BlockImportFailed, .context = err_msg } };
+            }
+        },
     };
 
     // Block processed successfully - compare the target state root with expected
@@ -335,9 +342,7 @@ pub fn processTrace(
 
     span.debug("Block processed successfully", .{});
     return TraceResult{ .success = .{ .post_root = target_state_root } };
-
 }
-
 
 // Report generation types
 pub const Summary = struct {

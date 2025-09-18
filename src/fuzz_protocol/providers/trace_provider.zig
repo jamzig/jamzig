@@ -139,12 +139,25 @@ pub fn TraceProvider(comptime params: jam_params.Params) type {
                 const expected_state_root = state_transition.postStateRoot();
 
                 // Send block to target
-                const target_state_root_after = fuzzer.sendBlock(block) catch |err| {
+                var block_result = fuzzer.sendBlock(block) catch |err| {
                     block_span.err("Error sending block to target: {s}", .{@errorName(err)});
                     result.blocks_processed = i;
                     result.success = false;
                     result.err = err;
                     return result;
+                };
+                defer block_result.deinit(self.allocator);
+
+                const target_state_root_after = switch (block_result) {
+                    .success => |root| root,
+                    .import_error => |err_msg| {
+                        block_span.err("Target rejected valid test vector block: {s}", .{err_msg});
+                        result.blocks_processed = i;
+                        result.success = false;
+                        result.err = error.BlockRejectedByTarget;
+                        result.err_details = try self.allocator.dupe(u8, err_msg);
+                        return result;
+                    },
                 };
 
                 // If the reported target root is the same as previous, target couldn't process the block
@@ -179,4 +192,3 @@ pub fn TraceProvider(comptime params: jam_params.Params) type {
         }
     };
 }
-

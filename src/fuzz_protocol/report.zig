@@ -33,11 +33,15 @@ pub const FuzzResult = struct {
     mismatch: ?Mismatch,
     success: bool,
     err: ?anyerror = null,
+    err_details: ?[]const u8 = null,
 
     /// Clean up all allocated data
     pub fn deinit(self: *FuzzResult, allocator: std.mem.Allocator) void {
         if (self.mismatch) |*mismatch| {
             mismatch.deinit(allocator);
+        }
+        if (self.err_details) |details| {
+            allocator.free(details);
         }
     }
 
@@ -67,6 +71,9 @@ pub fn generateReport(comptime params: jam_params.Params, allocator: std.mem.All
         try writer.print("Error: {s}\n", .{@errorName(err)});
         if (err == error.BrokenPipe or err == error.UnexpectedEndOfStream) {
             try writer.print("(Target appears to have disconnected)\n", .{});
+        }
+        if (result.err_details) |details| {
+            try writer.print("Error Details: {s}\n", .{details});
         }
     }
     try writer.print("\n", .{});

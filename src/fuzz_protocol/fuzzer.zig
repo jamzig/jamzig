@@ -39,6 +39,20 @@ const FuzzerState = enum {
     }
 };
 
+/// Result of sending a block
+pub const BlockImportResult = union(enum) {
+    success: messages.StateRootHash,
+    import_error: []const u8,
+
+    pub fn deinit(self: *BlockImportResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .import_error => |msg| allocator.free(msg),
+            .success => {},
+        }
+        self.* = undefined;
+    }
+};
+
 /// Type aliases for common Fuzzer configurations
 pub fn SocketFuzzer(comptime params: jam_params.Params) type {
     return Fuzzer(io.SequentialExecutor, socket_target.SocketTarget, params);
@@ -249,7 +263,7 @@ pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type, comptime params:
         }
 
         /// Send block to target for processing
-        pub fn sendBlock(self: *Self, block: *const types.Block) !messages.StateRootHash {
+        pub fn sendBlock(self: *Self, block: *const types.Block) !BlockImportResult {
             const span = trace.span(@src(), .fuzzer_send_block);
             defer span.deinit();
             span.debug("Sending block to target", .{});
@@ -270,7 +284,13 @@ pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type, comptime params:
                 .state_root => |state_root| {
                     try self.state.assertReachedState(.state_initialized);
                     span.debug("Block processed, state root: {s}", .{std.fmt.fmtSliceHexLower(&state_root)});
-                    return state_root;
+                    return BlockImportResult{ .success = state_root };
+                },
+                .@"error" => |err| {
+                    span.err("Block import error: {s}", .{err});
+                    // Take ownership of the error message
+                    const error_msg = try self.allocator.dupe(u8, err);
+                    return BlockImportResult{ .import_error = error_msg };
                 },
                 else => return error.UnexpectedImportBlockResponse,
             }

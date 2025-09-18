@@ -156,15 +156,22 @@ pub fn SequoiaProvider(comptime IOExecutor: type, comptime params: jam_params.Pa
                 errdefer block.deinit(self.allocator);
 
                 // Send block to target
-                const block_target_state_root = fuzzer.sendBlock(&block) catch |err| {
-                    block_span.err("Error sending block to target: {s}", .{@errorName(err)});
-                    return report.FuzzResult{
-                        .seed = self.seed,
-                        .blocks_processed = block_num,
-                        .mismatch = null,
-                        .success = false,
-                        .err = err,
-                    };
+                var block_result = try fuzzer.sendBlock(&block);
+                defer block_result.deinit(self.allocator);
+
+                const block_target_state_root = switch (block_result) {
+                    .success => |root| root,
+                    .import_error => |err_msg| {
+                        block_span.err("Block import failed: {s}", .{err_msg});
+                        return report.FuzzResult{
+                            .seed = self.seed,
+                            .blocks_processed = block_num,
+                            .mismatch = null,
+                            .success = false,
+                            .err = error.BlockImportFailed,
+                            .err_details = try self.allocator.dupe(u8, err_msg),
+                        };
+                    },
                 };
 
                 // Process block locally and get local state root
