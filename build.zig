@@ -154,7 +154,12 @@ pub fn build(b: *std.Build) !void {
     const target_config = BuildConfig{
         .tracing_scopes = base_config.tracing_scopes,
         .tracing_level = base_config.tracing_level,
-        .tracing_mode = base_config.tracing_mode,
+        .tracing_mode = switch (optimize) {
+            .ReleaseFast => .disabled,
+            .ReleaseSafe => .disabled,
+            .ReleaseSmall => .disabled,
+            else => base_config.tracing_mode,
+        },
         .conformance_params = base_config.conformance_params,
         .enable_tracy = false,
     };
