@@ -7,6 +7,7 @@ const io = @import("io.zig");
 const fuzzer_mod = @import("fuzz_protocol/fuzzer.zig");
 const socket_target = @import("fuzz_protocol/socket_target.zig");
 const report = @import("fuzz_protocol/report.zig");
+const block_providers = @import("block_providers/providers.zig");
 
 const SocketFuzzer = fuzzer_mod.Fuzzer(io.SequentialExecutor, socket_target.SocketTarget, jam_params.TINY_PARAMS);
 const jam_params = @import("jam_params.zig");
@@ -154,7 +155,7 @@ pub fn main() !void {
     defer executor.deinit();
 
     // Create and run fuzzer
-    var fuzzer = try fuzzer_mod.createSocketFuzzer(FUZZ_PARAMS, &executor, allocator, seed, socket_path);
+    var fuzzer = try fuzzer_mod.createSocketFuzzer(FUZZ_PARAMS, allocator, seed, socket_path);
     defer fuzzer.destroy();
 
     std.debug.print("Connecting to target at {s}...\n", .{socket_path});
@@ -169,19 +170,35 @@ pub fn main() !void {
     try fuzzer.performHandshake();
     std.debug.print("Handshake completed successfully\n\n", .{});
 
-    // Run fuzzing cycle or trace mode
+    // Create shutdown check function
+    const check_shutdown = struct {
+        fn check() bool {
+            return shutdown_requested.atomic.load(.monotonic);
+        }
+    }.check;
+
+    // Run fuzzing cycle or trace mode using inverted control flow - providers drive the fuzzer
     var result = if (trace_dir) |dir| blk: {
         std.debug.print("Starting trace-based conformance testing from: {s}\n", .{dir});
-        break :blk try fuzzer.runTraceMode(dir);
+
+        // Create TraceProvider and let it drive the process
+        var trace_provider = try block_providers.TraceProvider(FUZZ_PARAMS).init(allocator, .{
+            .directory = dir,
+        });
+        defer trace_provider.deinit();
+
+        break :blk try trace_provider.run(SocketFuzzer, fuzzer, check_shutdown);
     } else blk: {
         std.debug.print("Starting conformance testing with {d} blocks...\n", .{num_blocks});
-        // Pass shutdown check function
-        const check_shutdown = struct {
-            fn check() bool {
-                return shutdown_requested.atomic.load(.monotonic);
-            }
-        }.check;
-        break :blk try fuzzer.runFuzzCycleWithShutdown(num_blocks, check_shutdown);
+
+        // Create SequoiaProvider and let it drive the process
+        var sequoia_provider = try block_providers.SequoiaProvider(io.SequentialExecutor, FUZZ_PARAMS).init(&executor, allocator, .{
+            .seed = seed,
+            .num_blocks = num_blocks,
+        });
+        defer sequoia_provider.deinit();
+
+        break :blk try sequoia_provider.run(SocketFuzzer, fuzzer, check_shutdown);
     };
     defer result.deinit(allocator);
 
