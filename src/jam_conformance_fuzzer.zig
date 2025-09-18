@@ -7,7 +7,7 @@ const io = @import("io.zig");
 const fuzzer_mod = @import("fuzz_protocol/fuzzer.zig");
 const socket_target = @import("fuzz_protocol/socket_target.zig");
 const report = @import("fuzz_protocol/report.zig");
-const block_providers = @import("block_providers/providers.zig");
+const block_providers = @import("fuzz_protocol/providers/providers.zig");
 
 const SocketFuzzer = fuzzer_mod.Fuzzer(io.SequentialExecutor, socket_target.SocketTarget, jam_params.TINY_PARAMS);
 const jam_params = @import("jam_params.zig");

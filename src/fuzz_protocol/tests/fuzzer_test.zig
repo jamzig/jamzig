@@ -54,7 +54,7 @@ test "fuzzer_embedded_target_cycle" {
     try fuzzer_instance.performHandshake();
 
     // Run a short fuzzing cycle
-    var provider = try @import("../../block_providers/providers.zig").SequoiaProvider(
+    var provider = try @import("../providers/providers.zig").SequoiaProvider(
         io.SequentialExecutor,
         FUZZ_PARAMS,
     ).init(

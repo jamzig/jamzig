@@ -1,11 +1,11 @@
 const std = @import("std");
-const types = @import("../types.zig");
-const jam_params = @import("../jam_params.zig");
-const jamtestnet = @import("../trace_runner/parsers.zig");
-const state_transitions = @import("../trace_runner/state_transitions.zig");
-const report = @import("../fuzz_protocol/report.zig");
-const messages = @import("../fuzz_protocol/messages.zig");
-const state_converter = @import("../fuzz_protocol/state_converter.zig");
+const types = @import("../../types.zig");
+const jam_params = @import("../../jam_params.zig");
+const jamtestnet = @import("../../trace_runner/parsers.zig");
+const state_transitions = @import("../../trace_runner/state_transitions.zig");
+const report = @import("../report.zig");
+const messages = @import("../messages.zig");
+const state_converter = @import("../state_converter.zig");
 
 const trace = @import("tracing").scoped(.trace_provider);
 

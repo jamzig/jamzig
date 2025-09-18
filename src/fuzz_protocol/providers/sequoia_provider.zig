@@ -1,14 +1,14 @@
 const std = @import("std");
-const types = @import("../types.zig");
-const sequoia = @import("../sequoia.zig");
-const jam_params = @import("../jam_params.zig");
-const JamState = @import("../state.zig").JamState;
-const block_import = @import("../block_import.zig");
-const io = @import("../io.zig");
-const report = @import("../fuzz_protocol/report.zig");
-const messages = @import("../fuzz_protocol/messages.zig");
-const state_converter = @import("../fuzz_protocol/state_converter.zig");
-const state_dictionary = @import("../state_dictionary.zig");
+const types = @import("../../types.zig");
+const sequoia = @import("../../sequoia.zig");
+const jam_params = @import("../../jam_params.zig");
+const JamState = @import("../../state.zig").JamState;
+const block_import = @import("../../block_import.zig");
+const io = @import("../../io.zig");
+const report = @import("../report.zig");
+const messages = @import("../messages.zig");
+const state_converter = @import("../state_converter.zig");
+const state_dictionary = @import("../../state_dictionary.zig");
 
 const trace = @import("tracing").scoped(.sequoia_provider);
 
