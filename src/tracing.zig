@@ -13,6 +13,54 @@ var config: ?Config = null;
 // Thread-local depth for indentation
 threadlocal var depth: usize = 0;
 
+// Global mutex for thread-safe trace output
+var trace_mutex = std.Thread.Mutex{};
+
+// Global stderr writer type
+const StderrWriter = @TypeOf(std.io.getStdErr().writer());
+
+// Generic indented writer for tracing output
+fn IndentedWriter(comptime WriterType: type) type {
+    return struct {
+        inner: WriterType,
+        indent_level: usize,
+        at_line_start: bool,
+
+        const Self = @This();
+        const Error = WriterType.Error;
+        const Writer = std.io.Writer(*Self, Error, write);
+
+        pub fn init(inner_writer: WriterType, indent_level: usize) Self {
+            return .{
+                .inner = inner_writer,
+                .indent_level = indent_level,
+                .at_line_start = true,
+            };
+        }
+
+        pub fn writer(self: *Self) Writer {
+            return .{ .context = self };
+        }
+
+        pub fn write(self: *Self, bytes: []const u8) Error!usize {
+            for (bytes) |byte| {
+                if (self.at_line_start and byte != '\n') {
+                    // Write indentation
+                    for (0..self.indent_level * 2) |_| {
+                        try self.inner.writeByte(' ');
+                    }
+                    self.at_line_start = false;
+                }
+                try self.inner.writeByte(byte);
+                if (byte == '\n') {
+                    self.at_line_start = true;
+                }
+            }
+            return bytes.len;
+        }
+    };
+}
+
 // Get config, initializing if necessary
 fn getConfig() *Config {
     if (config == null) {
@@ -36,12 +84,16 @@ pub const Span = struct {
 
         const cfg = getConfig();
         if (cfg.findScope(scope)) |_| {
-            for (0..depth * 2) |_| {
-                std.debug.print(" ", .{});
-            }
-            std.debug.print("\x1b[1;34m", .{}); // Bold blue for scope/operation
-            std.debug.print("[{s}] BEGIN {s}", .{ scope, operation });
-            std.debug.print("\x1b[0m\n", .{}); // Reset color and add newline
+            trace_mutex.lock();
+            defer trace_mutex.unlock();
+
+            const stderr = std.io.getStdErr().writer();
+            var indented = IndentedWriter(StderrWriter).init(stderr, depth);
+            const writer = indented.writer();
+
+            writer.writeAll("\x1b[1;34m") catch {}; // Bold blue for scope/operation
+            writer.print("[{s}] BEGIN {s}", .{ scope, operation }) catch {};
+            writer.writeAll("\x1b[0m\n") catch {}; // Reset color and add newline
         }
 
         depth += 1;
@@ -51,12 +103,16 @@ pub const Span = struct {
     pub fn deinit(self: *const Span) void {
         const cfg = getConfig();
         if (cfg.findScope(self.scope)) |_| {
-            for (0..self.saved_depth * 2) |_| {
-                std.debug.print(" ", .{});
-            }
-            std.debug.print("\x1b[1;34m", .{}); // Bold blue for scope/operation
-            std.debug.print("[{s}] END {s}", .{ self.scope, self.operation });
-            std.debug.print("\x1b[0m\n", .{}); // Reset color and add newline
+            trace_mutex.lock();
+            defer trace_mutex.unlock();
+
+            const stderr = std.io.getStdErr().writer();
+            var indented = IndentedWriter(StderrWriter).init(stderr, self.saved_depth);
+            const writer = indented.writer();
+
+            writer.writeAll("\x1b[1;34m") catch {}; // Bold blue for scope/operation
+            writer.print("[{s}] END {s}", .{ self.scope, self.operation }) catch {};
+            writer.writeAll("\x1b[0m\n") catch {}; // Reset color and add newline
         }
 
         depth = self.saved_depth;
@@ -75,15 +131,17 @@ pub const Span = struct {
             return;
         }
 
-        // Indent based on depth
-        for (0..self.saved_depth * 2) |_| {
-            std.debug.print(" ", .{});
-        }
+        trace_mutex.lock();
+        defer trace_mutex.unlock();
 
-        // Print with color: color code, scope, message, then reset color
-        std.debug.print("{s} ", .{level.color()});
-        std.debug.print(fmt, args);
-        std.debug.print("\x1b[0m\n", .{}); // Reset color and add newline
+        const stderr = std.io.getStdErr().writer();
+        var indented = IndentedWriter(StderrWriter).init(stderr, self.saved_depth);
+        const writer = indented.writer();
+
+        // Print with color: color code, then message with automatic indentation for multi-line
+        writer.writeAll(level.color()) catch return;
+        writer.print(fmt, args) catch return;
+        writer.writeAll("\x1b[0m\n") catch return; // Reset color and add newline
     }
 
     pub inline fn trace(self: *const Span, comptime fmt: []const u8, args: anytype) void {
