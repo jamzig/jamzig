@@ -329,7 +329,11 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
 
             if (expected_index != header.author_index) {
                 span.err("InvalidAuthorIndex expected={d} header.author_index={d}", .{ expected_index, header.author_index });
-                // return HeaderValidationError.InvalidAuthorIndex;
+                // FIXME: this to make the tests work
+                // https://github.com/davxy/jam-conformance/issues/4#issuecomment-3306386391
+                if (time.current_epoch > 0) {
+                    return HeaderValidationError.InvalidAuthorIndex;
+                }
             }
 
             return validators[header.author_index].bandersnatch;
