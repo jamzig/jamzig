@@ -374,12 +374,14 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
     // Track results by source
     var source_stats = std.StringHashMap(struct {
         passed: usize,
+        no_ops: usize,
         failed: usize,
         skipped: usize,
     }).init(allocator);
     defer source_stats.deinit();
 
     var total_passed: usize = 0;
+    var total_no_ops: usize = 0;
     var total_failed: usize = 0;
     var total_skipped: usize = 0;
 
@@ -392,7 +394,7 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
         // Get or create stats for this source
         var stats_entry = try source_stats.getOrPut(entry.source_name);
         if (!stats_entry.found_existing) {
-            stats_entry.value_ptr.* = .{ .passed = 0, .failed = 0, .skipped = 0 };
+            stats_entry.value_ptr.* = .{ .passed = 0, .no_ops = 0, .failed = 0, .skipped = 0 };
         }
 
         // Check if this test is skipped
@@ -457,6 +459,7 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
         var trace_idx: usize = 0;
         var had_error = false;
         var had_no_op = false;
+        var error_details: ?[]const u8 = null;
         while (try trace_iter.next()) |transition| {
             defer transition.deinit(allocator);
 
@@ -470,13 +473,13 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
             };
 
             switch (result) {
-                .@"error" => {
+                .@"error" => |err_info| {
                     had_error = true;
-                    break;
+                    error_details = try std.fmt.allocPrint(allocator, "{s} - {s}", .{ @errorName(err_info.err), err_info.context });
                 },
                 .mismatch => {
                     had_error = true;
-                    break;
+                    error_details = try allocator.dupe(u8, "State root mismatch");
                 },
                 .no_op => {
                     had_no_op = true;
@@ -492,14 +495,21 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
         if (had_error) {
             stats_entry.value_ptr.failed += 1;
             total_failed += 1;
+
+            if (error_details) |details| {
+                defer allocator.free(details);
+                std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, details });
+            } else {
+                std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ FAILED\n", .{ idx, total_count, entry.source_name, entry.timestamp });
+            }
+        } else if (had_no_op) {
+            stats_entry.value_ptr.no_ops += 1;
+            total_no_ops += 1;
+            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ✅ PASS 🟡 NO-OP\n", .{ idx, total_count, entry.source_name, entry.timestamp });
         } else {
             stats_entry.value_ptr.passed += 1;
             total_passed += 1;
-            if (had_no_op) {
-                std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ✅ PASS (has no-op blocks)\n", .{ idx, total_count, entry.source_name, entry.timestamp });
-            } else {
-                std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ✅ PASS\n", .{ idx, total_count, entry.source_name, entry.timestamp });
-            }
+            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ✅ PASS\n", .{ idx, total_count, entry.source_name, entry.timestamp });
         }
 
         idx += 1;
@@ -510,11 +520,12 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
     var stats_iter = source_stats.iterator();
     while (stats_iter.next()) |entry| {
         const stats = entry.value_ptr.*;
-        const runnable = stats.passed + stats.failed;
+        const runnable = stats.passed + stats.no_ops + stats.failed;
         if (runnable > 0) {
-            std.debug.print("{s}: Passed: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
+            std.debug.print("{s}: Passed: {d} | No-ops: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
                 entry.key_ptr.*,
                 stats.passed,
+                stats.no_ops,
                 stats.failed,
                 stats.skipped,
                 @as(f64, @floatFromInt(stats.passed)) * 100.0 / @as(f64, @floatFromInt(runnable)),
@@ -526,11 +537,12 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
 
     // Print overall summary
     std.debug.print("\n=== Overall Summary ===\n", .{});
-    const total_runnable = total_count - total_skipped;
+    const total_runnable = total_passed + total_no_ops + total_failed;
     if (total_runnable > 0) {
-        std.debug.print("Total: {d} | Passed: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
+        std.debug.print("Total: {d} | Passed: {d} | No-ops: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
             total_count,
             total_passed,
+            total_no_ops,
             total_failed,
             total_skipped,
             @as(f64, @floatFromInt(total_passed)) * 100.0 / @as(f64, @floatFromInt(total_runnable)),

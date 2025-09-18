@@ -303,15 +303,28 @@ pub fn processTrace(
         try validateInitialEntropy(params, fuzzer, block.*.header);
     }
 
+    // Get both pre and post state roots for no-op detection
+    const expected_pre_root = transition.preStateRoot();
+    const expected_post_root = transition.postStateRoot();
+
+    // Check if this is expected to be a no-op (post-state should equal pre-state)
+    const is_expected_no_op = std.mem.eql(u8, &expected_pre_root, &expected_post_root);
+
     // Import the block
     const block = transition.block();
     const target_state_root = fuzzer.sendBlock(block) catch |err| {
-        span.err("Failed to send block: {s}", .{@errorName(err)});
-        return TraceResult{ .@"error" = .{ .err = err, .context = "Failed to send block to target" } };
+        // Block processing failed - check if this was expected (no-op) or an actual error
+        const error_name = @errorName(err);
+        if (is_expected_no_op) {
+            span.debug("Block validation failed as expected (no-op): {s}", .{error_name});
+            return TraceResult{ .no_op = .{ .error_name = error_name } };
+        } else {
+            span.err("Failed to send block: {s}", .{error_name});
+            return TraceResult{ .@"error" = .{ .err = err, .context = "Failed to send block to target" } };
+        }
     };
 
-    // Compare the target state root with the expected post-state root
-    const expected_post_root = transition.postStateRoot();
+    // Block processed successfully - compare the target state root with expected
     if (!std.mem.eql(u8, &expected_post_root, &target_state_root)) {
         span.err("Post-state root mismatch", .{});
         return TraceResult{ .mismatch = .{
@@ -323,10 +336,8 @@ pub fn processTrace(
     span.debug("Block processed successfully", .{});
     return TraceResult{ .success = .{ .post_root = target_state_root } };
 
-    // Note: We don't currently detect no-ops in this simplified version.
-    // The fuzzer's trace mode only detects when the state root doesn't change,
-    // but we don't have access to the previous state root in this function.
 }
+
 
 // Report generation types
 pub const Summary = struct {
