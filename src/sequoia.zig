@@ -506,12 +506,30 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             };
         }
 
+        /// Initialize the BlockBuilder with required state
+        pub fn create(
+            allocator: std.mem.Allocator,
+            config: GenesisConfig(params), // Takes ownership of the config
+            rng: *std.Random,
+        ) !*Self {
+            const self = try allocator.create(Self);
+            self.* = try Self.init(allocator, config, rng);
+
+            return self;
+        }
+
         pub fn deinit(self: *Self) void {
             // config is owned by calling scope
             self.config.deinit(self.allocator);
             self.state.deinit(self.allocator);
             self.ticket_registry.deinit();
             self.* = undefined;
+        }
+
+        pub fn destroy(self: *Self) void {
+            const allocator = self.allocator;
+            self.deinit();
+            allocator.destroy(self);
         }
 
         fn handleEpochTransition(self: *Self) void {

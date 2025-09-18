@@ -10,7 +10,7 @@ const ring_vrf = @import("../ring_vrf.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("tracing").scoped(.epoch_handler);
+const trace = @import("tracing").scoped(.safrole);
 const tracy = @import("tracy");
 
 /// Transitions the epoch, handling validator rotation and state updates
@@ -179,26 +179,33 @@ pub fn entropyBasedKeySelector(
     errdefer allocator.free(result);
 
     for (0..epoch_length) |i| {
-        // Step 1: Encode the index i into 4 bytes (u32)
-        var encoded_index: [4]u8 = undefined;
-        std.mem.writeInt(u32, &encoded_index, @intCast(i), .little);
-
-        // Step 2: Concatenate r with the encoded value
-        const concatenated = r ++ encoded_index;
-
-        // Step 3: Hash the concatenated value and take the first 4 bytes
-        var hashed = entropy.hash(&concatenated);
-        var first_4_bytes: [4]u8 = hashed[0..4].*;
-
-        // Step 4: Decode the result
-        const decoded = std.mem.readInt(u32, &first_4_bytes, .little);
-
-        // Step 5: Take the modulus over the length of the keys
-        const index = decoded % keys.len;
-
-        // Step 6: Use this index to add that key to the result
+        const index = deriveKeyIndex(r, i, keys.len);
         result[i] = keys[index];
     }
 
     return result;
+}
+
+pub fn deriveKeyIndex(r: [32]u8, i: usize, keys_len: usize) usize {
+    const span = trace.span(@src(), .derive_key_index);
+    defer span.deinit();
+
+    span.debug("deriveKeyIndex called with r: {any}, i: {}, keys_len: {}", .{ std.fmt.fmtSliceHexLower(&r), i, keys_len });
+
+    // Step 1: Encode the index i into 4 bytes (u32)
+    var encoded_index: [4]u8 = undefined;
+    std.mem.writeInt(u32, &encoded_index, @intCast(i), .little);
+
+    // Step 2: Concatenate r with the encoded value
+    const concatenated = r ++ encoded_index;
+
+    // Step 3: Hash the concatenated value and take the first 4 bytes
+    var hashed = entropy.hash(&concatenated);
+    var first_4_bytes: [4]u8 = hashed[0..4].*;
+
+    // Step 4: Decode the result
+    const decoded = std.mem.readInt(u32, &first_4_bytes, .little);
+
+    // Step 5: Take the modulus over the length of the keys
+    return decoded % keys_len;
 }

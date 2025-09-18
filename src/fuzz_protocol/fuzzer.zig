@@ -50,7 +50,6 @@ pub fn EmbeddedFuzzer(comptime params: jam_params.Params) type {
 /// Helper factory functions for creating fuzzer instances with target initialization
 pub fn createSocketFuzzer(
     comptime params: jam_params.Params,
-    executor: *io.SequentialExecutor,
     allocator: std.mem.Allocator,
     seed: u64,
     socket_path: []const u8,
@@ -58,7 +57,7 @@ pub fn createSocketFuzzer(
     var target_instance = try socket_target.SocketTarget.init(allocator, .{ .socket_path = socket_path });
     errdefer target_instance.deinit();
 
-    return SocketFuzzer(params).create(executor, allocator, seed, target_instance);
+    return SocketFuzzer(params).create(allocator, seed, target_instance);
 }
 
 pub fn createEmbeddedFuzzer(
@@ -70,7 +69,7 @@ pub fn createEmbeddedFuzzer(
     var target_instance = try embedded_target.EmbeddedTarget(io.SequentialExecutor, params).init(allocator, executor, .{});
     errdefer target_instance.deinit();
 
-    return EmbeddedFuzzer(params).create(executor, allocator, seed, target_instance);
+    return EmbeddedFuzzer(params).create(allocator, seed, target_instance);
 }
 
 /// Main Fuzzer implementation for JAM protocol conformance testing
@@ -84,12 +83,6 @@ pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type, comptime params:
         rng: std.Random,
         seed: u64,
 
-        // JAM components
-        block_builder: sequoia.BlockBuilder(params),
-        block_importer: block_import.BlockImporter(IOExecutor, params),
-        current_jam_state: *const JamState(params),
-        latest_block: ?types.Block = null,
-
         // Target communication
         target: Target,
 
@@ -98,7 +91,7 @@ pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type, comptime params:
         state: FuzzerState = .initial,
 
         /// Initialize fuzzer with deterministic seed and pre-initialized target
-        pub fn create(executor: *IOExecutor, allocator: std.mem.Allocator, seed: u64, target_instance: Target) !*Self {
+        pub fn create(allocator: std.mem.Allocator, seed: u64, target_instance: Target) !*Self {
             const span = trace.span(@src(), .fuzzer_init);
             defer span.deinit();
 
@@ -117,43 +110,14 @@ pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type, comptime params:
                 .prng = std.Random.DefaultPrng.init(seed),
                 .rng = undefined,
                 .seed = seed,
-                .block_builder = undefined,
-                .block_importer = undefined,
-                .current_jam_state = undefined,
-                .latest_block = null,
                 .state = .initial,
             };
 
             // Initialize the rng from the prng stored in fuzzer
             fuzzer.rng = fuzzer.prng.random();
 
-            // Create a block builder using the stable rng
-            var config = try sequoia.GenesisConfig(params).buildWithRng(allocator, &fuzzer.rng);
-            errdefer config.deinit(allocator);
-
-            fuzzer.block_builder = try sequoia.BlockBuilder(params).init(allocator, config, &fuzzer.rng);
-            errdefer fuzzer.block_builder.deinit();
-
-            fuzzer.block_importer = block_import.BlockImporter(IOExecutor, params).init(executor, allocator);
-            fuzzer.current_jam_state = &fuzzer.block_builder.state;
-
-            // Process the first (genesis) block to get proper state
-            var genesis_block = try fuzzer.block_builder.buildNextBlock();
-            errdefer genesis_block.deinit(allocator);
-
-            fuzzer.latest_block = genesis_block;
-
-            // Process the genesis block with block importer to get proper header and state
-            var import_result = try fuzzer.block_importer.importBlockBuildingRoot(
-                fuzzer.current_jam_state,
-                &genesis_block,
-            );
-            defer import_result.deinit();
-
-            // Commit the state transition
-            try import_result.commit();
-
             span.debug("Fuzzer initialized successfully", .{});
+
             return fuzzer;
         }
 
@@ -164,11 +128,6 @@ pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type, comptime params:
 
             // Clean up target
             self.target.deinit();
-
-            // Clean up JAM components
-            self.block_builder.deinit();
-
-            if (self.latest_block) |*b| b.deinit(self.allocator);
 
             const allocator = self.allocator;
             allocator.destroy(self);
@@ -261,17 +220,7 @@ pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type, comptime params:
             var ancestry_items = std.ArrayList(messages.AncestryItem).init(self.allocator);
             defer ancestry_items.deinit();
 
-            if (self.current_jam_state.beta) |beta| {
-                span.debug("Extracting {d} recent blocks as ancestry", .{beta.recent_history.blocks.items.len});
-                for (beta.recent_history.blocks.items) |block| {
-                    // Note: We need timeslot from somewhere - for now we'll skip blocks without timeslot
-                    // In the future we might need to track timeslots in BlockInfo
-                    try ancestry_items.append(.{
-                        .slot = header.slot, // Use current block's slot as approximation
-                        .header_hash = block.header_hash,
-                    });
-                }
-            }
+            // TODO: empty for now, now supported
 
             var ancestry = messages.Ancestry{
                 .items = try ancestry_items.toOwnedSlice(),
@@ -354,335 +303,9 @@ pub fn Fuzzer(comptime IOExecutor: type, comptime Target: type, comptime params:
             }
         }
 
-        /// Process block locally and return state root
-        pub fn processBlockLocally(self: *Self, block: types.Block) !messages.StateRootHash {
-            const span = trace.span(@src(), .fuzzer_process_local);
-            defer span.deinit();
-            span.debug("Processing block locally", .{});
-
-            // Use block importer to process the block
-            var import_result = try self.block_importer.importBlockBuildingRoot(
-                self.current_jam_state,
-                &block,
-            );
-            defer import_result.deinit();
-
-            // Commit the state transition
-            try import_result.commit();
-
-            // Calculate and return the new state root
-            const state_root = try self.current_jam_state.buildStateRoot(self.allocator);
-
-            span.debug("Local state root: {s}", .{std.fmt.fmtSliceHexLower(&state_root)});
-            return state_root;
-        }
-
-        /// Compare two state roots
+        /// Compare two state roots (utility for providers)
         pub fn compareStateRoots(local_root: messages.StateRootHash, target_root: messages.StateRootHash) bool {
             return std.mem.eql(u8, &local_root, &target_root);
-        }
-
-        /// Run a complete fuzzing cycle with the specified number of blocks
-        pub fn runFuzzCycle(self: *Self, num_blocks: usize) !report.FuzzResult {
-            return self.runFuzzCycleWithShutdown(num_blocks, null);
-        }
-
-        /// Run a complete fuzzing cycle with optional shutdown check
-        pub fn runFuzzCycleWithShutdown(self: *Self, num_blocks: usize, should_shutdown: ?*const fn () bool) !report.FuzzResult {
-            const span = trace.span(@src(), .fuzzer_run_cycle);
-            defer span.deinit();
-            span.debug("Starting fuzz cycle with {d} blocks", .{num_blocks});
-
-            // Initialize state on target
-            var initial_state_result = try state_converter.jamStateToFuzzState(
-                params,
-                self.allocator,
-                self.current_jam_state,
-            );
-            defer initial_state_result.deinit();
-
-            // Calculate local state root
-            const local_state_root = try self.current_jam_state.buildStateRoot(self.allocator);
-
-            // Set initial state on target and get target's state root
-            const header = self.latest_block.?.header;
-            const target_state_root = try self.setState(header, initial_state_result.state);
-
-            // Verify state roots match
-            if (!std.mem.eql(u8, &local_state_root, &target_state_root)) {
-                std.debug.print("State root mismatch! Local: {s}, Target: {s}\n", .{
-                    std.fmt.fmtSliceHexLower(&local_state_root),
-                    std.fmt.fmtSliceHexLower(&target_state_root),
-                });
-                return error.InitialStateRootMismatch;
-            }
-
-            std.debug.print("Initial state roots match: {s}\n", .{std.fmt.fmtSliceHexLower(&local_state_root)});
-
-            // Process blocks
-            for (0..num_blocks) |block_num| {
-                // Check for shutdown signal
-                if (should_shutdown) |check_fn| {
-                    if (check_fn()) {
-                        span.debug("Shutdown requested, stopping at block {d}", .{block_num});
-                        return report.FuzzResult{
-                            .seed = self.seed,
-                            .blocks_processed = block_num,
-                            .mismatch = null,
-                            .success = true, // Clean shutdown is considered success
-                            .err = null,
-                        };
-                    }
-                }
-
-                const block_span = span.child(@src(), .process_block);
-                defer block_span.deinit();
-
-                block_span.debug("Processing block {d}/{d}", .{ block_num + 1, num_blocks });
-
-                // Generate next block
-                var block = try self.block_builder.buildNextBlock();
-                errdefer block.deinit(self.allocator);
-
-                // Send to target
-                const reported_target_root = self.sendBlock(&block) catch |err| {
-                    block_span.err("Error sending block to target: {s}", .{@errorName(err)});
-
-                    // Return partial result with the error
-                    return report.FuzzResult{
-                        .seed = self.seed,
-                        .blocks_processed = block_num,
-                        .mismatch = null,
-                        .success = false,
-                        .err = err,
-                    };
-                };
-
-                // If the reported target root is the same the local root we can end the
-                // fuzz cycle early. As we know the target could not or would not process the block.
-                if (compareStateRoots(reported_target_root, try self.current_jam_state.buildStateRoot(self.allocator))) {
-                    block_span.warn("Target reported same state root as local: {s}", .{std.fmt.fmtSliceHexLower(&reported_target_root)});
-                    return error.SameRootReturned; // Skip further processing for this block
-                }
-
-                var local_root: messages.StateRootHash = undefined;
-
-                // Scope for block generation and ownership transfer
-                {
-
-                    // Process locally
-                    local_root = try self.processBlockLocally(block);
-
-                    // Update latest block - ownership transfers here
-                    self.latest_block.?.deinit(self.allocator);
-                    self.latest_block = block;
-                }
-
-                sequoia.logging.printBlockEntropyDebug(params, &self.latest_block.?, self.current_jam_state);
-
-                // Compare state roots
-                if (!compareStateRoots(local_root, reported_target_root)) {
-                    block_span.debug("State root mismatch detected!", .{});
-
-                    // Build local dictionary
-                    var local_dict = try self.current_jam_state.buildStateMerklizationDictionary(self.allocator);
-                    errdefer local_dict.deinit();
-
-                    // Retrieve full target state for analysis
-                    const block_header_hash = try self.latest_block.?.header.header_hash(params, self.allocator);
-                    var target_state: ?messages.State = self.getState(block_header_hash) catch |err| blk: {
-                        block_span.err("Failed to retrieve target state: {s}", .{@errorName(err)});
-                        break :blk null;
-                    };
-                    defer if (target_state) |*ts| {
-                        ts.deinit(self.allocator);
-                    };
-
-                    // Build target dictionary and validate if we got state
-                    var target_dict: ?state_dictionary.MerklizationDictionary = null;
-                    var target_computed_root: ?messages.StateRootHash = null;
-                    if (target_state) |ts| {
-                        // Convert to MerklizationDictionary
-                        target_dict = try state_converter.fuzzStateToMerklizationDictionary(self.allocator, ts);
-                        errdefer if (target_dict) |*td| td.deinit();
-
-                        // Verify state root
-                        const computed_root = try target_dict.?.buildStateRoot(self.allocator);
-                        target_computed_root = computed_root;
-                    }
-
-                    // Create mismatch entry
-                    const mismatch = report.Mismatch{
-                        .block_number = block_num,
-                        .block = try self.latest_block.?.deepClone(self.allocator),
-                        .reported_state_root = reported_target_root,
-                        .local_dict = local_dict,
-                        .target_dict = target_dict,
-                        .target_computed_root = target_computed_root,
-                    };
-
-                    // Create result
-                    return report.FuzzResult{
-                        .seed = self.seed,
-                        .blocks_processed = block_num,
-                        .mismatch = mismatch,
-                        .success = false,
-                    };
-                } else {
-                    block_span.debug("State roots match: {s}", .{std.fmt.fmtSliceHexLower(&local_root)});
-                }
-            }
-
-            span.debug("Fuzz cycle completed. Blocks: {d}", .{num_blocks});
-
-            // Create result
-            return report.FuzzResult{
-                .seed = self.seed,
-                .blocks_processed = num_blocks,
-                .mismatch = null,
-                .success = true,
-            };
-        }
-
-        /// Run trace mode - replay W3F format traces from a directory
-        pub fn runTraceMode(self: *Self, trace_dir: []const u8) !report.FuzzResult {
-            const span = trace.span(@src(), .fuzzer_run_trace_mode);
-            defer span.deinit();
-            span.debug("Starting trace mode from directory: {s}", .{trace_dir});
-
-            // Create W3F loader directly
-            const w3f_loader = jamtestnet.w3f.Loader(params){};
-            const loader = w3f_loader.loader();
-
-            // Collect state transitions from directory
-            var transitions = try state_transitions.collectStateTransitions(trace_dir, self.allocator);
-            defer transitions.deinit(self.allocator);
-
-            // Filter transitions to only keep valid format (digits + .bin)
-            var valid_transitions = std.ArrayList(state_transitions.StateTransitionPair).init(self.allocator);
-            defer valid_transitions.deinit();
-
-            for (transitions.items()) |transition| {
-                // Check if filename matches pattern: digits_digits.bin
-                const name = transition.bin.name;
-                if (std.mem.endsWith(u8, name, ".bin")) // exclude genesis.bin
-                {
-                    // Verify it contains only digits and underscore before .bin
-                    const basename = name[0 .. name.len - 4];
-                    var valid = true;
-                    for (basename) |c| {
-                        if (!std.ascii.isDigit(c)) {
-                            valid = false;
-                            break;
-                        }
-                    }
-                    if (valid) {
-                        try valid_transitions.append(transition);
-                    }
-                }
-            }
-
-            span.debug("Found {d} valid state transitions", .{valid_transitions.items.len});
-
-            if (valid_transitions.items.len == 0) {
-                // REFACTOR: explain the format of the expected traces
-                return error.NoValidTransitions;
-            }
-
-            // Initialize result
-            var result = report.FuzzResult{
-                .seed = 0, // No seed for trace mode
-                .blocks_processed = 0,
-                .mismatch = null,
-                .success = true,
-            };
-            errdefer result.deinit(self.allocator);
-
-            // Process first transition with SetState
-            const pre_state_root = blk: {
-                const first_transition = valid_transitions.items[0];
-                span.debug("Processing first transition for SetState: {s}", .{first_transition.bin.name});
-
-                // Load the state transition
-                var state_transition = try loader.loadTestVector(self.allocator, first_transition.bin.path);
-                defer state_transition.deinit(self.allocator);
-
-                // Get the block header
-                const block = state_transition.block();
-
-                // Convert pre-state dictionary directly to fuzz format
-                var pre_state_dict = try state_transition.preStateAsMerklizationDict(self.allocator);
-                defer pre_state_dict.deinit();
-
-                var fuzz_state = try state_converter.dictionaryToFuzzState(self.allocator, &pre_state_dict);
-                defer fuzz_state.deinit(self.allocator);
-
-                // Send state to target
-                const target_state_root = try self.setState(block.*.header, fuzz_state);
-
-                // Verify pre-state root matches
-                const pre_state_root = state_transition.preStateRoot();
-
-                if (!std.mem.eql(u8, &pre_state_root, &target_state_root)) {
-                    span.err("Initial state root mismatch at trace {s}", .{first_transition.bin.name});
-                    result.mismatch = report.Mismatch{
-                        .block_number = block.header.slot,
-                        .block = try block.deepClone(self.allocator),
-                        .reported_state_root = target_state_root,
-                    };
-                    result.success = false;
-                    return result;
-                }
-
-                span.debug("Initial state set successfully and confirmed on target", .{});
-                break :blk pre_state_root;
-            };
-
-            // Process remaining transitions by sending blocks
-            var previous_state_root: messages.StateRootHash = pre_state_root;
-            for (valid_transitions.items, 0..) |transition, i| {
-                span.debug("Processing block {d}: {s}", .{ i, transition.bin.name });
-
-                // Load the state transition
-                var state_transition = try loader.loadTestVector(self.allocator, transition.bin.path);
-                defer state_transition.deinit(self.allocator);
-
-                // Get the block
-                const block = state_transition.block();
-
-                // Calculate expected state root
-                const expected_state_root = state_transition.postStateRoot();
-
-                // Send block to target
-                const target_state_root_after = try self.sendBlock(block);
-
-                // If the reported target root is the same the local root we can end the
-                // fuzz cycle early. As we know the target could not or would not process the block.
-                if (compareStateRoots(previous_state_root, target_state_root_after)) {
-                    span.warn("Target reported same state root as previous: {s}", .{std.fmt.fmtSliceHexLower(&target_state_root_after)});
-                    return error.SameRootReturned; // Skip further processing for this block
-                }
-
-                // Compare results
-                if (!std.mem.eql(u8, &expected_state_root, &target_state_root_after)) {
-                    span.err("Post-state root mismatch at trace {s}", .{transition.bin.name});
-                    result.mismatch = report.Mismatch{
-                        .block_number = block.header.slot,
-                        .block = try block.deepClone(self.allocator),
-                        .reported_state_root = target_state_root_after,
-                    };
-                    result.success = false;
-                    break;
-                }
-
-                // Update previous state root
-                previous_state_root = expected_state_root;
-
-                span.debug("Trace {s} passed", .{transition.bin.name});
-                result.blocks_processed += 1;
-            }
-
-            return result;
         }
 
         pub fn endSession(self: *Self) void {

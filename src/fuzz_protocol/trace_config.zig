@@ -58,6 +58,12 @@ pub fn configureTracing(args: struct {
     trace: ?[]const u8,
     trace_quiet: ?[]const u8,
 }) !void {
+    std.debug.print("Configuring tracing with verbose={d}, trace_all={s}, trace={s}, trace_quiet={s}\n", .{
+        args.verbose,
+        args.trace_all orelse "null",
+        args.trace orelse "null",
+        args.trace_quiet orelse "null",
+    });
     // Initialize runtime tracing if any trace options are provided
     if (args.trace_all != null or args.trace != null or args.trace_quiet != null) {
         // Apply default level first if specified
@@ -83,18 +89,28 @@ pub fn configureTracing(args: struct {
     }
 
     // Apply verbose levels
-    try tracing.setScope("codec", .info); // Keep codec quiet by default
-    
+    // try tracing.setScope("codec", .info); // Keep codec quiet by default
+
+    const SCOPES_TO_ENABLE = [_][]const u8{
+        "fuzz_protocol",
+        "jam_conformance_fuzzer",
+        "jam_conformance_target",
+        "stf",
+        "header_validator",
+        // "accumulate",
+        // "reports",
+        // "host_calls",
+        // "safrole",
+    };
+
     if (args.verbose == 1) {
-        try tracing.setScope("fuzz_protocol", .debug);
-        try tracing.setScope("jam_conformance_fuzzer", .debug);
-        try tracing.setScope("jam_conformance_target", .debug);
-        try tracing.setScope("header_validator", .debug);
+        inline for (SCOPES_TO_ENABLE) |scope| {
+            try tracing.setScope(scope, .debug);
+        }
     } else if (args.verbose == 2) {
-        try tracing.setScope("fuzz_protocol", .trace);
-        try tracing.setScope("jam_conformance_fuzzer", .trace);
-        try tracing.setScope("jam_conformance_target", .trace);
-        try tracing.setScope("header_validator", .trace);
+        inline for (SCOPES_TO_ENABLE) |scope| {
+            try tracing.setScope(scope, .debug);
+        }
     } else if (args.verbose == 3) {
         tracing.setDefaultLevel(.debug);
     } else if (args.verbose == 4) {
@@ -103,3 +119,4 @@ pub fn configureTracing(args: struct {
         try tracing.setScope("codec", .debug);
     }
 }
+

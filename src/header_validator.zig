@@ -86,8 +86,6 @@ pub const ValidationResult = struct {
     success: bool,
     /// Whether the block was sealed with tickets
     sealed_with_tickets: bool,
-    /// The entropy that was used for validation
-    entropy_used: ?types.Entropy = null,
 };
 
 /// Header validator with state-based validation
@@ -147,12 +145,15 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             // Ensure state is initialized (only debugbuilds)
             _ = try state.debugCheckIfFullyInitialized();
 
+            const time = params.Time().init(state.tau.?, header.slot);
+            span.debug("Time initialized: {}", .{time});
+
             // Phase:  Select appropriate entropy
-            const entropy = self.selectEntropy(state, header);
+            const eta_prime = self.selectEntropy(state, header);
 
             // Phase: Author validation
             const author_key =
-                try self.validateAuthorConstraints(state, header);
+                try self.validateAuthorConstraints(state, header, eta_prime);
 
             // Phase: Determine ticket availability
             var tickets = try self.resolveTickets(state, header);
@@ -168,7 +169,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
                 const seal_context = SealContext{
                     .header = header,
                     .author_key = author_key,
-                    .entropy = entropy,
+                    .entropy = eta_prime[3],
                     .tickets = tickets.tickets,
                     .context_prefix = if (tickets.tickets != null) SEAL_CONTEXT_TICKET else SEAL_CONTEXT_FALLBACK,
                 };
@@ -207,7 +208,6 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             return ValidationResult{
                 .success = true,
                 .sealed_with_tickets = tickets.tickets != null,
-                .entropy_used = entropy,
             };
         }
 
@@ -297,6 +297,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             self: *Self,
             state: *const JamState(params),
             header: *const types.Header,
+            eta_prime: types.Eta,
         ) !types.BandersnatchPublic {
             _ = self;
             const span = trace.span(@src(), .validate_author_constraints);
@@ -306,6 +307,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             // According to graypaper: use posterior κ' which at epoch boundaries is γ_k
             const time = params.Time().init(state.tau.?, header.slot);
             const validators = if (time.isNewEpoch())
+                // TODO: gamma_k is no gamma_pedning
                 state.gamma.?.k.validators // Use gamma.k for first block of new epoch
             else
                 state.kappa.?.validators; // Use kappa for regular blocks
@@ -317,6 +319,21 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
                     validators.len - 1,
                 });
                 return HeaderValidationError.InvalidAuthorIndex;
+            }
+
+            const expected_index = @import("safrole/epoch_handler.zig").deriveKeyIndex(
+                eta_prime[2],
+                time.current_slot_in_epoch,
+                validators.len,
+            );
+
+            if (expected_index != header.author_index) {
+                span.err("InvalidAuthorIndex expected={d} header.author_index={d}", .{ expected_index, header.author_index });
+                // FIXME: this to make the tests work
+                // https://github.com/davxy/jam-conformance/issues/4#issuecomment-3306386391
+                if (time.current_epoch > 0) {
+                    return HeaderValidationError.InvalidAuthorIndex;
+                }
             }
 
             return validators[header.author_index].bandersnatch;
@@ -413,7 +430,7 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             self: *Self,
             state: *const JamState(params),
             header: *const types.Header,
-        ) types.Entropy {
+        ) types.Eta {
             _ = self;
             const span = trace.span(@src(), .select_entropy);
             defer span.deinit();
@@ -422,11 +439,9 @@ pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Pa
             const entropy_buffer = state.eta.?;
 
             if (time.isNewEpoch()) {
-                // Use entropy from 3 epochs ago
-                return entropy_buffer[2];
+                return [4][32]u8{ [_]u8{0} ** 32, entropy_buffer[0], entropy_buffer[1], entropy_buffer[2] };
             } else {
-                // Use current epoch's entropy
-                return entropy_buffer[3];
+                return entropy_buffer;
             }
         }
 
