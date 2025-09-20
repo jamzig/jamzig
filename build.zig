@@ -2,6 +2,7 @@ const std = @import("std");
 
 // Define enum types that can be shared
 const TracingMode = enum { disabled, runtime, tracy };
+const ConformanceParams = enum { tiny, full };
 
 // Configuration struct to hold all build parameters
 const BuildConfig = struct {
@@ -108,6 +109,16 @@ pub fn build(b: *std.Build) !void {
     const tracing_scopes = b.option([][]const u8, "tracing-scope", "Enable detailed tracing by scope") orelse &[_][]const u8{};
     const tracing_scopes_disabled = b.option([][]const u8, "tracing-scope-disabled", "Disable detailed tracing by scope") orelse
         &[_][]const u8{ "codec", "types_fmt", "pvm" };
+
+    // We set this for our conformance releases
+    // see: src/fuzz_protocol/param_formatter.zig:9
+    const conformance_params = b.option(
+        ConformanceParams,
+        "conformance-params",
+        "JAM protocol parameters for conformance testing (tiny/full)",
+    ) orelse
+        .tiny;
+    _ = conformance_params;
 
     // Create base configuration from command-line options
     const base_config = BuildConfig{
