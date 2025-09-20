@@ -33,7 +33,6 @@ pub fn BlockImporter(comptime IOExecutor: type, comptime params: jam_params.Para
             sealed_with_tickets: bool,
 
             pub fn commit(self: *ImportResult) !void {
-                // Commit the state transition to the heap
                 try self.state_transition.mergePrimeOntoBase();
             }
 
