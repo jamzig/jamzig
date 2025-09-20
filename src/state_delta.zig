@@ -230,15 +230,12 @@ pub fn StateTransition(comptime params: Params) type {
             try @constCast(self.base).merge(&self.prime, self.allocator);
         }
 
-        /// Compute the state root of the transition result WITHOUT committing changes.
-        /// This creates a merged view of base + prime without cloning data.
-        ///
-        /// IMPORTANT: This is used for fork detection in the fuzz protocol.
-        /// We need to know the resulting state root before deciding whether to commit.
-        pub fn computeStateRoot(self: *const Self, allocator: std.mem.Allocator) !types.StateRoot {
-            // Create a merged view state that points to the right sources without copying
+        /// Create a merged view of base + prime without cloning data.
+        /// This creates a view state that combines committed state (base) with pending changes (prime).
+        /// The returned state should NOT be deinitialized - it's just a view.
+        pub fn createMergedView(self: *const Self) State {
             var merged_view = State{};
-            // No deinit, as we just want to create a view and then discard it
+            // No deinit needed, as we just want to create a view and then discard it
 
             // For each field, take from prime if present, otherwise from base
             inline for (std.meta.fields(State)) |field| {
@@ -250,6 +247,16 @@ pub fn StateTransition(comptime params: Params) type {
                 }
             }
 
+            return merged_view;
+        }
+
+        /// Compute the state root of the transition result WITHOUT committing changes.
+        /// This creates a merged view of base + prime without cloning data.
+        ///
+        /// IMPORTANT: This is used for fork detection in the fuzz protocol.
+        /// We need to know the resulting state root before deciding whether to commit.
+        pub fn computeStateRoot(self: *const Self, allocator: std.mem.Allocator) !types.StateRoot {
+            const merged_view = self.createMergedView();
             return try merged_view.buildStateRoot(allocator);
         }
 
