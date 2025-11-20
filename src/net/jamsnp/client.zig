@@ -13,7 +13,7 @@ const Connection = @import("connection.zig").Connection;
 const Stream = @import("stream.zig").Stream;
 
 const toSocketAddress = @import("../ext.zig").toSocketAddress;
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 // Use shared types
 pub const ConnectionId = shared.ConnectionId;
@@ -120,7 +120,7 @@ pub const JamSnpClient = struct {
         chain_genesis_hash: []const u8,
         is_builder: bool,
     ) !*JamSnpClient {
-        const span = trace.span(.init_client);
+        const span = trace.span(@src(), .init_client);
         defer span.deinit();
         span.debug("Initializing JamSnpClient", .{});
 
@@ -239,7 +239,7 @@ pub const JamSnpClient = struct {
     }
 
     pub fn buildLoop(self: *@This()) void {
-        const span = trace.span(.build_loop);
+        const span = trace.span(@src(), .build_loop);
         defer span.deinit();
         span.debug("Initializing event loop", .{});
 
@@ -271,7 +271,7 @@ pub const JamSnpClient = struct {
     }
 
     pub fn runTick(self: *@This()) !void {
-        const span = trace.span(.run_client_tick);
+        const span = trace.span(@src(), .run_client_tick);
         defer span.deinit();
         if (self.loop) |loop| {
             span.trace("Running a single tick on JamSnpClient", .{});
@@ -282,7 +282,7 @@ pub const JamSnpClient = struct {
     }
 
     pub fn runUntilDone(self: *@This()) !void {
-        const span = trace.span(.run);
+        const span = trace.span(@src(), .run);
         defer span.deinit();
         if (self.loop) |loop| {
             span.debug("Starting JamSnpClient event loop", .{});
@@ -300,7 +300,7 @@ pub const JamSnpClient = struct {
     /// The caller is responsible for ensuring the `callback_fn_ptr` points to a
     /// function with the correct signature corresponding to the `event_type`
     pub fn setCallback(self: *@This(), event_type: EventType, callback_fn_ptr: ?*const anyopaque, context: ?*anyopaque) void {
-        const span = trace.span(.set_callback);
+        const span = trace.span(@src(), .set_callback);
         defer span.deinit();
         span.trace("Setting callback for event {s}", .{@tagName(event_type)});
         self.callback_handlers[@intFromEnum(event_type)] = .{
@@ -310,7 +310,7 @@ pub const JamSnpClient = struct {
     }
 
     pub fn deinit(self: *JamSnpClient) void {
-        const span = trace.span(.deinit);
+        const span = trace.span(@src(), .deinit);
         defer span.deinit();
         span.debug("Deinitializing JamSnpClient", .{});
 
@@ -383,7 +383,7 @@ pub const JamSnpClient = struct {
         address: []const u8,
         port: u16,
     ) !ConnectionId {
-        const span = trace.span(.connect_address_and_port);
+        const span = trace.span(@src(), .connect_address_and_port);
         defer span.deinit();
         span.debug("Connecting to {s}:{d}", .{ address, port });
 
@@ -402,7 +402,7 @@ pub const JamSnpClient = struct {
     }
 
     pub fn connect(self: *JamSnpClient, peer_endpoint: network.EndPoint, connection_id: ConnectionId) !void {
-        const span = trace.span(.connect);
+        const span = trace.span(@src(), .connect);
         defer span.deinit();
         span.debug("Connecting to {s}", .{peer_endpoint});
 
@@ -459,7 +459,7 @@ pub const JamSnpClient = struct {
 
     // -- Logging
     pub fn enableSslCtxLogging(self: *@This()) void {
-        const span = trace.span(.enable_ssl_ctx_logging);
+        const span = trace.span(@src(), .enable_ssl_ctx_logging);
         defer span.deinit();
         @import("../tests/logging.zig").enableDetailedSslCtxLogging(self.ssl_ctx);
     }
@@ -471,7 +471,7 @@ pub const JamSnpClient = struct {
         xev_completion: *xev.Completion,
         xev_timer_result: xev.Timer.RunError!void,
     ) xev.CallbackAction {
-        const span = trace.span(.on_client_tick);
+        const span = trace.span(@src(), .on_client_tick);
         defer span.deinit();
 
         errdefer |err| {
@@ -538,7 +538,7 @@ pub const JamSnpClient = struct {
         xev_read_buffer: xev.ReadBuffer, // Buffer containing the data
         xev_read_result: xev.ReadError!usize, // Result of the read operation
     ) xev.CallbackAction {
-        const span = trace.span(.on_packets_in_client);
+        const span = trace.span(@src(), .on_packets_in_client);
         defer span.deinit();
 
         errdefer |read_err| {
@@ -614,7 +614,7 @@ pub const JamSnpClient = struct {
         specs_ptr: ?[*]const lsquic.lsquic_out_spec,
         specs_len: c_uint,
     ) callconv(.C) c_int {
-        const span = trace.span(.client_send_packets_out);
+        const span = trace.span(@src(), .client_send_packets_out);
         defer span.deinit();
         span.trace("Request to send {d} packet specs", .{specs_len});
 

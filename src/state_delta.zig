@@ -186,6 +186,18 @@ pub fn StateTransition(comptime params: Params) type {
             }
         }
 
+        /// Check if a field is initialized (non-null) in base state
+        pub fn hasBase(self: *const Self, comptime field: STAccessors(State)) bool {
+            const name = @tagName(field);
+            const base_name = if (comptime std.mem.endsWith(u8, name, "_prime"))
+                name[0 .. name.len - 6]
+            else
+                name;
+
+            const base_field = @field(self.base, base_name);
+            return base_field != null;
+        }
+
         fn cloneField(self: *Self, field: anytype) Error!@TypeOf(field.?) {
             const T = @TypeOf(field.?);
             return switch (@typeInfo(T)) {
@@ -216,6 +228,36 @@ pub fn StateTransition(comptime params: Params) type {
         /// to base to make this work. Prime will be all nulls after
         pub fn mergePrimeOntoBase(self: *Self) !void {
             try @constCast(self.base).merge(&self.prime, self.allocator);
+        }
+
+        /// Create a merged view of base + prime without cloning data.
+        /// This creates a view state that combines committed state (base) with pending changes (prime).
+        /// The returned state should NOT be deinitialized - it's just a view.
+        pub fn createMergedView(self: *const Self) State {
+            var merged_view = State{};
+            // No deinit needed, as we just want to create a view and then discard it
+
+            // For each field, take from prime if present, otherwise from base
+            inline for (std.meta.fields(State)) |field| {
+                const prime_value = @field(self.prime, field.name);
+                if (prime_value != null) {
+                    @field(merged_view, field.name) = prime_value;
+                } else {
+                    @field(merged_view, field.name) = @field(self.base, field.name);
+                }
+            }
+
+            return merged_view;
+        }
+
+        /// Compute the state root of the transition result WITHOUT committing changes.
+        /// This creates a merged view of base + prime without cloning data.
+        ///
+        /// IMPORTANT: This is used for fork detection in the fuzz protocol.
+        /// We need to know the resulting state root before deciding whether to commit.
+        pub fn computeStateRoot(self: *const Self, allocator: std.mem.Allocator) !types.StateRoot {
+            const merged_view = self.createMergedView();
+            return try merged_view.buildStateRoot(allocator);
         }
 
         /// frees all owned memory except non-owned self.base
@@ -283,7 +325,7 @@ pub fn STBaseType(comptime T: anytype, comptime field: anytype) type {
     // Convert string to field enum
     @setEvalBranchQuota(8000);
     const field_enum = std.meta.stringToEnum(std.meta.FieldEnum(T), base_name) //
-    orelse @compileError("Invalid field name: " ++ base_name);
+        orelse @compileError("Invalid field name: " ++ base_name);
 
     return std.meta.Child(std.meta.fieldInfo(T, field_enum).type);
 }

@@ -1,11 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const PVM = @import("../../pvm.zig").PVM;
+const types = @import("../../pvm/memory/types.zig");
 const SeedGenerator = @import("seed.zig").SeedGenerator;
 const ProgramGenerator = @import("program_generator.zig").ProgramGenerator;
 const Register = @import("../../pvm/registers.zig").Register;
 
-const trace = @import("../../tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 /// Configuration for program mutations
 pub const MutationConfig = struct {
@@ -21,7 +22,7 @@ pub fn mutateProgramBytes(
     config: MutationConfig,
     seed_gen: *SeedGenerator,
 ) void {
-    const span = trace.span(.mutate_program);
+    const span = trace.span(@src(), .mutate_program);
     defer span.deinit();
     span.debug("Evaluating program mutation (length={d} bytes)", .{bytes.len});
 
@@ -129,7 +130,7 @@ const ErrorStats = struct {
     }
 
     pub fn writeErrorCounts(self: *const ErrorStats, writer: anytype) !void {
-        const span = trace.span(.write_error_stats);
+        const span = trace.span(@src(), .write_error_stats);
         defer span.deinit();
         span.debug("Writing error statistics", .{});
 
@@ -193,7 +194,7 @@ pub const FuzzResults = struct {
     }
 
     pub fn accumulate(self: *@This(), result: FuzzResult) void {
-        const span = trace.span(.accumulate_results);
+        const span = trace.span(@src(), .accumulate_results);
         defer span.deinit();
 
         self.accumulated.total_cases += 1;
@@ -265,7 +266,7 @@ pub const PVMFuzzer = struct {
     }
 
     pub fn run(self: *Self) !struct { results: FuzzResults, init_errors: FuzzResults } {
-        const span = trace.span(.run_fuzzer);
+        const span = trace.span(@src(), .run_fuzzer);
         defer span.deinit();
         span.debug("Starting fuzzing session with {d} test cases", .{self.config.num_cases});
 
@@ -302,7 +303,7 @@ pub const PVMFuzzer = struct {
     }
 
     pub fn runSingleTest(self: *Self, seed: u64) !FuzzResult {
-        const span = trace.span(.test_case);
+        const span = trace.span(@src(), .test_case);
         defer span.deinit();
         span.debug("Running test case with seed {d}", .{seed});
 
@@ -400,28 +401,32 @@ pub const PVMFuzzer = struct {
 
             // Check if pvm scope tracing is enabled, in that case we want polkavm logging as well
             // NOTE: use RUST_LOG=trace to actually show the pvm logs
-            if (@import("../../tracing.zig").findScope("pvm")) |_| {
+            if (@import("tracing").findScope("pvm")) |_| {
                 polkavm_ffi.initLogging();
             }
 
-            // Setup memory pages for FFI
+            // Get memory snapshot for FFI setup
+            var memory_snapshot = try exec_ctx.memory.getMemorySnapshot();
+            defer memory_snapshot.deinit(self.allocator);
+
+            // Setup memory pages for FFI from snapshot
             var pages = try std.ArrayList(polkavm_ffi.MemoryPage).initCapacity(
                 self.allocator,
-                exec_ctx.memory.page_table.pages.items.len,
+                memory_snapshot.regions.len,
             );
             defer pages.deinit();
 
-            // Create pages matching our PVM layout
-            for (exec_ctx.memory.page_table.pages.items) |page| {
-                const page_data = try self.allocator.alloc(u8, page.data.len);
+            // Create pages matching our PVM layout from snapshot
+            for (memory_snapshot.regions) |region| {
+                const page_data = try self.allocator.alloc(u8, region.data.len);
                 errdefer self.allocator.free(page_data);
                 @memset(page_data, 0);
 
                 try pages.append(.{
-                    .address = page.address,
+                    .address = region.address,
                     .data = page_data.ptr,
-                    .size = page.data.len,
-                    .is_writable = page.flags == .ReadWrite,
+                    .size = region.data.len,
+                    .is_writable = region.writable,
                 });
             }
 
@@ -669,18 +674,29 @@ pub fn compareRegisters(msg: []const u8, our_registers: []const u64, ref_registe
 }
 
 pub fn compareMemoryPages(memory: *PVM.Memory, ref_pages: []const polkavm_ffi.MemoryPage) !void {
+    // Get memory snapshot for comparison
+    var memory_snapshot = try memory.getMemorySnapshot();
+    defer memory_snapshot.deinit(memory.allocator);
+
+    // Create a map of our pages by address for quick lookup
+    var our_pages = std.AutoHashMap(u32, types.MemoryRegion).init(memory.allocator);
+    defer our_pages.deinit();
+
+    for (memory_snapshot.regions) |region| {
+        try our_pages.put(region.address, region);
+    }
+
+    // Compare with reference pages
     for (ref_pages) |ref_page| {
-        // Get our corresponding page
-        if (memory.page_table.findPageOfAddresss(ref_page.address)) |our_page| {
+        if (our_pages.get(ref_page.address)) |our_region| {
             // Compare page contents
             const ref_data = ref_page.data[0..ref_page.size];
-            const our_data = our_page.page.data[0..ref_page.size];
 
-            if (!std.mem.eql(u8, ref_data, our_data)) {
+            if (!std.mem.eql(u8, ref_data, our_region.data)) {
                 std.debug.print("\nMemory state mismatch detected!\n", .{});
                 std.debug.print("Page address: 0x{X:0>8}\n", .{ref_page.address});
                 std.debug.print("First differing byte at offset: {d}\n", .{
-                    std.mem.indexOfDiff(u8, ref_data, our_data).?,
+                    std.mem.indexOfDiff(u8, ref_data, our_region.data).?,
                 });
                 return error.CrossCheckMemoryMismatch;
             }

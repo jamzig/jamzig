@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const trace = @import("tracing.zig").scoped(.pvm);
+const trace = @import("tracing").scoped(.pvm);
 
 pub const invoke = @import("pvm/invocation.zig");
 
@@ -106,7 +106,7 @@ pub const PVM = struct {
 
     // Single step invocation
     pub fn singleStepInvocation(context: *ExecutionContext) Error!SingleStepResult {
-        const span = trace.span(.execute_step);
+        const span = trace.span(@src(), .execute_step);
         defer span.deinit();
 
         const pc_before = context.pc;
@@ -152,7 +152,7 @@ pub const PVM = struct {
     pub fn basicInvocation(
         context: *ExecutionContext,
     ) Error!BasicInvocationResult {
-        const span = trace.span(.basic_invocation);
+        const span = trace.span(@src(), .basic_invocation);
         defer span.deinit();
         while (true) {
             const step_result = try singleStepInvocation(context);
@@ -184,78 +184,81 @@ pub const PVM = struct {
 
     // Host call invocation invocation
     pub fn hostcallInvocation(context: *ExecutionContext, call_ctx: *anyopaque) Error!HostCallInvocationResult {
-        const span = trace.span(.host_call_invocation);
-        defer span.deinit();
+        // iterative host call invocation loop
+        while (true) {
+            switch (try basicInvocation(context)) {
+                .host_call => |params| {
+                    const span = trace.span(@src(), .host_call_invocation);
+                    defer span.deinit();
 
-        switch (try basicInvocation(context)) {
-            .host_call => |params| {
-                if (context.host_calls) |host_calls_ptr| {
-                    // Cast the anyopaque pointer to our HostCallsConfig
-                    const host_calls_config = @as(*const HostCallsConfig, @ptrCast(@alignCast(host_calls_ptr)));
+                    if (context.host_calls) |host_calls_ptr| {
+                        // Cast the anyopaque pointer to our HostCallsConfig
+                        const host_calls_config = @as(*const HostCallsConfig, @ptrCast(@alignCast(host_calls_ptr)));
 
-                    const maybe_host_call_fn: ?HostCallFn = host_calls_config.map.get(params.idx) orelse host_calls_config.catchall;
-                    if (maybe_host_call_fn) |host_call_fn| {
-                        const gas_before = context.gas;
-                        const pc_before = context.pc;
-                        const registers_before = context.registers;
+                        const maybe_host_call_fn: ?HostCallFn = host_calls_config.map.get(params.idx) orelse host_calls_config.catchall;
+                        if (maybe_host_call_fn) |host_call_fn| {
+                            const gas_before = context.gas;
+                            const pc_before = context.pc;
+                            const registers_before = context.registers;
 
-                        const result = blk: {
-                            // Use wrapper if configured, otherwise panic on errors
-                            if (host_calls_config.wrapper) |wrapper| {
-                                // Wrapper handles all error processing
-                                break :blk wrapper(host_call_fn, context, call_ctx);
-                            } else {
-                                // No wrapper - any error should panic to decouple PVM from implementation details
-                                break :blk host_call_fn(context, call_ctx) catch {
-                                    return .{ .terminal = .panic };
-                                };
-                            }
-                        };
-
-                        // Log the host call with comprehensive information
-                        context.exec_trace.logHostCall(
-                            params.idx,
-                            gas_before,
-                            context.gas,
-                            &registers_before,
-                            &context.registers,
-                            pc_before,
-                            params.next_pc,
-                        );
-
-                        switch (result) {
-                            .play => {
-                                // Check for out of gas immediately after host call
-                                if (context.gas < 0) {
-                                    return .{ .terminal = .out_of_gas };
+                            const result = blk: {
+                                // Use wrapper if configured, otherwise panic on errors
+                                if (host_calls_config.wrapper) |wrapper| {
+                                    // Wrapper handles all error processing
+                                    break :blk wrapper(host_call_fn, context, call_ctx);
+                                } else {
+                                    // No wrapper - any error should panic to decouple PVM from implementation details
+                                    break :blk host_call_fn(context, call_ctx) catch {
+                                        return .{ .terminal = .panic };
+                                    };
                                 }
+                            };
 
-                                // Update total gas used
-                                context.exec_trace.total_gas_used += gas_before - context.gas;
-                                context.pc = params.next_pc;
-                                return try hostcallInvocation(context, call_ctx);
-                            },
-                            .terminal => |terminal_result| {
-                                return .{
-                                    .terminal = terminal_result,
-                                };
-                            },
+                            // Log the host call with comprehensive information
+                            context.exec_trace.logHostCall(
+                                params.idx,
+                                gas_before,
+                                context.gas,
+                                &registers_before,
+                                &context.registers,
+                                pc_before,
+                                params.next_pc,
+                            );
+
+                            switch (result) {
+                                .play => {
+                                    // Check for out of gas immediately after host call
+                                    if (context.gas < 0) {
+                                        return .{ .terminal = .out_of_gas };
+                                    }
+
+                                    // Update total gas used
+                                    context.exec_trace.total_gas_used += gas_before - context.gas;
+                                    context.pc = params.next_pc;
+                                    continue;
+                                },
+                                .terminal => |terminal_result| {
+                                    return .{
+                                        .terminal = terminal_result,
+                                    };
+                                },
+                            }
+                        } else {
+                            // No catchall provided - return panic as no handler exists
+                            span.warn("No host calls catchall provided - return panic", .{});
+                            return .{ .terminal = .panic };
                         }
                     } else {
-                        // No catchall provided - return panic as no handler exists
-                        span.warn("No host calls catchall provided - return panic", .{});
+                        // No host calls configured at all - return panic
+                        //
+                        span.warn("No host calls configured at all - return panic", .{});
                         return .{ .terminal = .panic };
                     }
-                } else {
-                    // No host calls configured at all - return panic
-                    //
-                    span.warn("No host calls configured at all - return panic", .{});
-                    return .{ .terminal = .panic };
-                }
-            },
-            .terminal => |terminal| {
-                return .{ .terminal = terminal };
-            },
+                },
+                .terminal => |terminal| {
+                    return .{ .terminal = terminal };
+                },
+            }
         }
     }
 

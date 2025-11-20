@@ -6,7 +6,7 @@ const types = @import("../types.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = state_d.StateTransition;
 
-const trace = @import("../tracing.zig").scoped(.stf);
+const trace = @import("tracing").scoped(.stf);
 
 pub const Error = error{};
 
@@ -15,7 +15,7 @@ pub fn transition(
     stx: *StateTransition(params),
     new_entropy: types.Entropy,
 ) !void {
-    const span = trace.span(.transition_eta);
+    const span = trace.span(@src(), .transition_eta);
     defer span.deinit();
 
     var eta_current = try stx.ensure(.eta);

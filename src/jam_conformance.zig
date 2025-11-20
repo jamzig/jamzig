@@ -10,7 +10,6 @@ const io = @import("io.zig");
 
 // Use FUZZ_PARAMS for consistency with fuzz protocol testing
 const FUZZ_PARAMS = jam_params.TINY_PARAMS;
-const RunConfig = trace_runner.RunConfig;
 
 // Skipped tests configuration
 const SkippedTest = struct {
@@ -211,22 +210,72 @@ test "jam-conformance:traces" {
 
         std.debug.print("Running trace test for: {s} (from {s})\n", .{ trace_timestamp, entry.source_name });
 
-        // Run test for the specific directory only
+        // Run test for the specific directory using new simplified runner
         const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
         const loader = w3f_loader.loader();
 
         var sequential_executor = try io.SequentialExecutor.init(allocator);
         defer sequential_executor.deinit();
-        var run_result = try trace_runner.runTracesInDir(
-            io.SequentialExecutor,
-            &sequential_executor,
-            FUZZ_PARAMS,
-            loader,
-            allocator,
-            entry.full_path,
-            RunConfig{ .mode = .CONTINOUS_MODE, .quiet = false },
-        );
-        defer run_result.deinit(allocator);
+
+        // Create embedded fuzzer
+        var fuzzer = try trace_runner.fuzzer_mod.createEmbeddedFuzzer(FUZZ_PARAMS, &sequential_executor, allocator, 0);
+        defer fuzzer.destroy();
+
+        // Connect and handshake with embedded target
+        try fuzzer.connectToTarget();
+        try fuzzer.performHandshake();
+
+        // Create trace iterator
+        var trace_iter = try trace_runner.traceIterator(allocator, loader, entry.full_path);
+        defer trace_iter.deinit();
+
+        // Process all traces
+        var results = std.ArrayList(trace_runner.TraceResult).init(allocator);
+        defer results.deinit();
+
+        var trace_names = std.ArrayList([]u8).init(allocator);
+        defer {
+            for (trace_names.items) |name| {
+                allocator.free(name);
+            }
+            trace_names.deinit();
+        }
+
+        var is_first = true;
+        var trace_index: usize = 0;
+        while (try trace_iter.next()) |transition| {
+            defer transition.deinit(allocator);
+
+            // Extract trace name from transition index for reporting
+            const trace_name = try std.fmt.allocPrint(allocator, "trace_{d}", .{trace_index});
+            try trace_names.append(trace_name);
+
+            const result = try trace_runner.processTrace(FUZZ_PARAMS, fuzzer, transition, is_first);
+            try results.append(result);
+
+            // Stop on first error for individual trace test
+            switch (result) {
+                .@"error" => |err_info| {
+                    std.debug.print("Error processing trace {d}: {s} - {s}\n", .{ trace_index, @errorName(err_info.err), err_info.context });
+                    return err_info.err;
+                },
+                .mismatch => |mismatch| {
+                    std.debug.print("State mismatch in trace {d}:\n", .{trace_index});
+                    std.debug.print("  Expected: {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.expected_root)});
+                    std.debug.print("  Actual:   {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.actual_root)});
+                    return error.StateMismatch;
+                },
+                .no_op => |no_op| {
+                    std.debug.print("Trace {d} resulted in no-op: {s}\n", .{ trace_index, no_op.error_name });
+                },
+                else => {},
+            }
+
+            is_first = false;
+            trace_index += 1;
+        }
+
+        std.debug.print("Successfully processed {d} traces\n", .{results.items.len});
     } else {
         std.debug.print("Error: Trace {s} not found in any configured path\n", .{trace_timestamp});
         return error.TraceNotFound;
@@ -315,68 +364,26 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
         return;
     }
 
-    // Create W3F loader for the traces
+    // Create W3F loader and executor
     const w3f_loader = parsers.w3f.Loader(FUZZ_PARAMS){};
     const loader = w3f_loader.loader();
 
-    // Create executor for summary trace running
-    // const ExecutorType = io.ThreadPoolExecutor;
-    const ExecutorType = io.SequentialExecutor;
-    var executor = try ExecutorType.init(allocator);
-    defer executor.deinit();
+    var sequential_executor = try io.SequentialExecutor.init(allocator);
+    defer sequential_executor.deinit();
 
     // Track results by source
     var source_stats = std.StringHashMap(struct {
         passed: usize,
+        no_ops: usize,
         failed: usize,
         skipped: usize,
     }).init(allocator);
     defer source_stats.deinit();
 
     var total_passed: usize = 0;
+    var total_no_ops: usize = 0;
     var total_failed: usize = 0;
     var total_skipped: usize = 0;
-
-    // Track failures and no-op blocks for summary
-    var failures = std.ArrayList(struct {
-        source: []u8,
-        id: []u8,
-        err: anyerror,
-    }).init(allocator);
-    defer {
-        for (failures.items) |failure| {
-            allocator.free(failure.source);
-            allocator.free(failure.id);
-        }
-        failures.deinit();
-    }
-
-    var no_op_blocks = std.ArrayList(struct {
-        source: []u8,
-        id: []u8,
-        exceptions: []const u8,
-    }).init(allocator);
-    defer {
-        for (no_op_blocks.items) |block| {
-            allocator.free(block.source);
-            allocator.free(block.id);
-            allocator.free(block.exceptions);
-        }
-        no_op_blocks.deinit();
-    }
-
-    var skipped_tests = std.ArrayList(struct {
-        source: []u8,
-        id: []u8,
-        reason: []const u8,
-    }).init(allocator);
-    defer {
-        for (skipped_tests.items) |skipped_test| {
-            allocator.free(skipped_test.source);
-            allocator.free(skipped_test.id);
-        }
-        skipped_tests.deinit();
-    }
 
     // Run traces using the iterator
     var iter = collection.iterator();
@@ -387,7 +394,7 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
         // Get or create stats for this source
         var stats_entry = try source_stats.getOrPut(entry.source_name);
         if (!stats_entry.found_existing) {
-            stats_entry.value_ptr.* = .{ .passed = 0, .failed = 0, .skipped = 0 };
+            stats_entry.value_ptr.* = .{ .passed = 0, .no_ops = 0, .failed = 0, .skipped = 0 };
         }
 
         // Check if this test is skipped
@@ -395,46 +402,116 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
             std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ⏭️  SKIPPED ({s})\n", .{ idx, total_count, entry.source_name, entry.timestamp, reason });
             stats_entry.value_ptr.skipped += 1;
             total_skipped += 1;
-            const source_copy = try allocator.dupe(u8, entry.source_name);
-            const id_copy = try allocator.dupe(u8, entry.timestamp);
-            try skipped_tests.append(.{ .source = source_copy, .id = id_copy, .reason = reason });
             idx += 1;
             continue;
         }
 
-        // Try to run traces, catch and record any errors
-        var run_result = trace_runner.runTracesInDir(
-            ExecutorType,
-            &executor,
-            FUZZ_PARAMS,
-            loader,
-            allocator,
-            entry.full_path,
-            RunConfig{ .mode = .CONTINOUS_MODE, .quiet = true },
-        ) catch |err| {
-            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, @errorName(err) });
+        // Create embedded fuzzer for this trace directory
+        var fuzzer = trace_runner.fuzzer_mod.createEmbeddedFuzzer(FUZZ_PARAMS, &sequential_executor, allocator, 0) catch |err| {
+            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ Failed to create fuzzer: {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, @errorName(err) });
             stats_entry.value_ptr.failed += 1;
             total_failed += 1;
-            const source_copy = try allocator.dupe(u8, entry.source_name);
-            const id_copy = try allocator.dupe(u8, entry.timestamp);
-            try failures.append(.{ .source = source_copy, .id = id_copy, .err = err });
             idx += 1;
             continue;
         };
-        defer run_result.deinit(allocator);
+        defer fuzzer.destroy();
 
-        // Track no-op blocks if any
-        if (run_result.had_no_op_blocks) {
-            const source_copy = try allocator.dupe(u8, entry.source_name);
-            const id_copy = try allocator.dupe(u8, entry.timestamp);
-            const exceptions_copy = try allocator.dupe(u8, run_result.no_op_exceptions);
-            try no_op_blocks.append(.{ .source = source_copy, .id = id_copy, .exceptions = exceptions_copy });
-            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ✅ PASS (no-op block: {s})\n", .{ idx, total_count, entry.source_name, entry.timestamp, run_result.no_op_exceptions });
+        // Connect and handshake
+        fuzzer.connectToTarget() catch |err| {
+            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ Connect failed: {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, @errorName(err) });
+            stats_entry.value_ptr.failed += 1;
+            total_failed += 1;
+            idx += 1;
+            continue;
+        };
+
+        fuzzer.performHandshake() catch |err| {
+            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ Handshake failed: {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, @errorName(err) });
+            stats_entry.value_ptr.failed += 1;
+            total_failed += 1;
+            idx += 1;
+            continue;
+        };
+
+        // Create trace iterator for this directory
+        var trace_iter = trace_runner.traceIterator(allocator, loader, entry.full_path) catch |err| {
+            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ Iterator failed: {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, @errorName(err) });
+            stats_entry.value_ptr.failed += 1;
+            total_failed += 1;
+            idx += 1;
+            continue;
+        };
+        defer trace_iter.deinit();
+
+        // Process all traces in this directory
+        var trace_results = std.ArrayList(trace_runner.TraceResult).init(allocator);
+        defer trace_results.deinit();
+
+        var trace_names = std.ArrayList([]u8).init(allocator);
+        defer {
+            for (trace_names.items) |name| {
+                allocator.free(name);
+            }
+            trace_names.deinit();
+        }
+
+        var is_first = true;
+        var trace_idx: usize = 0;
+        var had_error = false;
+        var had_no_op = false;
+        var error_details: ?[]const u8 = null;
+        while (try trace_iter.next()) |transition| {
+            defer transition.deinit(allocator);
+
+            const trace_name = try std.fmt.allocPrint(allocator, "trace_{d}", .{trace_idx});
+            try trace_names.append(trace_name);
+
+            const result = trace_runner.processTrace(FUZZ_PARAMS, fuzzer, transition, is_first) catch |err| {
+                std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ Process failed: {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, @errorName(err) });
+                had_error = true;
+                break;
+            };
+
+            switch (result) {
+                .@"error" => |err_info| {
+                    had_error = true;
+                    error_details = try std.fmt.allocPrint(allocator, "{s} - {s}", .{ @errorName(err_info.err), err_info.context });
+                },
+                .mismatch => {
+                    had_error = true;
+                    error_details = try allocator.dupe(u8, "State root mismatch");
+                },
+                .no_op => {
+                    had_no_op = true;
+                },
+                else => {},
+            }
+
+            try trace_results.append(result);
+            is_first = false;
+            trace_idx += 1;
+        }
+
+        if (had_error) {
+            stats_entry.value_ptr.failed += 1;
+            total_failed += 1;
+
+            if (error_details) |details| {
+                defer allocator.free(details);
+                std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ {s}\n", .{ idx, total_count, entry.source_name, entry.timestamp, details });
+            } else {
+                std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ❌ FAILED\n", .{ idx, total_count, entry.source_name, entry.timestamp });
+            }
+        } else if (had_no_op) {
+            stats_entry.value_ptr.no_ops += 1;
+            total_no_ops += 1;
+            std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ✅ PASS 🟡 NO-OP\n", .{ idx, total_count, entry.source_name, entry.timestamp });
         } else {
+            stats_entry.value_ptr.passed += 1;
+            total_passed += 1;
             std.debug.print("[{d:3}/{d:3}] [{s:7}] {s}: ✅ PASS\n", .{ idx, total_count, entry.source_name, entry.timestamp });
         }
-        stats_entry.value_ptr.passed += 1;
-        total_passed += 1;
+
         idx += 1;
     }
 
@@ -443,11 +520,12 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
     var stats_iter = source_stats.iterator();
     while (stats_iter.next()) |entry| {
         const stats = entry.value_ptr.*;
-        const runnable = stats.passed + stats.failed;
+        const runnable = stats.passed + stats.no_ops + stats.failed;
         if (runnable > 0) {
-            std.debug.print("{s}: Passed: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
+            std.debug.print("{s}: Passed: {d} | No-ops: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
                 entry.key_ptr.*,
                 stats.passed,
+                stats.no_ops,
                 stats.failed,
                 stats.skipped,
                 @as(f64, @floatFromInt(stats.passed)) * 100.0 / @as(f64, @floatFromInt(runnable)),
@@ -459,40 +537,17 @@ fn runTraceSummary(allocator: std.mem.Allocator, collection: *const TraceCollect
 
     // Print overall summary
     std.debug.print("\n=== Overall Summary ===\n", .{});
-    const total_runnable = total_count - total_skipped;
+    const total_runnable = total_passed + total_no_ops + total_failed;
     if (total_runnable > 0) {
-        std.debug.print("Total: {d} | Passed: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
+        std.debug.print("Total: {d} | Passed: {d} | No-ops: {d} | Failed: {d} | Skipped: {d} | Pass rate: {d:.1}%\n", .{
             total_count,
             total_passed,
+            total_no_ops,
             total_failed,
             total_skipped,
             @as(f64, @floatFromInt(total_passed)) * 100.0 / @as(f64, @floatFromInt(total_runnable)),
         });
     } else {
         std.debug.print("Total: {d} | All tests skipped\n", .{total_count});
-    }
-
-    // List tests with no-op blocks
-    if (no_op_blocks.items.len > 0) {
-        std.debug.print("\nTests with no-op blocks:\n", .{});
-        for (no_op_blocks.items) |block| {
-            std.debug.print("  - [{s}] {s}: {s}\n", .{ block.source, block.id, block.exceptions });
-        }
-    }
-
-    // List failed cases
-    if (failures.items.len > 0) {
-        std.debug.print("\nFailed cases:\n", .{});
-        for (failures.items) |failure| {
-            std.debug.print("  - [{s}] {s}: {s}\n", .{ failure.source, failure.id, @errorName(failure.err) });
-        }
-    }
-
-    // List skipped tests
-    if (skipped_tests.items.len > 0) {
-        std.debug.print("\nSkipped tests:\n", .{});
-        for (skipped_tests.items) |skipped_test| {
-            std.debug.print("  - [{s}] {s}: {s}\n", .{ skipped_test.source, skipped_test.id, skipped_test.reason });
-        }
     }
 }

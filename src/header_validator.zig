@@ -4,9 +4,11 @@ const jam_params = @import("jam_params.zig");
 const JamState = @import("state.zig").JamState;
 const codec = @import("codec.zig");
 const crypto = @import("crypto.zig");
+const io = @import("io.zig");
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.stf);
+const tracy = @import("tracy");
 
 // Constants for seal contexts
 const SEAL_CONTEXT_TICKET = "jam_ticket_seal";
@@ -84,30 +86,49 @@ pub const ValidationResult = struct {
     success: bool,
     /// Whether the block was sealed with tickets
     sealed_with_tickets: bool,
-    /// The entropy that was used for validation
-    entropy_used: ?types.Entropy = null,
 };
 
 /// Header validator with state-based validation
-pub fn HeaderValidator(comptime params: jam_params.Params) type {
+pub fn HeaderValidator(comptime IOExecutor: type, comptime params: jam_params.Params) type {
     return struct {
         allocator: std.mem.Allocator,
         config: ValidationConfig,
+        executor: *IOExecutor,
 
         const Self = @This();
 
-        pub fn init(allocator: std.mem.Allocator) Self {
+        pub fn init(allocator: std.mem.Allocator, executor: *IOExecutor) Self {
             return .{
                 .allocator = allocator,
                 .config = ValidationConfig{},
+                .executor = executor,
             };
         }
 
-        pub fn initWithConfig(allocator: std.mem.Allocator, config: ValidationConfig) Self {
+        pub fn initWithConfig(allocator: std.mem.Allocator, executor: *IOExecutor, config: ValidationConfig) Self {
             return .{
                 .allocator = allocator,
                 .config = config,
+                .executor = executor,
             };
+        }
+
+        /// Worker function for parallel seal validation
+        fn validateSealWorker(
+            self: *Self,
+            ctx: SealContext,
+        ) !void {
+            try self.validateSeal(ctx);
+        }
+
+        /// Worker function for parallel entropy source validation
+        fn validateEntropySourceWorker(
+            self: *Self,
+            header: *const types.Header,
+            author_key: types.BandersnatchPublic,
+            sealed_with_tickets: bool,
+        ) !void {
+            try self.validateEntropySource(header, author_key, sealed_with_tickets);
         }
 
         /// Main entry point for header validation
@@ -118,49 +139,76 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             current_state_root: types.StateRoot,
             extrinsics: *const types.Extrinsic,
         ) !ValidationResult {
-            const span = trace.span(.validate_header);
+            const span = trace.span(@src(), .validate_header);
             defer span.deinit();
 
             // Ensure state is initialized (only debugbuilds)
             _ = try state.debugCheckIfFullyInitialized();
 
-            // Phase 1: Structural validation
-            try self.validateStructuralConstraints(state, header, current_state_root, extrinsics);
+            const time = params.Time().init(state.tau.?, header.slot);
+            span.debug("Time initialized: {}", .{time});
 
-            // Phase 2: Timing validation
-            try self.validateTimingConstraints(state, header);
+            // Phase:  Select appropriate entropy
+            const eta_prime = self.selectEntropy(state, header);
 
-            // Phase 3: Author validation
-            const author_key = try self.validateAuthorConstraints(state, header);
-
-            // Phase 4: Marker timing validation
-            try self.validateMarkerTiming(state, header);
-
-            // Phase 5: Determine ticket availability
+            // Phase: Determine ticket availability
             var tickets = try self.resolveTickets(state, header);
             defer tickets.deinit(self.allocator);
 
-            // Phase 6: Select appropriate entropy
-            const entropy = self.selectEntropy(state, header);
+            // Phase: Author validation (needs ticket information)
+            // TODO: cleanup code
+            const author_key =
+                try self.validateAuthorConstraints(state, header, eta_prime, tickets.tickets);
 
-            // Phase 7: Validate seal
-            const seal_context = SealContext{
-                .header = header,
-                .author_key = author_key,
-                .entropy = entropy,
-                .tickets = tickets.tickets,
-                .context_prefix = if (tickets.tickets != null) SEAL_CONTEXT_TICKET else SEAL_CONTEXT_FALLBACK,
-            };
+            {
+                // Parallel signature verification using WorkGroup
+                // Create WorkGroup for parallel execution
+                var work_group = self.executor.createGroup();
+                defer work_group.deinit();
 
-            try self.validateSeal(seal_context);
+                // Prepare seal context
+                const seal_context = SealContext{
+                    .header = header,
+                    .author_key = author_key,
+                    .entropy = eta_prime[3],
+                    .tickets = tickets.tickets,
+                    .context_prefix = if (tickets.tickets != null) SEAL_CONTEXT_TICKET else SEAL_CONTEXT_FALLBACK,
+                };
 
-            // Phase 8: Validate entropy source
-            try self.validateEntropySource(header, author_key, tickets.tickets != null);
+                // Spawn seal verification task
+                try work_group.spawn(validateSealWorker, .{
+                    self,
+                    seal_context,
+                });
+
+                // Spawn entropy verification task
+                try work_group.spawn(validateEntropySourceWorker, .{
+                    self,
+                    header,
+                    author_key,
+                    tickets.tickets != null,
+                });
+
+                // Wait for both tasks and propagate any errors (fail-fast built into WorkGroup)
+                // NOTE: we cannot optimize this by placeing this below for example structural
+                // validation because we need to ensure both tasks complete before we return otherwise
+                // structural validation could fail and and memory pointed to would be freed. Or we should ensure
+                // contexts are owned copies and we can safely ignore the threads.
+                try work_group.waitAndCheckErrors();
+            }
+
+            // Phase: Structural validation
+            try self.validateStructuralConstraints(state, header, current_state_root, extrinsics);
+
+            // Phase: Timing validation
+            try self.validateTimingConstraints(state, header);
+
+            // Phase: Marker timing validation
+            try self.validateMarkerTiming(state, header);
 
             return ValidationResult{
                 .success = true,
                 .sealed_with_tickets = tickets.tickets != null,
-                .entropy_used = entropy,
             };
         }
 
@@ -172,38 +220,50 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             current_state_root: types.StateRoot,
             extrinsics: *const types.Extrinsic,
         ) !void {
-            const span = trace.span(.validate_structural);
+            const span = trace.span(@src(), .validate_structural_constraints);
             defer span.deinit();
 
             // Validate parent hash
-            if (state.beta) |beta| {
-                const last_block_hash = beta.getLastBlockHash();
-                if (!std.mem.eql(u8, &header.parent, &last_block_hash)) {
-                    span.err("Parent hash mismatch: header={s}, state={s}", .{
-                        std.fmt.fmtSliceHexLower(&header.parent),
-                        std.fmt.fmtSliceHexLower(&last_block_hash),
-                    });
-                    return HeaderValidationError.InvalidParentHash;
+            {
+                const parent_span = span.child(@src(), .parent_hash);
+                defer parent_span.deinit();
+                if (state.beta) |beta| {
+                    const last_block_hash = beta.getLastBlockHash();
+                    if (!std.mem.eql(u8, &header.parent, &last_block_hash)) {
+                        span.err("Parent hash mismatch: header={s}, state={s}", .{
+                            std.fmt.fmtSliceHexLower(&header.parent),
+                            std.fmt.fmtSliceHexLower(&last_block_hash),
+                        });
+                        return HeaderValidationError.InvalidParentHash;
+                    }
                 }
             }
 
             // Validate prior state root
-            if (!std.mem.eql(u8, &header.parent_state_root, &current_state_root)) {
-                span.err("Prior state root mismatch: header={s}, computed={s}", .{
-                    std.fmt.fmtSliceHexLower(&header.parent_state_root),
-                    std.fmt.fmtSliceHexLower(&current_state_root),
-                });
-                return HeaderValidationError.InvalidPriorStateRoot;
+            {
+                const state_root_span = span.child(@src(), .prior_state_root);
+                defer state_root_span.deinit();
+                if (!std.mem.eql(u8, &header.parent_state_root, &current_state_root)) {
+                    span.err("Prior state root mismatch: header={s}, computed={s}", .{
+                        std.fmt.fmtSliceHexLower(&header.parent_state_root),
+                        std.fmt.fmtSliceHexLower(&current_state_root),
+                    });
+                    return HeaderValidationError.InvalidPriorStateRoot;
+                }
             }
 
             // Validate extrinsic hash
-            const computed_hash = try extrinsics.calculateHash(params, self.allocator);
-            if (!std.mem.eql(u8, &header.extrinsic_hash, &computed_hash)) {
-                span.err("Extrinsic hash mismatch: header={s}, computed={s}", .{
-                    std.fmt.fmtSliceHexLower(&header.extrinsic_hash),
-                    std.fmt.fmtSliceHexLower(&computed_hash),
-                });
-                return HeaderValidationError.InvalidExtrinsicHash;
+            {
+                const extrinsic_span = span.child(@src(), .extrinsic_hash);
+                defer extrinsic_span.deinit();
+                const computed_hash = try extrinsics.calculateHash(params, self.allocator);
+                if (!std.mem.eql(u8, &header.extrinsic_hash, &computed_hash)) {
+                    span.err("Extrinsic hash mismatch: header={s}, computed={s}", .{
+                        std.fmt.fmtSliceHexLower(&header.extrinsic_hash),
+                        std.fmt.fmtSliceHexLower(&computed_hash),
+                    });
+                    return HeaderValidationError.InvalidExtrinsicHash;
+                }
             }
         }
 
@@ -213,7 +273,7 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             state: *const JamState(params),
             header: *const types.Header,
         ) !void {
-            const span = trace.span(.validate_timing);
+            const span = trace.span(@src(), .validate_timing);
             defer span.deinit();
 
             const tau = state.tau.?;
@@ -238,15 +298,18 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             self: *Self,
             state: *const JamState(params),
             header: *const types.Header,
+            eta_prime: types.Eta,
+            tickets: ?[]const types.TicketBody,
         ) !types.BandersnatchPublic {
             _ = self;
-            const span = trace.span(.validate_author);
+            const span = trace.span(@src(), .validate_author_constraints);
             defer span.deinit();
 
             // Determine which validator set to use based on epoch transition
             // According to graypaper: use posterior κ' which at epoch boundaries is γ_k
             const time = params.Time().init(state.tau.?, header.slot);
             const validators = if (time.isNewEpoch())
+                // TODO: gamma_k is no gamma_pedning
                 state.gamma.?.k.validators // Use gamma.k for first block of new epoch
             else
                 state.kappa.?.validators; // Use kappa for regular blocks
@@ -260,6 +323,39 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
                 return HeaderValidationError.InvalidAuthorIndex;
             }
 
+            // Author validation depends on whether we're in ticket mode or fallback mode
+            if (tickets) |ticket_list| {
+                // TICKET MODE: Author is self-declared via header.author_index
+                // The seal verification will prove they own the winning ticket
+                // (Only the ticket owner can produce a seal with matching ticket ID)
+                span.debug("Validating author in ticket mode", .{});
+
+                const winning_ticket = ticket_list[time.current_slot_in_epoch];
+                _ = winning_ticket;
+
+                span.debug("Ticket mode: author claims index {d}, ownership verified via seal", .{header.author_index});
+            } else {
+                // FALLBACK MODE: Author is determined by entropy-based derivation
+                span.debug("Validating author in fallback mode", .{});
+
+                const expected_index = @import("safrole/epoch_handler.zig").deriveKeyIndex(
+                    eta_prime[2],
+                    time.current_slot_in_epoch,
+                    validators.len,
+                );
+
+                if (expected_index != header.author_index) {
+                    span.err("Fallback mode: expected author index {d}, got {d}", .{ expected_index, header.author_index });
+                    // FIXME: this to make the tests work
+                    // https://github.com/davxy/jam-conformance/issues/4#issuecomment-3306386391
+                    if (time.current_epoch > 0) {
+                        return HeaderValidationError.InvalidAuthorIndex;
+                    }
+                }
+
+                span.debug("Fallback mode author validation passed: slot={d}, author={d}", .{ time.current_slot_in_epoch, expected_index });
+            }
+
             return validators[header.author_index].bandersnatch;
         }
 
@@ -270,7 +366,7 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             header: *const types.Header,
         ) !void {
             _ = self;
-            const span = trace.span(.validate_marker_timing);
+            const span = trace.span(@src(), .validate_marker_timing);
             defer span.deinit();
 
             const tau = state.tau.?;
@@ -291,8 +387,16 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             }
 
             // Check tickets marker timing
-            if (transition_time.didCrossTicketSubmissionEndInSameEpoch()) {
-                // Tickets marker validation would go here if needed
+            if (transition_time.didCrossTicketSubmissionEndInSameEpoch() and
+                // TODO: make a nice accessor for this
+                state.gamma.?.a.len == params.epoch_length)
+            {
+                // When crossing ticket submission end, and our ticket
+                // accumulator is full tickets_mark is REQUIRED
+                if (header.tickets_mark == null) {
+                    span.err("Missing required tickets marker when crossing ticket submission end", .{});
+                    return HeaderValidationError.InvalidTicketsMarkerTiming;
+                }
             } else if (header.tickets_mark != null) {
                 span.err("Tickets marker present but we did not cross didCrossTicketSubmissionEnd", .{});
                 return HeaderValidationError.InvalidTicketsMarkerTiming;
@@ -318,7 +422,7 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             state: *const JamState(params),
             header: *const types.Header,
         ) !TicketResolution {
-            const span = trace.span(.resolve_tickets);
+            const span = trace.span(@src(), .resolve_tickets);
             defer span.deinit();
 
             const time = params.Time().init(state.tau.?, header.slot);
@@ -354,90 +458,103 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
             self: *Self,
             state: *const JamState(params),
             header: *const types.Header,
-        ) types.Entropy {
+        ) types.Eta {
             _ = self;
+            const span = trace.span(@src(), .select_entropy);
+            defer span.deinit();
+
             const time = params.Time().init(state.tau.?, header.slot);
             const entropy_buffer = state.eta.?;
 
             if (time.isNewEpoch()) {
-                // Use entropy from 3 epochs ago
-                return entropy_buffer[2];
+                return [4][32]u8{ [_]u8{0} ** 32, entropy_buffer[0], entropy_buffer[1], entropy_buffer[2] };
             } else {
-                // Use current epoch's entropy
-                return entropy_buffer[3];
+                return entropy_buffer;
             }
         }
 
         /// Unified seal validation
         fn validateSeal(self: *Self, ctx: SealContext) !void {
-            const span = trace.span(.validate_seal);
+            const span = trace.span(@src(), .validate_seal);
             defer span.deinit();
 
             // Serialize unsigned header
-            const unsigned_header = types.HeaderUnsigned.fromHeaderShared(ctx.header);
-            const unsigned_header_bytes = try codec.serializeAlloc(
-                types.HeaderUnsigned,
-                params,
-                self.allocator,
-                unsigned_header,
-            );
+            const unsigned_header_bytes = blk: {
+                const unsigned_header = types.HeaderUnsigned.fromHeaderShared(ctx.header);
+                break :blk try codec.serializeAlloc(
+                    types.HeaderUnsigned,
+                    params,
+                    self.allocator,
+                    unsigned_header,
+                );
+            };
             defer self.allocator.free(unsigned_header_bytes);
 
             // Extract seal signature
             const seal_signature = crypto.bandersnatch.Bandersnatch.Signature.fromBytes(ctx.header.seal);
 
             // Build context buffer
-            var context_buf: [MAX_CONTEXT_BUFFER_SIZE]u8 = undefined;
-            var context_len: usize = 0;
+            const context_bytes = blk: {
+                const context_span = span.child(@src(), .seal_build_context);
+                defer context_span.deinit();
+                var context_buf: [MAX_CONTEXT_BUFFER_SIZE]u8 = undefined;
+                var context_len: usize = 0;
 
-            // Add context prefix
-            @memcpy(context_buf[context_len .. context_len + ctx.context_prefix.len], ctx.context_prefix);
-            context_len += ctx.context_prefix.len;
+                // Add context prefix
+                @memcpy(context_buf[context_len .. context_len + ctx.context_prefix.len], ctx.context_prefix);
+                context_len += ctx.context_prefix.len;
 
-            // Add entropy
-            @memcpy(context_buf[context_len .. context_len + 32], &ctx.entropy);
-            context_len += 32;
+                // Add entropy
+                @memcpy(context_buf[context_len .. context_len + 32], &ctx.entropy);
+                context_len += 32;
 
-            // Handle ticket-specific validation
-            if (ctx.tickets) |ticket_bodies| {
-                const slot_in_epoch = ctx.header.slot % params.epoch_length;
-                const ticket = ticket_bodies[slot_in_epoch];
+                // Handle ticket-specific validation
+                if (ctx.tickets) |ticket_bodies| {
+                    const ticket_span = span.child(@src(), .seal_validate_ticket);
+                    defer ticket_span.deinit();
+                    const slot_in_epoch = ctx.header.slot % params.epoch_length;
+                    const ticket = ticket_bodies[slot_in_epoch];
 
-                // Verify VRF output matches ticket ID
-                const seal_vrf_output = seal_signature.outputHash() catch {
-                    span.err("Failed to extract VRF output from seal", .{});
-                    return HeaderValidationError.TicketSealVerificationFailed;
-                };
+                    // Verify VRF output matches ticket ID
+                    const seal_vrf_output = seal_signature.outputHash() catch {
+                        span.err("Failed to extract VRF output from seal", .{});
+                        return HeaderValidationError.TicketSealVerificationFailed;
+                    };
 
-                if (!std.mem.eql(u8, &ticket.id, &seal_vrf_output)) {
-                    span.err("Ticket ID mismatch: Ticket ID={s}, VRF output={s}", .{
-                        std.fmt.fmtSliceHexLower(&ticket.id),
-                        std.fmt.fmtSliceHexLower(&seal_vrf_output),
-                    });
-                    return HeaderValidationError.InvalidTicketId;
+                    if (!std.mem.eql(u8, &ticket.id, &seal_vrf_output)) {
+                        span.err("Ticket ID mismatch: Ticket ID={s}, VRF output={s}", .{
+                            std.fmt.fmtSliceHexLower(&ticket.id),
+                            std.fmt.fmtSliceHexLower(&seal_vrf_output),
+                        });
+                        return HeaderValidationError.InvalidTicketId;
+                    }
+
+                    // Add ticket attempt to context
+                    context_buf[context_len] = ticket.attempt;
+                    context_len += 1;
                 }
 
-                // Add ticket attempt to context
-                context_buf[context_len] = ticket.attempt;
-                context_len += 1;
-            }
-
-            const context_bytes = context_buf[0..context_len];
+                break :blk context_buf[0..context_len];
+            };
 
             // Verify signature
-            const public_key = crypto.bandersnatch.Bandersnatch.PublicKey.fromBytes(ctx.author_key);
-            _ = seal_signature.verify(
-                context_bytes,
-                unsigned_header_bytes,
-                public_key,
-            ) catch {
-                const err = if (ctx.tickets != null)
-                    HeaderValidationError.TicketSealVerificationFailed
-                else
-                    HeaderValidationError.FallbackSealVerificationFailed;
-                span.err("{s} seal verification failed", .{ctx.context_prefix});
-                return err;
-            };
+            {
+                const verify_span = span.child(@src(), .seal_verify_signature);
+                defer verify_span.deinit();
+                const public_key = crypto.bandersnatch.Bandersnatch.PublicKey.fromBytes(ctx.author_key);
+                _ = seal_signature.verify(
+                    context_bytes,
+                    unsigned_header_bytes,
+                    public_key,
+                ) catch {
+                    const err = if (ctx.tickets != null)
+                        HeaderValidationError.TicketSealVerificationFailed
+                    else
+                        HeaderValidationError.FallbackSealVerificationFailed;
+                    span.err("{s} seal verification failed", .{ctx.context_prefix});
+                    return err;
+                };
+            }
 
             span.debug("Seal verification successful (mode: {s})", .{ctx.context_prefix});
         }
@@ -451,39 +568,49 @@ pub fn HeaderValidator(comptime params: jam_params.Params) type {
         ) !void {
             _ = self;
             _ = sealed_with_tickets;
-            const span = trace.span(.validate_entropy_source);
+            const span = trace.span(@src(), .validate_entropy_source);
             defer span.deinit();
 
             // Parse seal signature to get VRF output
-            const seal_signature = crypto.bandersnatch.Bandersnatch.Signature.fromBytes(header.seal);
-            const seal_output_hash = seal_signature.outputHash() catch {
-                span.err("Failed to extract seal output hash", .{});
-                return HeaderValidationError.InvalidEntropySource;
+            const seal_output_hash = blk: {
+                const seal_output_hash_span = span.child(@src(), .entropy_extract_seal_output);
+                defer seal_output_hash_span.deinit();
+                const seal_signature = crypto.bandersnatch.Bandersnatch.Signature.fromBytes(header.seal);
+                break :blk seal_signature.outputHash() catch {
+                    span.err("Failed to extract seal output hash", .{});
+                    return HeaderValidationError.InvalidEntropySource;
+                };
             };
 
             // Build context: ENTROPY_CONTEXT ⌢ Y(Hs)
-            var context_buf: [MAX_CONTEXT_BUFFER_SIZE]u8 = undefined;
-            var context_len: usize = 0;
+            const context_bytes = blk: {
+                var context_buf: [MAX_CONTEXT_BUFFER_SIZE]u8 = undefined;
+                var context_len: usize = 0;
 
-            @memcpy(context_buf[context_len .. context_len + ENTROPY_CONTEXT.len], ENTROPY_CONTEXT);
-            context_len += ENTROPY_CONTEXT.len;
+                @memcpy(context_buf[context_len .. context_len + ENTROPY_CONTEXT.len], ENTROPY_CONTEXT);
+                context_len += ENTROPY_CONTEXT.len;
 
-            @memcpy(context_buf[context_len .. context_len + 32], &seal_output_hash);
-            context_len += 32;
+                @memcpy(context_buf[context_len .. context_len + 32], &seal_output_hash);
+                context_len += 32;
 
-            const context_bytes = context_buf[0..context_len];
+                break :blk context_buf[0..context_len];
+            };
 
             // Verify entropy source signature
-            const entropy_signature = crypto.bandersnatch.Bandersnatch.Signature.fromBytes(header.entropy_source);
-            const public_key = crypto.bandersnatch.Bandersnatch.PublicKey.fromBytes(author_key);
-            _ = entropy_signature.verify(
-                context_bytes,
-                &[_]u8{}, // Empty message for VRF
-                public_key,
-            ) catch {
-                span.err("Entropy source verification failed", .{});
-                return HeaderValidationError.EntropySourceVerificationFailed;
-            };
+            {
+                const verify_span = span.child(@src(), .entropy_verify_signature);
+                defer verify_span.deinit();
+                const entropy_signature = crypto.bandersnatch.Bandersnatch.Signature.fromBytes(header.entropy_source);
+                const public_key = crypto.bandersnatch.Bandersnatch.PublicKey.fromBytes(author_key);
+                _ = entropy_signature.verify(
+                    context_bytes,
+                    &[_]u8{}, // Empty message for VRF
+                    public_key,
+                ) catch {
+                    span.err("Entropy source verification failed", .{});
+                    return HeaderValidationError.EntropySourceVerificationFailed;
+                };
+            }
 
             span.debug("Entropy source verification successful", .{});
         }

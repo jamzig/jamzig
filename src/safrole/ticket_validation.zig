@@ -2,6 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 
 const ring_vrf = @import("../ring_vrf.zig");
+const io = @import("../io.zig");
 
 pub const entropy = @import("../entropy.zig");
 pub const types = @import("../types.zig");
@@ -9,18 +10,21 @@ pub const types = @import("../types.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const trace = @import("../tracing.zig").scoped(.safrole);
+const trace = @import("tracing").scoped(.safrole);
 
 const Error = @import("../safrole.zig").Error;
 
 // Extracted ticket processing logic
 pub fn processTicketExtrinsic(
+    comptime IOExecutor: type,
+    io_executor: *IOExecutor,
     comptime params: Params,
     stx: *StateTransition(params),
     ticket_extrinsic: types.TicketsExtrinsic,
 ) Error![]types.TicketBody {
-    const span = trace.span(.process_ticket_extrinsic);
+    const span = trace.span(@src(), .process_ticket_extrinsic);
     defer span.deinit();
+
     span.debug("Processing ticket extrinsic", .{});
 
     // in case we have no tickets leave early
@@ -53,6 +57,8 @@ pub fn processTicketExtrinsic(
     const gamma = try stx.ensure(.gamma);
     const eta_prime = try stx.ensure(.eta_prime);
     const verified_extrinsic = verifyTicketEnvelope(
+        IOExecutor,
+        io_executor,
         stx.allocator,
         params.validators_count,
         &gamma.z,
@@ -61,49 +67,57 @@ pub fn processTicketExtrinsic(
     ) catch |e| {
         if (e == error.SignatureVerificationFailed) {
             return Error.BadTicketProof;
-        } else return e;
+        } else return @errorCast(e);
     };
     errdefer stx.allocator.free(verified_extrinsic);
 
     // Chapter 6.7: The tickets should be in order of their implied identifier
-    var index: usize = 0;
-    while (index < verified_extrinsic.len) : (index += 1) {
-        const current_ticket = verified_extrinsic[index];
+    {
+        const order_check_span = span.child(@src(), .check_order);
+        defer order_check_span.deinit();
+        var index: usize = 0;
+        while (index < verified_extrinsic.len) : (index += 1) {
+            const current_ticket = verified_extrinsic[index];
 
-        // Check order and duplicates with previous ticket
-        if (index > 0) {
-            const order = std.mem.order(u8, &current_ticket.id, &verified_extrinsic[index - 1].id);
-            switch (order) {
-                .lt => return Error.BadTicketOrder,
-                .eq => return Error.DuplicateTicket,
+            // Check order and duplicates with previous ticket
+            if (index > 0) {
+                const order = std.mem.order(u8, &current_ticket.id, &verified_extrinsic[index - 1].id);
+                switch (order) {
+                    .lt => return Error.BadTicketOrder,
+                    .eq => return Error.DuplicateTicket,
 
-                .gt => {},
+                    .gt => {},
+                }
             }
-        }
 
-        // Check for duplicates in gamma_a using binary search
-        std.debug.assert(blk: {
-            if (gamma.a.len <= 1) break :blk true;
-            var i: usize = 1;
-            while (i < gamma.a.len) : (i += 1) {
-                if (!std.mem.lessThan(u8, &gamma.a[i - 1].id, &gamma.a[i].id)) break :blk false;
-            }
-            break :blk true;
-        });
+            // Check for duplicates in gamma_a using binary search
+            {
+                const duplicate_check_span = span.child(@src(), .check_duplicates);
+                defer duplicate_check_span.deinit();
+                std.debug.assert(blk: {
+                    if (gamma.a.len <= 1) break :blk true;
+                    var i: usize = 1;
+                    while (i < gamma.a.len) : (i += 1) {
+                        if (!std.mem.lessThan(u8, &gamma.a[i - 1].id, &gamma.a[i].id)) break :blk false;
+                    }
+                    break :blk true;
+                });
 
-        const position = std.sort.binarySearch(types.TicketBody, gamma.a, current_ticket, struct {
-            fn order(context: types.TicketBody, item: types.TicketBody) std.math.Order {
-                return std.mem.order(u8, &context.id, &item.id);
-            }
-        }.order);
+                const position = std.sort.binarySearch(types.TicketBody, gamma.a, current_ticket, struct {
+                    fn order(context: types.TicketBody, item: types.TicketBody) std.math.Order {
+                        return std.mem.order(u8, &context.id, &item.id);
+                    }
+                }.order);
 
-        if (position != null) {
-            span.warn("Found duplicate ticket ID: {s}", .{std.fmt.fmtSliceHexLower(&current_ticket.id)});
-            span.trace("Current gamma_a contents:", .{});
-            for (gamma.a, 0..) |ticket, idx| {
-                span.trace("  [{d}] ID: {s}", .{ idx, std.fmt.fmtSliceHexLower(&ticket.id) });
+                if (position != null) {
+                    span.warn("Found duplicate ticket ID: {s}", .{std.fmt.fmtSliceHexLower(&current_ticket.id)});
+                    span.trace("Current gamma_a contents:", .{});
+                    for (gamma.a, 0..) |ticket, idx| {
+                        span.trace("  [{d}] ID: {s}", .{ idx, std.fmt.fmtSliceHexLower(&ticket.id) });
+                    }
+                    return Error.DuplicateTicket;
+                }
             }
-            return Error.DuplicateTicket;
         }
     }
 
@@ -111,14 +125,17 @@ pub fn processTicketExtrinsic(
 }
 
 fn verifyTicketEnvelope(
+    comptime IOExecutor: type,
+    io_executor: *IOExecutor,
     allocator: std.mem.Allocator,
     ring_size: usize,
     gamma_z: *const types.BandersnatchVrfRoot,
     n2: types.Entropy,
     extrinsic: []const types.TicketEnvelope,
 ) ![]types.TicketBody {
-    const span = trace.span(.verify_ticket_envelope);
+    const span = trace.span(@src(), .verify_ticket_envelope);
     defer span.deinit();
+
     span.debug("Verifying {d} ticket envelopes", .{extrinsic.len});
     span.trace("Ring size: {d}, gamma_z: {any}, n2: {any}", .{
         ring_size,
@@ -135,26 +152,63 @@ fn verifyTicketEnvelope(
 
     const empty_aux_data = [_]u8{};
 
+    // Use provided IO executor for parallel VRF verification
+    var task_group = io_executor.createGroup();
+    defer task_group.deinit();
+
+    // Spawn parallel VRF verification tasks
+
     for (extrinsic, 0..) |extr, i| {
-        span.trace("Verifying ticket envelope [{d}]:", .{i});
+        span.trace("Spawning VRF verification task [{d}]:", .{i});
         span.trace("  Attempt: {d}", .{extr.attempt});
         span.trace("  Signature: {s}", .{std.fmt.fmtSliceHexLower(&extr.signature)});
 
-        // TODO: rewrite
-        const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
-
-        const output = try ring_vrf.verifyRingSignatureAgainstCommitment(
+        try task_group.spawn(verifyTicketTask, .{
             gamma_z,
             ring_size,
-            vrf_input,
+            n2,
+            extr,
+            &tickets[i],
             &empty_aux_data,
-            &extr.signature,
-        );
-        span.trace("  VRF output (ticket ID): {s}", .{std.fmt.fmtSliceHexLower(&output)});
+        });
+    }
 
-        tickets[i].attempt = extr.attempt;
-        tickets[i].id = output;
+    // Wait for all VRF verifications to complete
+    try task_group.waitAndCheckErrors();
+
+    // Log results
+    for (tickets, 0..) |ticket, i| {
+        span.trace("VRF result [{d}] - ID: {s}", .{ i, std.fmt.fmtSliceHexLower(&ticket.id) });
     }
 
     return tickets;
+}
+
+// Helper function for parallel VRF verification task
+fn verifyTicketTask(
+    gamma_z: *const types.BandersnatchVrfRoot,
+    ring_size: usize,
+    n2: types.Entropy,
+    extr: types.TicketEnvelope,
+    output_ticket: *types.TicketBody,
+    empty_aux_data: *const [0]u8,
+) !void {
+    const vrf_zone = trace.span(@src(), .verify_ticket_task);
+    defer vrf_zone.deinit();
+
+    // Construct VRF input for this ticket
+    const vrf_input = "jam_ticket_seal" ++ n2 ++ [_]u8{extr.attempt};
+
+    // Perform VRF verification
+    const output = try ring_vrf.verifyRingSignatureAgainstCommitment(
+        gamma_z,
+        ring_size,
+        vrf_input,
+        empty_aux_data,
+        &extr.signature,
+    );
+
+    // Store results
+    output_ticket.attempt = extr.attempt;
+    output_ticket.id = output;
 }

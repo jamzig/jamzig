@@ -6,7 +6,7 @@ const state = @import("../state.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const tracing = @import("../tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.stf);
 
 pub const Error = error{};
@@ -18,7 +18,7 @@ pub fn updateParentBlockStateRoot(
     stx: *StateTransition(params),
     parent_state_root: types.Hash,
 ) !void {
-    const span = trace.span(.update_parent_block_state_root);
+    const span = trace.span(@src(), .update_parent_block_state_root);
     defer span.deinit();
 
     // Get beta_prime to ensure we're modifying the state
@@ -45,7 +45,7 @@ pub fn transition(
     new_block: *const types.Block,
     accumulate_root: types.AccumulateRoot,
 ) !void {
-    const span = trace.span(.transition_recent_history);
+    const span = trace.span(@src(), .recent_history);
     defer span.deinit();
 
     var beta_prime: *state.Beta = try stx.ensure(.beta_prime);

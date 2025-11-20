@@ -7,7 +7,7 @@ const InstructionWithArgs = PVM.InstructionWithArgs;
 
 const codec = @import("../codec.zig");
 
-const trace = @import("../tracing.zig").scoped(.pvm_test);
+const trace = @import("tracing").scoped(.pvm_test);
 
 pub const InstructionExecutionResult = struct {
     registers: [13]u64,
@@ -45,7 +45,7 @@ pub const TestEnvironment = struct {
         errdefer memory.deinit();
 
         // Allocate a single page at the specified address
-        try memory.allocatePageAt(0x20000, .ReadWrite);
+        try memory.allocatePageAt(0x20000, true); // true = writable
 
         // All zereos
         const registers: [13]u64 = std.mem.zeroes([13]u64);

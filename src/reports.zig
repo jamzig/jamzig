@@ -19,41 +19,28 @@ const banned = @import("reports/banned/banned.zig");
 
 const StateTransition = @import("state_delta.zig").StateTransition;
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.reports);
 
 /// Error types for report validation and processing
+/// REFACTOR: cleanup these errors
 pub const Error = error{
     BadCoreIndex,
-    FutureReportSlot,
-    ReportEpochBeforeLast,
     InsufficientGuarantees,
     OutOfOrderGuarantee,
-    NotSortedOrUniqueGuarantors,
-    TooManyGuarantees,
-    WrongAssignment,
     CoreEngaged,
-    AnchorNotRecent,
-    BadServiceId,
-    BadCodeHash,
-    BadAnchor,
-    DependencyMissing,
-    TooManyDependencies,
     DuplicatePackage,
-    BadStateRoot,
-    BadBeefyMmrRoot,
-    CoreUnauthorized,
-    BadValidatorIndex,
-    WorkReportGasTooHigh,
-    ServiceItemGasTooLow,
-    SegmentRootLookupInvalid,
-    BadSignature,
-    InvalidValidatorPublicKey,
-    InvalidRotationPeriod,
-    InvalidSlotRange,
-    WorkReportTooBig,
-    BannedValidators,
-};
+} || anchor.Error ||
+    service.Error ||
+    dependency.Error ||
+    timing.Error ||
+    guarantor.Error ||
+    signature.Error ||
+    output.Error ||
+    gas.Error ||
+    authorization.Error ||
+    banned.Error ||
+    duplicate_check.Error;
 
 pub const ValidatedGuaranteeExtrinsic = struct {
     guarantees: []const types.ReportGuarantee,
@@ -65,7 +52,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
         stx: *StateTransition(params),
         guarantees: types.GuaranteesExtrinsic,
     ) !@This() {
-        const span = trace.span(.validate_guarantees);
+        const span = trace.span(@src(), .validate_guarantees);
         defer span.deinit();
         span.debug("Starting guarantee validation for {d} guarantees", .{guarantees.data.len});
 
@@ -79,7 +66,7 @@ pub const ValidatedGuaranteeExtrinsic = struct {
         // Validate all guarantees
         var prev_guarantee_core: ?u32 = null;
         for (guarantees.data) |guarantee| {
-            const core_span = span.child(.validate_core);
+            const core_span = span.child(@src(), .validate_core);
             defer core_span.deinit();
             core_span.debug("Validating core index {d} for report hash {s}", .{
                 guarantee.report.core_index.value,
@@ -104,59 +91,30 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             prev_guarantee_core = guarantee.report.core_index.value;
 
             // Validate output size limits
-            output.validateOutputSize(params, guarantee) catch |err| switch (err) {
-                output.Error.WorkReportTooBig => return Error.WorkReportTooBig,
-                else => |e| return e,
-            };
+            try output.validateOutputSize(params, guarantee);
 
             // Validate gas limits
-            gas.validateGasLimits(params, guarantee) catch |err| switch (err) {
-                gas.Error.WorkReportGasTooHigh => return Error.WorkReportGasTooHigh,
-                else => |e| return e,
-            };
+            try gas.validateGasLimits(params, guarantee);
 
             // Check total dependencies don't exceed J according to equation 11.3
-            dependency.validateDependencyCount(params, guarantee) catch |err| switch (err) {
-                dependency.Error.TooManyDependencies => return Error.TooManyDependencies,
-                else => |e| return e,
-            };
+            try dependency.validateDependencyCount(params, guarantee);
 
             // Check if we have enough signatures:
 
             // Validate report slot is not in future
-            timing.validateReportSlot(params, stx, guarantee) catch |err| switch (err) {
-                timing.Error.FutureReportSlot => return Error.FutureReportSlot,
-                else => |e| return e,
-            };
+            try timing.validateReportSlot(params, stx, guarantee);
 
             // Check rotation period according to graypaper 11.27
-            timing.validateRotationPeriod(params, stx, guarantee) catch |err| switch (err) {
-                timing.Error.ReportEpochBeforeLast => return Error.ReportEpochBeforeLast,
-                else => |e| return e,
-            };
+            try timing.validateRotationPeriod(params, stx, guarantee);
 
             // Validate anchor is recent
-            anchor.validateAnchor(params, stx, guarantee) catch |err| switch (err) {
-                anchor.Error.AnchorNotRecent => return Error.AnchorNotRecent,
-                anchor.Error.BadBeefyMmrRoot => return Error.BadBeefyMmrRoot,
-                anchor.Error.BadStateRoot => return Error.BadStateRoot,
-                anchor.Error.BadAnchor => return Error.BadAnchor,
-                else => |e| return e,
-            };
+            try anchor.validateAnchor(params, stx, guarantee);
 
             // Validate guarantors are sorted and unique
-            guarantor.validateSortedAndUnique(guarantee) catch |err| switch (err) {
-                guarantor.Error.NotSortedOrUniqueGuarantors => return Error.NotSortedOrUniqueGuarantors,
-                else => |e| return e,
-            };
+            try guarantor.validateSortedAndUnique(guarantee);
 
             // Check service ID exists
-            service.validateServices(params, stx, guarantee) catch |err| switch (err) {
-                service.Error.BadServiceId => return Error.BadServiceId,
-                service.Error.BadCodeHash => return Error.BadCodeHash,
-                service.Error.ServiceItemGasTooLow => return Error.ServiceItemGasTooLow,
-                else => |e| return e,
-            };
+            try service.validateServices(params, stx, guarantee);
 
             // TODO: Check core is not engaged
             // if (jam_state.rho.?.isEngaged(guarantee.report.core_index)) {
@@ -164,22 +122,13 @@ pub const ValidatedGuaranteeExtrinsic = struct {
             // }
 
             // Validate report prerequisites exist
-            dependency.validatePrerequisites(params, stx, guarantee, guarantees) catch |err| switch (err) {
-                dependency.Error.DependencyMissing => return Error.DependencyMissing,
-                else => |e| return e,
-            };
+            try dependency.validatePrerequisites(params, stx, guarantee, guarantees);
 
             // Verify segment root lookup is valid
-            dependency.validateSegmentRootLookup(params, stx, guarantee, guarantees) catch |err| switch (err) {
-                dependency.Error.SegmentRootLookupInvalid => return Error.SegmentRootLookupInvalid,
-                else => |e| return e,
-            };
+            try dependency.validateSegmentRootLookup(params, stx, guarantee, guarantees);
 
             // Check timeslot is within valid range
-            timing.validateSlotRange(params, stx, guarantee) catch |err| switch (err) {
-                timing.Error.ReportEpochBeforeLast => return Error.ReportEpochBeforeLast,
-                else => |e| return e,
-            };
+            try timing.validateSlotRange(params, stx, guarantee);
 
             // 11.27 ---
 
@@ -194,68 +143,43 @@ pub const ValidatedGuaranteeExtrinsic = struct {
 
             // Validate signatures
             {
-                const sig_span = span.child(.validate_signatures);
+                const sig_span = span.child(@src(), .validate_signatures);
                 defer sig_span.deinit();
 
                 sig_span.debug("Validating {d} guarantor signatures", .{guarantee.signatures.len});
 
                 // Validate signature count
-                guarantor.validateSignatureCount(guarantee) catch |err| switch (err) {
-                    guarantor.Error.InsufficientGuarantees => return Error.InsufficientGuarantees,
-                    guarantor.Error.TooManyGuarantees => return Error.TooManyGuarantees,
-                    else => |e| return e,
-                };
+                try guarantor.validateSignatureCount(guarantee);
                 // Validate all validator indices are in range upfront
                 try signature.validateValidatorIndices(params, guarantee);
 
                 // Check if any guarantor is banned
-                banned.checkBannedValidators(params, guarantee, stx, &assignments) catch |err| switch (err) {
-                    banned.Error.BannedValidators => return Error.BannedValidators,
-                    else => |e| return e,
-                };
+                try banned.checkBannedValidators(params, guarantee, stx, &assignments);
 
                 // Validate guarantor assignments using pre-built assignments
-                guarantor.validateGuarantorAssignmentsWithPrebuilt(
+                try guarantor.validateGuarantorAssignmentsWithPrebuilt(
                     params,
                     guarantee,
                     &assignments,
-                ) catch |err| switch (err) {
-                    guarantor.Error.InvalidGuarantorAssignment => return Error.WrongAssignment,
-                    else => |e| return e,
-                };
+                );
 
                 // Validate signatures using pre-built assignments
-                signature.validateSignaturesWithAssignments(
+                try signature.validateSignaturesWithAssignments(
                     params,
                     allocator,
                     guarantee,
                     &assignments,
-                ) catch |err| switch (err) {
-                    signature.Error.BadValidatorIndex => return Error.BadValidatorIndex,
-                    signature.Error.BadSignature => return Error.BadSignature,
-                    signature.Error.InvalidValidatorPublicKey => return Error.InvalidValidatorPublicKey,
-                    else => |e| return e,
-                };
+                );
             }
 
             // Core must be free or its previous report must have timed out
-            timing.validateCoreTimeout(params, stx, guarantee) catch |err| switch (err) {
-                timing.Error.CoreEngaged => return Error.CoreEngaged,
-                else => |e| return e,
-            };
+            try timing.validateCoreTimeout(params, stx, guarantee);
 
             // Check if the authorizer hash is valid
-            authorization.validateCoreAuthorization(params, stx, guarantee) catch |err| switch (err) {
-                authorization.Error.CoreUnauthorized => return Error.CoreUnauthorized,
-                else => |e| return e,
-            };
+            try authorization.validateCoreAuthorization(params, stx, guarantee);
 
             // Check for duplicate packages across states
-            duplicate_check.checkDuplicatePackageInRecentHistory(params, stx, guarantee, guarantees) catch |err| switch (err) {
-                duplicate_check.Error.DuplicatePackage => return Error.DuplicatePackage,
-                duplicate_check.Error.DuplicatePackageInGuarantees => return Error.DuplicatePackage,
-                else => |e| return e,
-            };
+            try duplicate_check.checkDuplicatePackageInRecentHistory(params, stx, guarantee, guarantees);
             // TODO: should we add this?
             // // Check sufficient guarantors
             // if (guarantee.signatures.len < params.validators_super_majority) {
@@ -286,7 +210,7 @@ pub fn processGuaranteeExtrinsic(
     stx: *StateTransition(params),
     validated: ValidatedGuaranteeExtrinsic,
 ) !Result {
-    const span = trace.span(.process_guarantees);
+    const span = trace.span(@src(), .process_guarantees);
     defer span.deinit();
     span.debug("Processing guarantees - count: {d}, slot: {d}", .{ validated.guarantees.len, stx.time.current_slot });
     // span.trace("Current state root: {s}", .{
@@ -301,7 +225,7 @@ pub fn processGuaranteeExtrinsic(
 
     // Process each validated guarantee
     for (validated.guarantees) |guarantee| {
-        const process_span = span.child(.process_guarantee);
+        const process_span = span.child(@src(), .process_guarantee);
         defer process_span.deinit();
 
         const core_index = guarantee.report.core_index.value;

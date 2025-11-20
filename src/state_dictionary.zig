@@ -614,6 +614,7 @@ pub fn buildStateMerklizationDictionary(
     return try buildStateMerklizationDictionaryWithConfig(params, allocator, state, .{});
 }
 
+
 // -- Unit tests --
 
 const testing = std.testing;

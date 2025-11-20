@@ -3,11 +3,11 @@ const ssl = @import("ssl");
 
 const Base32 = @import("../base32.zig").Encoding;
 
-const trace = @import("../../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Certificate verification callback for JAMSNP
 pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.C) c_int {
-    const span = trace.span(.verify_certificate);
+    const span = trace.span(@src(), .verify_certificate);
     defer span.deinit();
     span.debug("Starting certificate verification", .{});
 
@@ -58,7 +58,7 @@ pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.
         return 0; // No alt name at index 0
     };
 
-    const name_check_span = span.child(.check_alt_name);
+    const name_check_span = span.child(@src(), .check_alt_name);
     defer name_check_span.deinit();
 
     // 4. Extract the DNS name and verify format
@@ -95,7 +95,7 @@ pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.
     name_check_span.debug("DNS name starts with 'e'", .{});
 
     // 5. Verify that the rest of the DNS name is base32 encoded, and matches the signers pubkey
-    const base32_check_span = span.child(.check_base32);
+    const base32_check_span = span.child(@src(), .check_base32);
     defer base32_check_span.deinit();
     base32_check_span.debug("Checking base32 encoding for DNS name", .{});
 
@@ -104,7 +104,7 @@ pub fn verifyCertificate(certs: ?*ssl.X509_STORE_CTX, _: ?*anyopaque) callconv(.
         base32_check_span.debug("DNS name is properly base32 encoded", .{});
 
         // Check if the decoded pubkey matches the certificate's key
-        const pubkey_check_span = span.child(.check_pubkey_match);
+        const pubkey_check_span = span.child(@src(), .check_pubkey_match);
         defer pubkey_check_span.deinit();
         pubkey_check_span.debug("Checking if decoded pubkey matches certificate pubkey", .{});
 

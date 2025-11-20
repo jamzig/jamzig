@@ -7,6 +7,8 @@ const disputes = @import("../disputes.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
+const trace = @import("tracing").scoped(.disputes);
+
 pub const Error = error{};
 
 pub fn transition(
@@ -15,6 +17,9 @@ pub fn transition(
     stx: *StateTransition(params),
     xtdisputes: types.DisputesExtrinsic,
 ) !void {
+    const span = trace.span(@src(), .transition_disputes);
+    defer span.deinit();
+
     const current_kappa: *const types.ValidatorSet = try stx.ensure(.kappa);
     const current_lambda: *const types.ValidatorSet = try stx.ensure(.lambda);
 

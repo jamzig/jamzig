@@ -215,6 +215,9 @@ pub const TINY_PARAMS = Params{
     .total_gas_alloc_accumulation = 20_000_000,
     .gas_alloc_refine = 1_000_000_000, // Found by decoding the fetch value
 
+    // L: Maximum age in timeslots of the lookup anchor
+    .max_lookup_anchor_age = 24,
+
     // All other fields use default values
 };
 

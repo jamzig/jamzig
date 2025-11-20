@@ -5,17 +5,17 @@ const codec = @import("../codec.zig");
 const authorization_pool = @import("../authorizer_pool.zig");
 const Alpha = authorization_pool.Alpha;
 
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 /// Encodes pools where each pool is length encoded. Length of pools is assumed to be C
 pub fn encode(comptime core_count: u16, comptime max_pool_items: u8, self: *const Alpha(core_count, max_pool_items), writer: anytype) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting alpha encoding for {d} cores", .{core_count});
 
     // Encode pools
     for (self.pools, 0..) |pool, i| {
-        const pool_span = span.child(.pool);
+        const pool_span = span.child(@src(), .pool);
         defer pool_span.deinit();
 
         pool_span.debug("Encoding pool {d} of {d}", .{ i + 1, core_count });
@@ -24,7 +24,7 @@ pub fn encode(comptime core_count: u16, comptime max_pool_items: u8, self: *cons
         try codec.writeInteger(pool.len, writer);
 
         for (pool.slice(), 0..) |*auth, j| {
-            const auth_span = pool_span.child(.auth);
+            const auth_span = pool_span.child(@src(), .auth);
             defer auth_span.deinit();
             auth_span.debug("Writing auth {d} of {d}", .{ j + 1, pool.len });
             auth_span.trace("Auth hash: {any}", .{std.fmt.fmtSliceHexLower(auth)});

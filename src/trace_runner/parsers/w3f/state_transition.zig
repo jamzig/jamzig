@@ -4,7 +4,7 @@ const codec = @import("../../../codec.zig");
 const state_dictionary = @import("../../../state_dictionary.zig");
 const merkle = @import("../../../merkle.zig");
 
-const tracing = @import("../../../tracing.zig");
+const tracing = @import("tracing");
 const codec_scope = tracing.scoped(.codec);
 
 const Params = @import("../../../jam_params.zig").Params;

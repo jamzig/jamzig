@@ -1,7 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const testing = std.testing;
+const clap = @import("clap");
 const types = @import("types.zig");
+const build_tuned_allocator = @import("build_tuned_allocator.zig");
 const block_import = @import("block_import.zig");
 const state = @import("state.zig");
 const jamtestvectors = @import("jamtestvectors.zig");
@@ -11,6 +13,7 @@ const state_dict = @import("state_dictionary.zig");
 const io = @import("io.zig");
 const jam_params = @import("jam_params.zig");
 const Params = jam_params.Params;
+const tracy = @import("tracy");
 
 const BenchmarkConfig = struct {
     iterations: u32 = 100,
@@ -20,6 +23,13 @@ const BenchmarkConfig = struct {
     output_format: OutputFormat = .json,
 
     const OutputFormat = enum { json, human_readable };
+
+    pub fn deinit(self: *BenchmarkConfig, allocator: std.mem.Allocator) void {
+        if (self.trace_filter) |filter| {
+            allocator.free(filter);
+            self.trace_filter = null;
+        }
+    }
 };
 
 const BenchmarkResult = struct {
@@ -194,6 +204,8 @@ fn executeBenchmarkBatch(comptime IOExecutor: type, context: BenchmarkContext(IO
     var successful_runs: usize = 0;
     var run_idx: usize = 0;
 
+    var cached_state_root = try jam_state.buildStateRoot(context.allocator);
+
     while (successful_runs < context.config.iterations) : (run_idx += 1) {
         if (run_idx > context.config.iterations * 10) {
             std.debug.print("  Warning: Too many failures, stopping at {} successful runs\n", .{successful_runs});
@@ -210,25 +222,26 @@ fn executeBenchmarkBatch(comptime IOExecutor: type, context: BenchmarkContext(IO
             defer dict.deinit();
 
             jam_state = try state_dict.reconstruct.reconstructState(jamtestvectors.W3F_PARAMS, context.allocator, &dict);
+            cached_state_root = try jam_state.buildStateRoot(context.allocator);
         }
 
-        var importer = block_import.BlockImporter(IOExecutor, jamtestvectors.W3F_PARAMS).init(&context.executor, context.allocator);
+        var importer = block_import.BlockImporter(
+            IOExecutor,
+            jamtestvectors.W3F_PARAMS,
+        ).init(context.executor, context.allocator);
 
         const start = std.time.nanoTimestamp();
 
-        var result = importer.importBlock(&jam_state, transition.block()) catch {
-            jam_state.deinit(context.allocator);
-            jam_state = try state.JamState(jamtestvectors.W3F_PARAMS).init(context.allocator);
-
-            var dict = try transition.preStateAsMerklizationDict(arena);
-            defer dict.deinit();
-
-            jam_state = try state_dict.reconstruct.reconstructState(jamtestvectors.W3F_PARAMS, context.allocator, &dict);
-            continue;
-        };
+        var result = try importer.importBlockWithCachedRoot(
+            &jam_state,
+            cached_state_root,
+            transition.block(),
+        );
 
         try result.commit();
         result.deinit();
+
+        cached_state_root = try jam_state.buildStateRoot(context.allocator);
 
         const end = std.time.nanoTimestamp();
         times[successful_runs] = @intCast(end - start);
@@ -323,7 +336,33 @@ pub fn benchmarkBlockImportWithBufferAndConfig(
         "storage_light",
     };
 
+    // Validate trace filter if provided
+    if (context.config.trace_filter) |filter| {
+        var valid_filter = false;
+        for (trace_dirs) |trace_name| {
+            if (std.mem.eql(u8, trace_name, filter)) {
+                valid_filter = true;
+                break;
+            }
+        }
+        if (!valid_filter) {
+            std.debug.print("Error: Unknown trace '{s}'. Available traces: ", .{filter});
+            for (trace_dirs, 0..) |trace_name, i| {
+                std.debug.print("{s}", .{trace_name});
+                if (i < trace_dirs.len - 1) std.debug.print("{s}", .{", "});
+            }
+            std.debug.print("{s}", .{"\n"});
+            return;
+        }
+    }
+
     for (trace_dirs) |trace_name| {
+        // Skip traces that don't match the filter
+        if (context.config.trace_filter) |filter| {
+            if (!std.mem.eql(u8, trace_name, filter)) {
+                continue;
+            }
+        }
         // Clear arena between trace directories
         _ = arena_allocator.reset(.retain_capacity);
 
@@ -354,7 +393,7 @@ pub fn benchmarkBlockImportWithBufferAndConfig(
             continue;
         }
 
-        const successful_runs = executeBenchmarkBatch(IOExecutor, &context, arena, transitions, times_buffer) catch |err| {
+        const successful_runs = executeBenchmarkBatch(IOExecutor, context, arena, transitions, times_buffer) catch |err| {
             std.debug.print("  Benchmark execution failed: {}\n", .{err});
             continue;
         };
@@ -384,29 +423,146 @@ pub fn benchmarkBlockImportWithBufferAndConfig(
     try generateBenchmarkReport(&context, arena, results.items, git_commit);
 }
 
-pub fn benchmarkBlockImportWithBuffer(comptime IOExecutor: type, allocator: std.mem.Allocator, times_buffer: []u64, iterations: u32, executor: IOExecutor) !void {
+pub fn benchmarkBlockImportWithBuffer(comptime IOExecutor: type, allocator: std.mem.Allocator, times_buffer: []u64, iterations: u32, executor: *IOExecutor) !void {
     const config = BenchmarkConfig{ .iterations = iterations };
-    return benchmarkBlockImportWithBufferAndConfig(IOExecutor, allocator, times_buffer, config, executor);
+    return benchmarkBlockImportWithBufferAndConfig(IOExecutor, executor, allocator, times_buffer, config);
 }
 
-pub fn benchmarkBlockImportWithConfig(comptime IOExecutor: type, allocator: std.mem.Allocator, config: BenchmarkConfig, executor: IOExecutor) !void {
+pub fn benchmarkBlockImportWithConfig(comptime IOExecutor: type, allocator: std.mem.Allocator, config: BenchmarkConfig, executor: *IOExecutor) !void {
     const times_buffer = try allocator.alloc(u64, config.iterations);
     defer allocator.free(times_buffer);
-    return benchmarkBlockImportWithBufferAndConfig(IOExecutor, allocator, times_buffer, config, executor);
+    return benchmarkBlockImportWithBufferAndConfig(IOExecutor, executor, allocator, times_buffer, config);
 }
 
-pub fn benchmarkBlockImport(comptime IOExecutor: type, allocator: std.mem.Allocator, iterations: u32, executor: IOExecutor) !void {
+pub fn benchmarkBlockImport(comptime IOExecutor: type, allocator: std.mem.Allocator, iterations: u32, executor: *IOExecutor) !void {
     const config = BenchmarkConfig{ .iterations = iterations };
     return benchmarkBlockImportWithConfig(IOExecutor, allocator, config, executor);
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+fn showHelp(params: anytype) !void {
+    std.debug.print(
+        \\JamZig⚡ Block Import Benchmark
+        \\
+        \\Benchmarks block import performance across different JAM trace types.
+        \\
+    , .{});
+    try clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+    std.debug.print(
+        \\
+        \\Usage: bench_block_import [iterations] [trace]
+        \\  iterations   Number of iterations per trace (default: 100)
+        \\  trace        Run only specific trace (optional)
+        \\
+        \\Available traces: fallback, safrole, preimages, preimages_light, storage, storage_light
+        \\
+        \\Examples:
+        \\  bench_block_import              # 100 iterations, all traces
+        \\  bench_block_import 50           # 50 iterations, all traces
+        \\  bench_block_import 25 safrole   # 25 iterations, safrole only
+        \\
+    , .{});
+}
 
-    var executor = try io.ThreadPoolExecutor.init(allocator, null);
+fn parseArgs(allocator: std.mem.Allocator) !BenchmarkConfig {
+    const params = comptime clap.parseParamsComptime(
+        \\-h, --help             Display this help and exit.
+        \\<u32>
+        \\<str>
+    );
+
+    var diag = clap.Diagnostic{};
+    var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
+        .diagnostic = &diag,
+        .allocator = allocator,
+    }) catch |err| {
+        diag.report(std.io.getStdErr().writer(), err) catch {};
+        try showHelp(params);
+        std.process.exit(1);
+        return err;
+    };
+    defer res.deinit();
+
+    if (res.args.help != 0) {
+        try showHelp(params);
+        std.process.exit(0);
+    }
+
+    var config = BenchmarkConfig{};
+
+    // Handle positional arguments
+    if (res.positionals.len > 0) {
+        // First positional: iterations (already parsed as u32 by clap)
+        if (res.positionals[0]) |iterations| {
+            config.iterations = iterations;
+        }
+    }
+
+    if (res.positionals.len > 1) {
+        // Second positional: trace name (already parsed as string by clap)
+        if (res.positionals[1]) |trace_name| {
+            const valid_traces = [_][]const u8{ "fallback", "safrole", "preimages", "preimages_light", "storage", "storage_light" };
+
+            var valid = false;
+            for (valid_traces) |valid_trace| {
+                if (std.mem.eql(u8, trace_name, valid_trace)) {
+                    valid = true;
+                    break;
+                }
+            }
+
+            if (!valid) {
+                std.debug.print("Error: Invalid trace '{s}'. Valid traces: ", .{trace_name});
+                for (valid_traces, 0..) |valid_trace, idx| {
+                    std.debug.print("{s}", .{valid_trace});
+                    if (idx < valid_traces.len - 1) std.debug.print(", ", .{});
+                }
+                std.debug.print("\n", .{});
+                return error.InvalidArguments;
+            }
+
+            config.trace_filter = try allocator.dupe(u8, trace_name);
+        }
+    }
+
+    if (res.positionals.len > 2) {
+        std.debug.print("Error: Too many positional arguments. Expected at most 2.\n", .{});
+        try showHelp(params);
+        return error.InvalidArguments;
+    }
+
+    return config;
+}
+
+pub fn main() !void {
+    var alloc = build_tuned_allocator.BuildTunedAllocator.init();
+    defer alloc.deinit();
+
+    // TracyAllocator is a no-op when Tracy is disabled
+    var tracy_alloc = tracy.TracyAllocator.init(alloc.allocator());
+    const allocator = tracy_alloc.allocator();
+
+    const ctx = tracy.ZoneS(@src(), 10);
+    defer ctx.End();
+
+    var config = parseArgs(allocator) catch |err| switch (err) {
+        error.InvalidArguments => std.process.exit(1),
+        else => return err,
+    };
+    defer config.deinit(allocator);
+
+    std.debug.print("Using JAM params: {any}\n", .{config});
+
+    // const ExecutorType = io.SequentialExecutor;
+    const ExecutorType = io.ThreadPoolExecutor;
+
+    var executor = try ExecutorType.init(allocator);
     defer executor.deinit();
 
-    try benchmarkBlockImport(io.ThreadPoolExecutor, allocator, 100, executor);
+    if (config.trace_filter) |filter| {
+        std.debug.print("Running {} iterations for trace: {s}\n", .{ config.iterations, filter });
+    } else {
+        std.debug.print("Running {} iterations per trace...\n", .{config.iterations});
+    }
+
+    try benchmarkBlockImportWithConfig(ExecutorType, allocator, config, &executor);
 }

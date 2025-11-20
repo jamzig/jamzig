@@ -3,6 +3,7 @@ const messages = @import("messages.zig");
 const types = @import("../types.zig");
 const state_dictionary = @import("../state_dictionary.zig");
 const state_converter = @import("state_converter.zig");
+const jam_params = @import("../jam_params.zig");
 
 /// Represents a state root mismatch between local and target
 pub const Mismatch = struct {
@@ -32,11 +33,15 @@ pub const FuzzResult = struct {
     mismatch: ?Mismatch,
     success: bool,
     err: ?anyerror = null,
+    err_details: ?[]const u8 = null,
 
     /// Clean up all allocated data
     pub fn deinit(self: *FuzzResult, allocator: std.mem.Allocator) void {
         if (self.mismatch) |*mismatch| {
             mismatch.deinit(allocator);
+        }
+        if (self.err_details) |details| {
+            allocator.free(details);
         }
     }
 
@@ -47,7 +52,7 @@ pub const FuzzResult = struct {
 };
 
 /// Generate a detailed report of fuzzing results
-pub fn generateReport(allocator: std.mem.Allocator, result: FuzzResult) ![]u8 {
+pub fn generateReport(comptime params: jam_params.Params, allocator: std.mem.Allocator, result: FuzzResult) ![]u8 {
     var report = std.ArrayList(u8).init(allocator);
     errdefer report.deinit();
 
@@ -66,6 +71,9 @@ pub fn generateReport(allocator: std.mem.Allocator, result: FuzzResult) ![]u8 {
         try writer.print("Error: {s}\n", .{@errorName(err)});
         if (err == error.BrokenPipe or err == error.UnexpectedEndOfStream) {
             try writer.print("(Target appears to have disconnected)\n", .{});
+        }
+        if (result.err_details) |details| {
+            try writer.print("Error Details: {s}\n", .{details});
         }
     }
     try writer.print("\n", .{});
@@ -96,7 +104,7 @@ pub fn generateReport(allocator: std.mem.Allocator, result: FuzzResult) ![]u8 {
         try writer.print("  Reported State Root: {s}\n", .{std.fmt.fmtSliceHexLower(&mismatch.reported_state_root)});
 
         // Block information
-        const block_hash = try mismatch.block.header.header_hash(messages.FUZZ_PARAMS, allocator);
+        const block_hash = try mismatch.block.header.header_hash(params, allocator);
         try writer.print("  Block Hash: {s}\n", .{std.fmt.fmtSliceHexLower(&block_hash)});
         try writer.print("  Block Slot: {d}\n", .{mismatch.block.header.slot});
 

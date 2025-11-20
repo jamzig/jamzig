@@ -8,7 +8,7 @@ const DecodingContext = state_decoding.DecodingContext;
 
 const H = 32; // Hash size (32)
 
-const trace = @import("../tracing.zig").scoped(.state_decoding);
+const trace = @import("tracing").scoped(.state_decoding);
 
 pub const DecoderParams = struct {
     core_count: u16,
@@ -28,7 +28,7 @@ pub fn decode(
     context: *DecodingContext,
     reader: anytype,
 ) !Phi(params.core_count, params.max_authorizations_queue_items) {
-    const span = trace.span(.decode);
+    const span = trace.span(@src(), .decode);
     defer span.deinit();
 
     span.debug("starting phi state decoding for {d} cores with queue length {d}", .{ params.core_count, params.max_authorizations_queue_items });

@@ -7,7 +7,7 @@ const services = @import("../services.zig");
 const state_recovery = @import("../state_recovery.zig");
 
 const Blake2b256 = std.crypto.hash.blake2.Blake2b(256);
-const trace = @import("../tracing.zig").scoped(.codec);
+const trace = @import("tracing").scoped(.codec);
 
 const log = std.log.scoped(.state_dictionary);
 
@@ -18,7 +18,7 @@ pub fn reconstructServiceAccountBase(
     key: types.StateKey,
     value: []const u8,
 ) !void {
-    const span = trace.span(.reconstruct_service_account_base);
+    const span = trace.span(@src(), .reconstruct_service_account_base);
     defer span.deinit();
     span.debug("Starting service account base reconstruction", .{});
     span.trace("Key: {any}, Value length: {d}", .{ std.fmt.fmtSliceHexLower(&key), value.len });
@@ -40,7 +40,7 @@ pub fn reconstructStorageData(
     delta: *state.Delta,
     dict_entry: state_dictionary.DictEntry,
 ) !void {
-    const span = trace.span(.reconstruct_storage_data);
+    const span = trace.span(@src(), .reconstruct_storage_data);
     defer span.deinit();
     span.debug("Starting storage entry reconstruction", .{});
     span.trace("Key: {any}, Value length: {d}", .{ std.fmt.fmtSliceHexLower(&dict_entry.key), dict_entry.value.len });

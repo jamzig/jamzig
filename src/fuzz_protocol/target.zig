@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const net = std.net;
 const messages = @import("messages.zig");
 const frame = @import("frame.zig");
@@ -12,7 +13,7 @@ const types = @import("../types.zig");
 const block_import = @import("../block_import.zig");
 const io = @import("../io.zig");
 
-const trace = @import("../tracing.zig").scoped(.fuzz_protocol);
+const trace = @import("tracing").scoped(.fuzz_protocol);
 
 /// Server restart behavior after client disconnect
 pub const RestartBehavior = enum {
@@ -26,7 +27,7 @@ pub const RestartBehavior = enum {
 pub const ServerState = enum {
     /// Initial state, no connection established
     initial,
-    /// Handshake completed, ready to receive SetState
+    /// Handshake completed, ready to receive Initialize
     handshake_complete,
     /// State initialized, ready for block operations
     ready,
@@ -35,18 +36,27 @@ pub const ServerState = enum {
 };
 
 /// Target server that implements the JAM protocol conformance testing target
-pub fn TargetServer(comptime IOExecutor: type) type {
+pub fn TargetServer(comptime IOExecutor: type, comptime params: @import("../jam_params.zig").Params) type {
     return struct {
         allocator: std.mem.Allocator,
         socket_path: []const u8,
 
         // State management
-        current_state: ?jamstate.JamState(messages.FUZZ_PARAMS) = null,
+        current_state: ?jamstate.JamState(params) = null,
         current_state_root: ?messages.StateRootHash = null,
         server_state: ServerState = .initial,
+        negotiated_features: messages.Features = 0,
 
         // Block importer
-        block_importer: block_import.BlockImporter(IOExecutor, messages.FUZZ_PARAMS),
+        block_importer: block_import.BlockImporter(IOExecutor, params),
+
+        // Fork handling state
+        last_block_parent: ?types.Hash = null,
+        last_block_hash: ?types.Hash = null,
+        last_block_state_root: ?messages.StateRootHash = null,
+
+        // Pending block import result (uncommitted)
+        pending_result: ?block_import.BlockImporter(IOExecutor, params).ImportResult = null,
 
         // Server management
         restart_behavior: RestartBehavior = .restart_on_disconnect,
@@ -54,7 +64,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         const Self = @This();
 
         pub fn init(executor: *IOExecutor, allocator: std.mem.Allocator, socket_path: []const u8, restart_behavior: RestartBehavior) !Self {
-            const block_importer = block_import.BlockImporter(IOExecutor, messages.FUZZ_PARAMS).init(executor, allocator);
+            const block_importer = block_import.BlockImporter(IOExecutor, params).init(executor, allocator);
 
             return Self{
                 .allocator = allocator,
@@ -65,18 +75,34 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            // Deinit JAM state
+            const span = trace.span(@src(), .deinit);
+            defer span.deinit();
+
             if (self.current_state) |*s| s.deinit(self.allocator);
 
-            // Clean up socket file if it exists
-            std.fs.deleteFileAbsolute(self.socket_path) catch |err| {
-                // Log but don't fail on cleanup error
-                const inner_span = trace.span(.cleanup_error);
-                defer inner_span.deinit();
-                inner_span.err("Failed to delete socket file: {s}", .{@errorName(err)});
-            };
+            if (self.pending_result) |*result| result.deinit();
 
-            self.* = undefined; // Clear the struct
+            if (self.socket_path.len > 0 and std.fs.path.isAbsolute(self.socket_path)) {
+                const stat = std.fs.cwd().statFile(self.socket_path) catch |err| switch (err) {
+                    error.FileNotFound => {
+                        return;
+                    },
+                    else => {
+                        span.warn("Cannot stat socket file for cleanup: {s}", .{@errorName(err)});
+                        return;
+                    },
+                };
+
+                if (stat.kind == .unix_domain_socket) {
+                    std.fs.deleteFileAbsolute(self.socket_path) catch |err| {
+                        span.err("Failed to delete socket file: {s}", .{@errorName(err)});
+                    };
+                } else {
+                    span.warn("Path exists but is not a socket (kind={s}), not deleting: {s}", .{ @tagName(stat.kind), self.socket_path });
+                }
+            }
+
+            self.* = undefined;
         }
 
         /// Request server shutdown
@@ -86,7 +112,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
         /// Start the server and bind to Unix domain socket
         pub fn start(self: *Self) !void {
-            const span = trace.span(.start_server);
+            const span = trace.span(@src(), .start_server);
             defer span.deinit();
             span.debug("Starting target server at socket: {s}", .{self.socket_path});
 
@@ -153,7 +179,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
                 // Handle connection (synchronous for now)
                 self.handleConnection(connection.stream) catch |err| {
-                    const inner_span = trace.span(.handle_error);
+                    const inner_span = trace.span(@src(), .handle_error);
                     defer inner_span.deinit();
 
                     switch (err) {
@@ -183,7 +209,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
         /// Handle a single client connection
         fn handleConnection(self: *Self, stream: net.Stream) !void {
-            const span = trace.span(.handle_connection);
+            const span = trace.span(@src(), .handle_connection);
             defer span.deinit();
 
             while (true) {
@@ -222,12 +248,12 @@ pub fn TargetServer(comptime IOExecutor: type) type {
             defer self.allocator.free(frame_data);
 
             // Decode message using JAM codec
-            return messages.decodeMessage(self.allocator, frame_data);
+            return messages.decodeMessage(params, self.allocator, frame_data);
         }
 
         /// Send a message to the stream
         pub fn sendMessage(self: *Self, stream: net.Stream, message: messages.Message) !void {
-            const encoded = try messages.encodeMessage(self.allocator, message);
+            const encoded = try messages.encodeMessage(params, self.allocator, message);
             defer self.allocator.free(encoded);
 
             try frame.writeFrame(stream, encoded);
@@ -235,81 +261,187 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
         /// Process an incoming message and generate appropriate response
         pub fn processMessage(self: *Self, message: messages.Message) !?messages.Message {
-            const span = trace.span(.process_message);
+            const span = trace.span(@src(), .process_message);
             defer span.deinit();
 
             switch (message) {
                 .peer_info => |peer_info| {
-                    span.debug("Processing PeerInfo from: {s}", .{peer_info.name});
+                    span.debug("Processing PeerInfo v{d} from: {s}", .{ peer_info.fuzz_version, peer_info.app_name });
+                    span.debug("Remote features: 0x{x}", .{peer_info.fuzz_features});
 
-                    // Respond with our own peer info, need to allocate
-                    // as we are moving ownership to calling scope which will deinit
+                    // Calculate negotiated features (intersection)
+                    const negotiated_features = peer_info.fuzz_features & version.IMPLEMENTED_FUZZ_FEATURES;
+                    self.negotiated_features = negotiated_features;
+                    span.debug("Negotiated features: 0x{x}", .{negotiated_features});
+
+                    // Respond with our own peer info
                     const our_peer_info = try messages.PeerInfo.buildFromStaticString(
                         self.allocator,
-                        version.TARGET_NAME,
-                        version.FUZZ_TARGET_VERSION,
+                        version.FUZZ_PROTOCOL_VERSION,
+                        version.IMPLEMENTED_FUZZ_FEATURES,
                         version.PROTOCOL_VERSION,
+                        version.FUZZ_TARGET_VERSION,
+                        version.TARGET_NAME,
                     );
 
                     self.server_state = .handshake_complete;
                     return messages.Message{ .peer_info = our_peer_info };
                 },
 
-                .set_state => |set_state| {
+                .initialize => |initialize| {
                     if (self.server_state != .handshake_complete and self.server_state != .ready) return error.HandshakeNotComplete;
 
-                    span.debug("Processing SetState with {d} key-value pairs", .{set_state.state.items.len});
+                    span.debug("Processing Initialize with {d} key-value pairs, ancestry length: {d}", .{ initialize.keyvals.items.len, initialize.ancestry.items.len });
 
                     // Clear current state
                     if (self.current_state) |*s| s.deinit(self.allocator);
 
+                    // Clear any pending block import result
+                    if (self.pending_result) |*result| {
+                        result.deinit();
+                        self.pending_result = null;
+                    }
+
+                    // Reset fork detection state for fresh initialization
+                    self.last_block_parent = null;
+                    self.last_block_parent = null;
+                    span.debug("Fork detection state reset for fresh initialization", .{});
+
                     // Reconstruct JAM state from fuzz protocol state
+                    const enable_ancestry = (self.negotiated_features & messages.FEATURE_ANCESTRY) != 0;
+
                     self.current_state = try state_converter.fuzzStateToJamState(
-                        messages.FUZZ_PARAMS,
+                        params,
                         self.allocator,
-                        set_state.state,
+                        initialize.keyvals,
                     );
+
+                    // Initialize and populate ancestry only if the feature is enabled
+                    if (enable_ancestry) {
+                        try self.current_state.?.initAncestry(self.allocator);
+                        if (self.current_state.?.ancestry) |*ancestry| {
+                            for (initialize.ancestry.items) |item| {
+                                try ancestry.addHeader(item.header_hash, item.slot);
+                            }
+                        }
+                    }
 
                     self.current_state_root = try self.computeStateRoot();
                     self.server_state = .ready;
+
+                    self.last_block_state_root = self.current_state_root;
 
                     return messages.Message{ .state_root = self.current_state_root.? };
                 },
 
                 .import_block => |block| {
+                    const import_block_span = span.child(@src(), .import_block);
+                    defer import_block_span.deinit();
+
                     if (self.server_state != .ready) return error.StateNotReady;
 
-                    span.debug("Processing ImportBlock", .{});
+                    // Calculate current block hash for fork tracking
+                    const block_hash = try block.header.header_hash(params, self.allocator);
+
+                    span.debug("Processing ImportBlock: block_hash={x}", .{std.fmt.fmtSliceHexLower(&block_hash)});
                     span.trace("{}", .{types.fmt.format(block)});
 
-                    // Use unified block importer with validation
-                    var result = self.block_importer.importBlock(
+                    // Fork detection: check if this block's parent matches the last block
+                    import_block_span.debug("Fork detection: last_block_hash={?s}, last_block_parent={?s}, current_block_parent={s}", .{
+                        if (self.last_block_hash) |h| std.fmt.fmtSliceHexLower(&h) else null,
+                        if (self.last_block_parent) |h| std.fmt.fmtSliceHexLower(&h) else null,
+                        std.fmt.fmtSliceHexLower(&block.header.parent),
+                    });
+                    const is_fork = if (self.last_block_hash) |last_block_hash| blk: {
+                        if (std.mem.eql(u8, &block.header.parent, &last_block_hash)) {
+                            // Sequential block - continues from last block
+                            import_block_span.debug("Sequential block detected", .{});
+                            break :blk false;
+                        } else if (self.last_block_parent) |last_block_parent| {
+                            if (std.mem.eql(u8, &block.header.parent, &last_block_parent)) {
+                                // Fork - sibling of last block
+                                import_block_span.debug("Fork detected: block is sibling of last block", .{});
+                                break :blk true;
+                            } else {
+                                // Invalid - parent doesn't match last or parent
+                                import_block_span.err("Invalid block parent: expected {s} or {s}, got {s}", .{
+                                    std.fmt.fmtSliceHexLower(&last_block_hash),
+                                    std.fmt.fmtSliceHexLower(&last_block_parent),
+                                    std.fmt.fmtSliceHexLower(&block.header.parent),
+                                });
+                                const error_msg = try std.fmt.allocPrint(
+                                    self.allocator,
+                                    "Invalid parent hash: not last block or parent",
+                                    .{},
+                                );
+                                return messages.Message{ .@"error" = error_msg };
+                            }
+                        } else {
+                            // No parent tracked yet, assume sequential
+                            break :blk false;
+                        }
+                    } else false;
+
+                    // Handle fork by discarding pending result (state stays at parent)
+                    if (is_fork) {
+                        if (self.pending_result) |*result| {
+                            result.deinit();
+                            self.pending_result = null;
+                        }
+                        // Revert to last block's state root
+                        self.current_state_root = self.last_block_state_root;
+                    } else if (self.pending_result) |*result| {
+                        // Sequential block - commit pending changes from previous block
+                        span.debug("Sequential block: committing pending changes", .{});
+                        try result.commit();
+                        result.deinit();
+                        self.pending_result = null;
+
+                        // check if the state root of the committed result is
+                        // the same as what we calculated before
+
+                        if (comptime builtin.mode == .Debug) {
+                            const state_root = try self.current_state.?.buildStateRoot(self.allocator);
+                            if (!std.mem.eql(u8, &state_root, &self.current_state_root.?)) {
+                                span.err("State root differs after commit, this is an internal state problem. Check fuzz target code", .{});
+                                return error.StateRootDiffersAfterCommit;
+                            }
+                        }
+                    }
+
+                    if (!is_fork) {
+                        // Update last block's state root after committing
+                        self.last_block_state_root = self.current_state_root;
+                    }
+
+                    // Fork tracking
+                    self.last_block_hash = block_hash;
+                    self.last_block_parent = block.header.parent;
+
+                    // Import new block without committing
+                    var result = self.block_importer.importBlockWithCachedRoot(
                         &self.current_state.?,
+                        self.current_state_root.?, // CACHED value (required)
                         &block,
                     ) catch |err| {
-                        std.debug.print("Failed to import block: {s}. State remains unchanged.\n", .{@errorName(err)});
-                        return messages.Message{ .state_root = self.current_state_root.? };
+                        span.err("Failed to import block: {s}. Sending error response.", .{@errorName(err)});
+                        // Allocate error message string
+                        const error_msg = try std.fmt.allocPrint(self.allocator, "Block import failed: {s}", .{@errorName(err)});
+                        return messages.Message{ .@"error" = error_msg };
                     };
-                    defer result.deinit();
 
                     span.debug("Block imported successfully, sealed with tickets: {}", .{result.sealed_with_tickets});
 
-                    // SET TO TRUE to simulate a failing state transition
-                    if (false) {
-                        var pi_prime: *@import("../state.zig").Pi = result.state_transition.get(.pi_prime) catch |err| {
-                            span.err("State transition failed: {s}", .{@errorName(err)});
-                            return err;
-                        };
-                        pi_prime.current_epoch_stats.items[0].blocks_produced += 1; // Increment epoch stats for testing
-                    }
+                    // Store pending result for potential commit later
+                    self.pending_result = result;
 
-                    // Merge the transition results into our current state
-                    try result.state_transition.mergePrimeOntoBase();
+                    // Compute state root from uncommitted transition
+                    const new_state_root = try result.state_transition.computeStateRoot(self.allocator);
+                    self.current_state_root = new_state_root;
 
-                    // Update our cached state root
-                    self.current_state_root = try self.computeStateRoot();
+                    span.debug("Block processed, state root: {s}", .{std.fmt.fmtSliceHexLower(&new_state_root)});
 
-                    return messages.Message{ .state_root = self.current_state_root.? };
+                    return messages.Message{ .state_root = new_state_root };
                 },
 
                 .get_state => |header_hash| {
@@ -317,11 +449,22 @@ pub fn TargetServer(comptime IOExecutor: type) type {
 
                     span.debug("Processing GetState for header: {s}", .{std.fmt.fmtSliceHexLower(&header_hash)});
 
-                    // Convert current JAM state to fuzz protocol state format
+                    // If we have pending changes, use merged view that includes them
+                    // Otherwise use current committed state
+                    const state_to_convert = if (self.pending_result) |*result| blk: {
+                        span.debug("GetState: Using merged view with pending changes", .{});
+                        const merged_view = result.state_transition.createMergedView();
+                        break :blk &merged_view;
+                    } else blk: {
+                        span.debug("GetState: Using current committed state", .{});
+                        break :blk &self.current_state.?;
+                    };
+
+                    // Convert JAM state to fuzz protocol state format
                     var result = try state_converter.jamStateToFuzzState(
-                        messages.FUZZ_PARAMS,
+                        params,
                         self.allocator,
-                        &self.current_state.?,
+                        state_to_convert,
                     );
                     // Transfer ownership to the message response
                     const state = result.state;
@@ -345,7 +488,7 @@ pub fn TargetServer(comptime IOExecutor: type) type {
         }
 
         fn computeStateRoot(self: *Self) !messages.StateRootHash {
-            return try state_merklization.merklizeState(messages.FUZZ_PARAMS, self.allocator, &self.current_state.?);
+            return try state_merklization.merklizeState(params, self.allocator, &self.current_state.?);
         }
     };
 }

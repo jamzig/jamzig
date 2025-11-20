@@ -3,12 +3,11 @@ const testing = std.testing;
 
 pub const W3fLoader = @import("trace_runner/parsers.zig").w3f.Loader;
 pub const runTracesInDir = @import("trace_runner/runner.zig").runTracesInDir;
-pub const RunConfig = @import("trace_runner/runner.zig").RunConfig;
 
 const jam_params = @import("jam_params.zig");
 const io = @import("io.zig");
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.jamtestvectors);
 
 const block_import = @import("block_import.zig");
@@ -28,7 +27,6 @@ test "w3f:traces:fallback" {
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/fallback",
-        RunConfig{ .mode = .CONTINOUS_MODE },
     );
     defer result.deinit(allocator);
 }
@@ -45,7 +43,6 @@ test "w3f:traces:safrole" {
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/safrole",
-        RunConfig{ .mode = .CONTINOUS_MODE },
     );
     defer result.deinit(allocator);
 }
@@ -62,7 +59,6 @@ test "w3f:traces:preimages_normal" {
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/preimages",
-        RunConfig{ .mode = .CONTINOUS_MODE },
     );
     defer result.deinit(allocator);
 }
@@ -79,7 +75,6 @@ test "w3f:traces:preimages_light" {
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/preimages_light",
-        RunConfig{ .mode = .CONTINOUS_MODE },
     );
     defer result.deinit(allocator);
 }
@@ -96,7 +91,6 @@ test "w3f:traces:storage" {
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/storage",
-        RunConfig{ .mode = .CONTINOUS_MODE },
     );
     defer result.deinit(allocator);
 }
@@ -113,7 +107,6 @@ test "w3f:traces:storage_light" {
         loader.loader(),
         allocator,
         "src/jamtestvectors/data/traces/storage_light",
-        RunConfig{ .mode = .CONTINOUS_MODE },
     );
     defer result.deinit(allocator);
 }

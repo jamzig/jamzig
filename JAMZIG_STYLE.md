@@ -597,7 +597,7 @@ pub fn process() ProcessError!Result { }
 
 // Error handling with context
 const result = operation() catch |err| {
-    const span = trace.span(.error_handler);
+    const span = trace.span(@src(), .error_handler);
     defer span.deinit();
     span.err("Operation failed: {s}", .{@errorName(err)});
     return err;
@@ -658,7 +658,7 @@ const result = optional orelse return error.NotFound;
   - Use `writeInt(type, value, .little)` instead of deprecated `writeIntLittle(type, value)`
   - For error logging, create inner spans: 
     ```zig
-    const inner_span = trace.span(.handle_error);
+    const inner_span = trace.span(@src(), .handle_error);
     defer inner_span.deinit();
     inner_span.err("Error message: {s}", .{@errorName(err)});
     ```
@@ -752,7 +752,7 @@ span.err("Error conditions with context");
 ### Trace Scoping
 ```zig
 pub fn complexOperation() !void {
-    const span = trace.span(.complex_operation);
+    const span = trace.span(@src(), .complex_operation);
     defer span.deinit();
     
     span.debug("Starting with {} items", .{count});

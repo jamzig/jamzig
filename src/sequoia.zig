@@ -9,7 +9,8 @@ const codec = @import("codec.zig");
 const time = @import("time.zig");
 
 pub const logging = @import("sequoia/logging.zig");
-const trace = @import("tracing.zig").scoped(.sequoia);
+
+const trace = @import("tracing").scoped(.sequoia);
 
 const Ed25519 = std.crypto.sign.Ed25519;
 const Bls12_381 = crypto.bls12_381.Bls12_381;
@@ -24,7 +25,7 @@ pub fn GenesisConfig(params: jam_params.Params) type {
         params: jam_params.Params = params,
 
         pub fn buildWithRng(allocator: std.mem.Allocator, rng: *std.Random) !GenesisConfig(params) {
-            const span = trace.span(.build_with_rng);
+            const span = trace.span(@src(), .build_with_rng);
             defer span.deinit();
             span.debug("Building genesis config with RNG", .{});
 
@@ -39,7 +40,7 @@ pub fn GenesisConfig(params: jam_params.Params) type {
 
             span.debug("Initializing {d} validator keys", .{params.validators_count});
             for (0..params.validators_count) |i| {
-                const key_span = span.child(.validator_key);
+                const key_span = span.child(@src(), .validator_key);
                 defer key_span.deinit();
                 key_span.debug("Generating key for validator {d}", .{i});
 
@@ -66,7 +67,7 @@ pub fn GenesisConfig(params: jam_params.Params) type {
         }
 
         pub fn buildJamState(self: *const GenesisConfig(params), allocator: std.mem.Allocator, _: *std.Random) !jamstate.JamState(params) {
-            const span = trace.span(.build_jam_state);
+            const span = trace.span(@src(), .build_jam_state);
             defer span.deinit();
             span.debug("Building JAM state from genesis config", .{});
 
@@ -122,7 +123,12 @@ pub fn GenesisConfig(params: jam_params.Params) type {
             // Gamma_s with initial empty tickets from the start
             state.gamma.?.s.deinit(allocator);
             state.gamma.?.s = .{
-                .keys = try safrole.epoch_handler.entropyBasedKeySelector(allocator, state.eta.?[2], params.epoch_length, state.kappa.?),
+                .keys = try safrole.epoch_handler.entropyBasedKeySelector(
+                    allocator,
+                    state.eta.?[2],
+                    params.epoch_length,
+                    state.kappa.?,
+                ),
             };
 
             // Calculate gamma_z (Bandersnatch ring root) from gamma_k validators
@@ -169,7 +175,7 @@ const ValidatorKeySet = struct {
 // Manages entropy generation and VRF output for block production
 const EntropyManager = struct {
     pub fn generateVrfOutputFallback(author_keys: *const ValidatorKeySet, eta_prime: *const types.Eta) !types.BandersnatchVrfOutput {
-        const span = trace.span(.generate_vrf_output_fallback);
+        const span = trace.span(@src(), .generate_vrf_output_fallback);
         defer span.deinit();
         span.debug("Generating VRF output using fallback function", .{});
 
@@ -194,7 +200,7 @@ const EntropyManager = struct {
         author_keys: ValidatorKeySet,
         eta_prime: *const types.Eta,
     ) !Bandersnatch.Signature {
-        const span = trace.span(.generate_entropy_source_fallback);
+        const span = trace.span(@src(), .generate_entropy_source_fallback);
         defer span.deinit();
         span.debug("Generating entropy source using fallback method", .{});
 
@@ -221,7 +227,7 @@ const EntropyManager = struct {
         author_keys: ValidatorKeySet,
         ticket: types.TicketBody,
     ) !Bandersnatch.Signature {
-        const span = trace.span(.generate_entropy_source_ticket);
+        const span = trace.span(@src(), .generate_entropy_source_ticket);
         defer span.deinit();
         span.debug("Generating entropy source using ticket method", .{});
 
@@ -271,7 +277,7 @@ const TicketRegistry = struct {
     }
 
     pub fn rotateRegistries(self: *TicketRegistry) void {
-        const span = trace.span(.rotate_registries);
+        const span = trace.span(@src(), .rotate_registries);
         defer span.deinit();
         span.debug("Rotating ticket registries at epoch boundary", .{});
 
@@ -321,7 +327,7 @@ const BlockSealGenerator = struct {
         eta_prime: *const types.Eta,
         comptime params: jam_params.Params,
     ) !Bandersnatch.Signature {
-        const span = trace.span(.generate_seal_fallback);
+        const span = trace.span(@src(), .generate_seal_fallback);
         defer span.deinit();
         span.debug("Generating block seal using fallback method", .{});
 
@@ -360,7 +366,7 @@ const BlockSealGenerator = struct {
         ticket: types.TicketBody,
         comptime params: jam_params.Params,
     ) !Bandersnatch.Signature {
-        const span = trace.span(.generate_seal_tickets);
+        const span = trace.span(@src(), .generate_seal_tickets);
         defer span.deinit();
         span.debug("Generating block seal using tickets method", .{});
 
@@ -416,7 +422,7 @@ const TicketSubmissionManager = struct {
         gamma_z: *const types.BandersnatchVrfRoot,
         comptime params: jam_params.Params,
     ) !GeneratedTicket {
-        const span = trace.span(.generate_single_ticket);
+        const span = trace.span(@src(), .generate_single_ticket);
         defer span.deinit();
         span.debug("Generating ticket for validator {d}", .{validator_index});
 
@@ -506,12 +512,30 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             };
         }
 
+        /// Initialize the BlockBuilder with required state
+        pub fn create(
+            allocator: std.mem.Allocator,
+            config: GenesisConfig(params), // Takes ownership of the config
+            rng: *std.Random,
+        ) !*Self {
+            const self = try allocator.create(Self);
+            self.* = try Self.init(allocator, config, rng);
+
+            return self;
+        }
+
         pub fn deinit(self: *Self) void {
             // config is owned by calling scope
             self.config.deinit(self.allocator);
             self.state.deinit(self.allocator);
             self.ticket_registry.deinit();
             self.* = undefined;
+        }
+
+        pub fn destroy(self: *Self) void {
+            const allocator = self.allocator;
+            self.deinit();
+            allocator.destroy(self);
         }
 
         fn handleEpochTransition(self: *Self) void {
@@ -522,8 +546,8 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             }
         }
 
-        fn determineGammaSPrime(self: *Self) !struct { bool, types.GammaS } {
-            const span = trace.span(.determine_gamma_s_prime);
+        fn determineGammaSPrime(self: *Self, entropy: types.Entropy, kappa_prime: types.ValidatorSet) !struct { bool, types.GammaS } {
+            const span = trace.span(@src(), .determine_gamma_s_prime);
             defer span.deinit();
             // Determine gamma_s_prime based on ticket submission state
             if (self.block_time.priorWasInTicketSubmissionTail() and
@@ -539,9 +563,9 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
                     return .{ true, .{
                         .keys = try safrole.epoch_handler.entropyBasedKeySelector(
                             self.allocator,
-                            self.state.eta.?[2],
+                            entropy,
                             params.epoch_length,
-                            self.state.kappa.?,
+                            kappa_prime,
                         ),
                     } };
                 }
@@ -569,7 +593,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             return null;
         }
 
-        fn calculateEtaPrime(self: *const Self, eta_current: *const types.Eta) types.Eta {
+        fn calculateEtaPrimeWithoutEta0(self: *const Self, eta_current: *const types.Eta) types.Eta {
             var eta_prime = eta_current.*;
             if (self.block_time.isNewEpoch()) {
                 // Rotate the entropy values
@@ -581,7 +605,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn generateBlockContent(self: *Self, eta_prime: *const types.Eta) !types.Extrinsic {
-            const span = trace.span(.generate_block_content);
+            const span = trace.span(@src(), .generate_block_content);
             defer span.deinit();
 
             var tickets = types.TicketsExtrinsic{ .data = &[_]types.TicketEnvelope{} };
@@ -634,7 +658,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
 
         // Build the next block in the chain with proper sealing
         pub fn buildNextBlock(self: *Self) !types.Block {
-            const span = trace.span(.build_next_block);
+            const span = trace.span(@src(), .build_next_block);
             defer span.deinit();
 
             // Progress to next slot and update state root
@@ -650,32 +674,36 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             // Handle epoch transition if needed
             self.handleEpochTransition();
 
+            // TODO: rotate the validator sets on a new epoch, now we have all the same validator sets
+            // as such this is not necessary
+
+            // Calculate eta_prime (taking into account if this is a newEpoch)
+            const eta_current = &self.state.eta.?;
+            var eta_prime_without_eta_0 = self.calculateEtaPrimeWithoutEta0(eta_current);
+
             // Determine gamma_s_prime for block production
-            var r = try self.determineGammaSPrime();
+            var r = try self.determineGammaSPrime(
+                eta_prime_without_eta_0[2],
+                self.state.kappa.?, // FIXME: this would be kappa_prime, but now all validatorset are the same
+            );
             defer if (r[0]) r[1].deinit(self.allocator);
             const gamma_s_prime = r[1];
 
             // Select block author and prepare block components
-            const author_index = try self.selectBlockAuthor(gamma_s_prime);
+            const author_index = try self.selectBlockAuthor(eta_prime_without_eta_0[2], gamma_s_prime);
             span.debug("Selected block author index: {d}", .{author_index});
 
-            // Validate author index before use
-            if (author_index >= self.config.validator_keys.len) {
-                return error.InvalidValidatorIndex;
-            }
+            // Get the author keys
             const author_keys = self.config.validator_keys[author_index];
             const epoch_mark = try self.prepareEpochMark();
             const tickets_mark = try self.prepareTicketsMark();
 
-            // Calculate eta_prime and generate entropy source
-            const eta_current = &self.state.eta.?;
-            var eta_prime = self.calculateEtaPrime(eta_current);
-
             const entropy_source = switch (gamma_s_prime) {
                 .tickets => |tickets| try EntropyManager.generateEntropySourceTicket(author_keys, tickets[self.block_time.current_slot_in_epoch]),
-                .keys => try EntropyManager.generateEntropySourceFallback(author_keys, &eta_prime),
+                .keys => try EntropyManager.generateEntropySourceFallback(author_keys, &eta_prime_without_eta_0),
             };
-            eta_prime[0] = EntropyManager.updateEntropy(self.state.eta.?, try entropy_source.outputHash());
+            eta_prime_without_eta_0[0] = EntropyManager.updateEntropy(self.state.eta.?, try entropy_source.outputHash());
+            const eta_prime = eta_prime_without_eta_0;
 
             // Generate extrinsic content
             const extrinsic = try self.generateBlockContent(&eta_prime);
@@ -695,7 +723,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             };
 
             // Seal the block
-            try self.sealBlock(&header, gamma_s_prime, author_keys, &eta_prime);
+            try self.sealBlock(&header, gamma_s_prime, author_keys, &eta_prime_without_eta_0);
 
             // Assemble complete block
             const block = types.Block{
@@ -714,7 +742,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             self: *Self,
             eta_prime: *const types.Eta,
         ) ![]types.TicketEnvelope {
-            const span = trace.span(.generate_tickets);
+            const span = trace.span(@src(), .generate_tickets);
             defer span.deinit();
             span.debug("Generating tickets", .{});
 
@@ -804,7 +832,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
         }
 
         fn selectBlockAuthorFromTickets(self: *Self, tickets: []const types.TicketBody, slot_in_epoch: u64) !types.ValidatorIndex {
-            const span = trace.span(.select_block_author_tickets);
+            const span = trace.span(@src(), .select_block_author_tickets);
             defer span.deinit();
             span.debug("Using ticket-based author selection for slot {d}", .{slot_in_epoch});
 
@@ -834,8 +862,8 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             return error.ValidatorTicketNotFoundInRegistry;
         }
 
-        fn selectBlockAuthorFromKeys(self: *Self, keys: []const types.BandersnatchPublic, slot_in_epoch: u64) !types.ValidatorIndex {
-            const span = trace.span(.select_block_author_keys);
+        fn selectBlockAuthorFromKeys(_: *Self, keys: []const types.BandersnatchPublic, entropy: types.Entropy, slot_in_epoch: u64) !types.ValidatorIndex {
+            const span = trace.span(@src(), .select_block_author_keys);
             defer span.deinit();
             span.debug("Using fallback key-based author selection for slot {d}", .{slot_in_epoch});
 
@@ -849,43 +877,17 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             }
 
             // Encode the slot index into 4 bytes as per equation 6.26
-            var encoded_slot: [4]u8 = undefined;
-            std.mem.writeInt(u32, &encoded_slot, @intCast(slot_in_epoch), .little);
+            const validator_index = safrole.epoch_handler.deriveKeyIndex(
+                entropy,
+                slot_in_epoch,
+                params.validators_count,
+            );
 
-            // Get entropy from eta[2] for the fallback function as per equation 6.24
-            var entropy = self.state.eta.?[2];
-
-            // Hash entropy concatenated with encoded slot
-            span.trace("Using entropy for hash: {any}", .{std.fmt.fmtSliceHexLower(&entropy)});
-            span.trace("Using encoded slot: {any}", .{std.fmt.fmtSliceHexLower(&encoded_slot)});
-
-            var hasher = std.crypto.hash.blake2.Blake2b256.init(.{});
-            hasher.update(&entropy);
-            hasher.update(&encoded_slot);
-            var hash: [32]u8 = undefined;
-            hasher.final(&hash);
-            span.trace("Generated hash: {any}", .{std.fmt.fmtSliceHexLower(&hash)});
-
-            // Take first 4 bytes for deterministic validator selection, as per equation 6.26
-            const index_bytes = hash[0..4].*;
-            const validator_index = std.mem.readInt(u32, &index_bytes, .little) % keys.len;
-            // Additional bounds check for safety
-            if (validator_index >= keys.len) {
-                return error.InvalidValidatorIndex;
-            }
-
-            const validator_key = keys[validator_index];
-            span.debug("Selected validator index {d} from key set", .{validator_index});
-            span.trace("Using validator key: {any}", .{std.fmt.fmtSliceHexLower(&validator_key)});
-
-            // TODO: ensure this is kappa'
-            const found_index = try self.state.kappa.?.findValidatorIndex(.BandersnatchPublic, validator_key);
-            span.trace("Found validator at kappa index: {d}", .{found_index});
-            return found_index;
+            return @intCast(validator_index);
         }
 
-        fn selectBlockAuthor(self: *Self, gamma_s_prime: types.GammaS) !types.ValidatorIndex {
-            const span = trace.span(.select_block_author);
+        fn selectBlockAuthor(self: *Self, entropy: types.Entropy, gamma_s_prime: types.GammaS) !types.ValidatorIndex {
+            const span = trace.span(@src(), .select_block_author);
             defer span.deinit();
             span.debug("Selecting block author for slot {d}", .{self.block_time.current_slot});
 
@@ -901,7 +903,7 @@ pub fn BlockBuilder(comptime params: jam_params.Params) type {
             // Select based on gamma_s mode
             return switch (gamma_s_prime) {
                 .tickets => |tickets| try self.selectBlockAuthorFromTickets(tickets, slot_in_epoch),
-                .keys => |keys| try self.selectBlockAuthorFromKeys(keys, slot_in_epoch),
+                .keys => |keys| try self.selectBlockAuthorFromKeys(keys, entropy, slot_in_epoch),
             };
         }
     };

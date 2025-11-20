@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
-const tracing = @import("../../tracing.zig");
+const tracing = @import("tracing");
 
 const trace = tracing.scoped(.reports);
 const StateTransition = @import("../../state_delta.zig").StateTransition;
@@ -17,7 +17,7 @@ pub fn validateCoreAuthorization(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_authorization);
+    const span = trace.span(@src(), .validate_authorization);
     defer span.deinit();
 
     span.debug("Checking authorization for core {d} with hash {s}", .{

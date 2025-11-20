@@ -3,7 +3,7 @@ const types = @import("../types.zig");
 const encoder = @import("../codec/encoder.zig");
 const codec = @import("../codec.zig");
 
-const trace = @import("../tracing.zig").scoped(.pi_encoding);
+const trace = @import("tracing").scoped(.codec);
 
 const validator_statistics = @import("../validator_stats.zig");
 const Pi = validator_statistics.Pi;
@@ -13,30 +13,30 @@ const CoreActivityRecord = validator_statistics.CoreActivityRecord;
 const ServiceActivityRecord = validator_statistics.ServiceActivityRecord;
 
 pub fn encode(self: *const Pi, writer: anytype) !void {
-    const span = trace.span(.encode);
+    const span = trace.span(@src(), .encode);
     defer span.deinit();
     span.debug("Starting Pi component encoding", .{});
 
     // Encode current epoch stats
-    const current_span = span.child(.current_epoch);
+    const current_span = span.child(@src(), .current_epoch);
     defer current_span.deinit();
     current_span.debug("Encoding current epoch stats for {} validators", .{self.current_epoch_stats.items.len});
     try encodeEpochStats(self.current_epoch_stats.items, writer);
 
     // Encode previous epoch stats
-    const previous_span = span.child(.previous_epoch);
+    const previous_span = span.child(@src(), .previous_epoch);
     defer previous_span.deinit();
     previous_span.debug("Encoding previous epoch stats for {} validators", .{self.previous_epoch_stats.items.len});
     try encodeEpochStats(self.previous_epoch_stats.items, writer);
 
     // Encode core statistics
-    const core_span = span.child(.core_stats);
+    const core_span = span.child(@src(), .core_stats);
     defer core_span.deinit();
     core_span.debug("Encoding core stats for {} cores", .{self.core_stats.items.len});
     try encodeCoreStats(self.core_stats.items, writer);
 
     // Encode service statistics
-    const service_span = span.child(.service_stats);
+    const service_span = span.child(@src(), .service_stats);
     defer service_span.deinit();
     service_span.debug("Encoding service stats for {} services", .{self.service_stats.count()});
     try encodeServiceStats(self.service_stats, writer);
@@ -45,12 +45,12 @@ pub fn encode(self: *const Pi, writer: anytype) !void {
 }
 
 fn encodeEpochStats(stats: []ValidatorStats, writer: anytype) !void {
-    const span = trace.span(.encode_epoch_stats);
+    const span = trace.span(@src(), .encode_epoch_stats);
     defer span.deinit();
     span.debug("Encoding epoch stats for {} validators", .{stats.len});
 
     for (stats, 0..) |entry, i| {
-        const entry_span = span.child(.validator_entry);
+        const entry_span = span.child(@src(), .validator_entry);
         defer entry_span.deinit();
         entry_span.debug("Encoding stats for validator {}", .{i});
 
@@ -77,7 +77,7 @@ fn encodeEpochStats(stats: []ValidatorStats, writer: anytype) !void {
 }
 
 fn encodeCoreStats(stats: []CoreActivityRecord, writer: anytype) !void {
-    const span = trace.span(.encode_core_stats);
+    const span = trace.span(@src(), .encode_core_stats);
     defer span.deinit();
     span.debug("Encoding core stats for {} cores", .{stats.len});
 
@@ -85,7 +85,7 @@ fn encodeCoreStats(stats: []CoreActivityRecord, writer: anytype) !void {
     // try codec.writeInteger(stats.len, writer);
 
     for (stats, 0..) |entry, i| {
-        const entry_span = span.child(.core_entry);
+        const entry_span = span.child(@src(), .core_entry);
         defer entry_span.deinit();
         entry_span.debug("Encoding stats for core {}", .{i});
 
@@ -96,7 +96,7 @@ fn encodeCoreStats(stats: []CoreActivityRecord, writer: anytype) !void {
 }
 
 fn encodeServiceStats(stats: std.AutoHashMap(types.ServiceId, ServiceActivityRecord), writer: anytype) !void {
-    const span = trace.span(.encode_service_stats);
+    const span = trace.span(@src(), .encode_service_stats);
     defer span.deinit();
     span.debug("Encoding service stats for {} services", .{stats.count()});
 
@@ -115,7 +115,7 @@ fn encodeServiceStats(stats: std.AutoHashMap(types.ServiceId, ServiceActivityRec
 
     for (service_ids.items, 0..) |service_id, entry_index| {
         const record = stats.get(service_id).?;
-        const entry_span = span.child(.service_entry);
+        const entry_span = span.child(@src(), .service_entry);
         defer entry_span.deinit();
         entry_span.debug("Encoding stats for service {} (ID: {})", .{ entry_index, service_id });
 

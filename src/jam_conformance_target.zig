@@ -1,12 +1,13 @@
 const std = @import("std");
 const clap = @import("clap");
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const io = @import("io.zig");
+const build_tuned_allocator = @import("build_tuned_allocator.zig");
 
 const target = @import("fuzz_protocol/target.zig");
 const TargetServer = target.TargetServer;
 const RestartBehavior = target.RestartBehavior;
-const trace = @import("tracing.zig").scoped(.jam_conformance_target);
+const trace = @import("tracing").scoped(.jam_conformance_target);
 const jam_params = @import("jam_params.zig");
 const jam_params_format = @import("jam_params_format.zig");
 const build_options = @import("build_options");
@@ -44,12 +45,12 @@ fn showHelp(params: anytype) !void {
 }
 
 pub fn main() !void {
-    const span = trace.span(.main);
+    const span = trace.span(@src(), .main);
     defer span.deinit();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var alloc = build_tuned_allocator.BuildTunedAllocator.init();
+    defer alloc.deinit();
+    const allocator = alloc.allocator();
 
     // Parse command line arguments
     const params = comptime clap.parseParamsComptime(
@@ -78,8 +79,10 @@ pub fn main() !void {
         return;
     }
 
+    const FUZZ_PARAMS = jam_params.TINY_PARAMS;
+
     // Handle parameter dumping
-    if (try param_formatter.handleParamDump(res.args.@"dump-params" != 0, res.args.format)) {
+    if (try param_formatter.handleParamDump(FUZZ_PARAMS, res.args.@"dump-params" != 0, res.args.format)) {
         return;
     }
 
@@ -115,13 +118,18 @@ pub fn main() !void {
     var executor = try ExecutorType.init(allocator);
     defer executor.deinit();
 
-    var server = try TargetServer(ExecutorType).init(&executor, allocator, socket_path, restart_behavior);
+    var server = try TargetServer(ExecutorType, FUZZ_PARAMS).init(
+        &executor,
+        allocator,
+        socket_path,
+        restart_behavior,
+    );
     defer server.deinit();
 
     // Setup signal handler for graceful shutdown
     // Note: Signal handlers must use global state as they can't capture context
     const shutdown_requested = struct {
-        var server_ref: ?*TargetServer(ExecutorType) = null;
+        var server_ref: ?*TargetServer(ExecutorType, FUZZ_PARAMS) = null;
     };
     shutdown_requested.server_ref = &server;
 

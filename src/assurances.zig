@@ -3,7 +3,7 @@ const types = @import("types.zig");
 const state = @import("state.zig");
 const crypto = std.crypto;
 
-const tracing = @import("tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.assurances);
 
 /// A wrapper type that guarantees an AssuranceExtrinsic has been validated
@@ -44,7 +44,7 @@ pub const ValidatedAssuranceExtrinsic = struct {
             std.debug.assert(params.validators_count > 0);
             std.debug.assert(params.avail_bitfield_bytes == (params.core_count + 7) / 8);
         }
-        const span = trace.span(.validate);
+        const span = trace.span(@src(), .validate);
         defer span.deinit();
         span.debug("Starting validation of AssuranceExtrinsic with {d} assurances", .{extrinsic.data.len});
 
@@ -55,7 +55,7 @@ pub const ValidatedAssuranceExtrinsic = struct {
 
         var prev_validator_idx: isize = -1;
         for (extrinsic.data, 0..) |assurance, i| {
-            const assurance_span = span.child(.validate_assurance);
+            const assurance_span = span.child(@src(), .validate_assurance);
             defer assurance_span.deinit();
             assurance_span.debug("Validating assurance {d} of {d}", .{ i + 1, extrinsic.data.len });
 
@@ -85,7 +85,7 @@ pub const ValidatedAssuranceExtrinsic = struct {
 
             // Validate that bits are only set for cores with pending reports
             // This implements the graypaper constraint: ∀a ∈ E_A, c ∈ N_C : a_f[c] ⇒ ρ†[c] ≠ ∅
-            const bitfield_validation_span = assurance_span.child(.validate_bitfield_cores);
+            const bitfield_validation_span = assurance_span.child(@src(), .validate_bitfield_cores);
             defer bitfield_validation_span.deinit();
             bitfield_validation_span.debug("Validating bitfield against pending reports", .{});
 
@@ -106,7 +106,7 @@ pub const ValidatedAssuranceExtrinsic = struct {
             }
 
             // Validate signature
-            const signature_span = assurance_span.child(.validate_signature);
+            const signature_span = assurance_span.child(@src(), .validate_signature);
             defer signature_span.deinit();
             signature_span.debug("Validating signature for validator {d}", .{assurance.validator_index});
 
@@ -209,7 +209,7 @@ pub fn processAssuranceExtrinsic(
     assurances_extrinsic: ValidatedAssuranceExtrinsic,
     current_slot: types.TimeSlot,
 ) !AvailableAssignments {
-    const span = trace.span(.process_assurance_extrinsic);
+    const span = trace.span(@src(), .process_assurance_extrinsic);
     defer span.deinit();
     span.debug("Processing assurance extrinsic with {d} assurances", .{assurances_extrinsic.items().len});
 
@@ -223,12 +223,12 @@ pub fn processAssuranceExtrinsic(
 
     // Process each assurance in the extrinsic
     {
-        const process_span = span.child(.process_assurances);
+        const process_span = span.child(@src(), .process_assurances);
         defer process_span.deinit();
         process_span.debug("Processing {d} assurances for {d} cores", .{ assurances_extrinsic.items().len, params.core_count });
 
         for (assurances_extrinsic.items(), 0..) |assurance, assurance_idx| {
-            const bitfield_span = process_span.child(.process_bitfield);
+            const bitfield_span = process_span.child(@src(), .process_bitfield);
             defer bitfield_span.deinit();
             bitfield_span.debug("Processing assurance {d}: bitfield={}", .{ assurance_idx, std.fmt.fmtSliceHexLower(assurance.bitfield) });
 
@@ -254,7 +254,7 @@ pub fn processAssuranceExtrinsic(
 
     // Check which cores have super-majority
     {
-        const majority_span = span.child(.check_super_majority);
+        const majority_span = span.child(@src(), .check_super_majority);
         defer majority_span.deinit();
         majority_span.debug("Checking cores against super majority threshold {d}", .{params.validators_super_majority});
 
@@ -262,7 +262,7 @@ pub fn processAssuranceExtrinsic(
         const super_majority = params.validators_super_majority;
 
         for (core_assurance_counts, 0..) |count, core_idx| {
-            const core_span = majority_span.child(.check_core);
+            const core_span = majority_span.child(@src(), .check_core);
             defer core_span.deinit();
             core_span.debug("Core {d}: checking assurance count {d} >= super_majority {d}", .{ core_idx, count, super_majority });
 
@@ -311,7 +311,7 @@ fn processBitfield(
             continue;
         }
 
-        const byte_span = span.child(.process_byte);
+        const byte_span = span.child(@src(), .process_byte);
         defer byte_span.deinit();
         byte_span.trace("Processing byte {d}: 0x{x:0>2}", .{ byte_idx, byte });
 
@@ -341,7 +341,7 @@ fn cleanupTimedOutReports(
     current_slot: types.TimeSlot,
     span: anytype,
 ) void {
-    const timeout_span = span.child(.cleanup_timeouts);
+    const timeout_span = span.child(@src(), .cleanup_timeouts);
     defer timeout_span.deinit();
     timeout_span.debug("Checking for timed out reports at slot {d}", .{current_slot});
 

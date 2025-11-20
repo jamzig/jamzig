@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
-const tracing = @import("../../tracing.zig");
+const tracing = @import("tracing");
 const disputes = @import("../../disputes.zig");
 
 const trace = tracing.scoped(.reports);
@@ -19,7 +19,7 @@ pub fn checkBannedValidators(
     stx: *StateTransition(params),
     assignments: *const @import("../../guarantor_assignments.zig").GuarantorAssignmentResult,
 ) !void {
-    const span = trace.span(.check_banned_validators);
+    const span = trace.span(@src(), .check_banned_validators);
     defer span.deinit();
 
     // Get the Psi (disputes state) from the state transition

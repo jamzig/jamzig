@@ -1,0 +1,159 @@
+/// Tracy tracing backend - zones and messages integrated with Tracy profiler
+const std = @import("std");
+const tracy = @import("tracy");
+const config_mod = @import("tracing/config.zig");
+
+pub const LogLevel = config_mod.LogLevel;
+pub const Config = config_mod.Config;
+
+// Static buffer for tracing configuration
+var config_buffer: [4096]u8 align(@alignOf(std.StringHashMap(LogLevel).KV)) = undefined;
+var config_fba = std.heap.FixedBufferAllocator.init(&config_buffer);
+
+// Global config instance - initialized on first use
+var config: ?Config = null;
+
+// Thread-local depth for tracking span hierarchy
+threadlocal var depth: usize = 0;
+
+// Get config, initializing if necessary
+fn getConfig() *Config {
+    if (config == null) {
+        config = Config.init(config_fba.allocator());
+    }
+    return &config.?;
+}
+
+pub const TracingScope = struct {
+    name: []const u8,
+
+    const Self = @This();
+
+    pub fn init(comptime scope: @Type(.enum_literal)) Self {
+        return comptime Self{
+            .name = @tagName(scope),
+        };
+    }
+
+    pub inline fn span(comptime self: *const Self, src: std.builtin.SourceLocation, operation: @Type(.enum_literal)) Span {
+        return Span.init(src, self.name, @tagName(operation));
+    }
+};
+
+pub const Span = struct {
+    scope: []const u8,
+    operation: []const u8,
+    tracy_zone: tracy.ZoneCtx,
+    saved_depth: usize,
+
+    pub inline fn init(src: std.builtin.SourceLocation, scope: []const u8, operation: [:0]const u8) Span {
+        const current_depth = depth;
+        depth += 1;
+
+        return Span{
+            .scope = scope,
+            .operation = operation,
+            .tracy_zone = tracy.ZoneN(src, operation),
+            .saved_depth = current_depth,
+        };
+    }
+
+    pub inline fn child(self: *const Span, src: std.builtin.SourceLocation, operation: @Type(.enum_literal)) Span {
+        return Span.init(src, self.scope, @tagName(operation));
+    }
+
+    pub fn deinit(self: *const Span) void {
+        // ALWAYS check - this is critical for Tracy correctness
+        if (depth != self.saved_depth + 1) {
+            // Log error to stderr since we're in Tracy mode (can't use Tracy to report Tracy errors)
+            std.debug.print("ERROR: Span '{s}.{s}' being deinitialized with incorrect depth!\n" ++
+                "  Expected depth: {d}\n" ++
+                "  Actual depth: {d}\n" ++
+                "  This means child spans were not properly deinitialized.\n" ++
+                "  Tracy profiling data will be corrupted!\n", .{ self.scope, self.operation, self.saved_depth + 1, depth });
+
+            // Still end the zone to prevent Tracy from hanging
+            self.tracy_zone.End();
+
+            // Force depth correction to prevent cascading errors
+            depth = self.saved_depth;
+
+            // In debug builds, panic to catch this during development
+            if (std.debug.runtime_safety) {
+                std.debug.panic("Child span leak detected - see error above", .{});
+            }
+        } else {
+            // Normal case - everything is correct
+            depth = self.saved_depth;
+            self.tracy_zone.End();
+        }
+    }
+
+    pub inline fn trace(self: *const Span, comptime fmt: []const u8, args: anytype) void {
+        self.log(.trace, fmt, args);
+    }
+
+    pub inline fn debug(self: *const Span, comptime fmt: []const u8, args: anytype) void {
+        self.log(.debug, fmt, args);
+    }
+
+    pub inline fn info(self: *const Span, comptime fmt: []const u8, args: anytype) void {
+        self.log(.info, fmt, args);
+    }
+
+    pub inline fn warn(self: *const Span, comptime fmt: []const u8, args: anytype) void {
+        self.log(.warn, fmt, args);
+    }
+
+    pub inline fn err(self: *const Span, comptime fmt: []const u8, args: anytype) void {
+        self.log(.err, fmt, args);
+    }
+
+    inline fn log(self: *const Span, level: LogLevel, comptime fmt: []const u8, args: anytype) void {
+        _ = self;
+        _ = level;
+        _ = fmt;
+        _ = args;
+        // NOTE: not logging messages here. In Tracy mode, we only use zones.
+
+        // const cfg = getConfig();
+        // const scope_level = cfg.findScope(self.scope) orelse cfg.default_level;
+        //
+        // if (@intFromEnum(level) < @intFromEnum(scope_level)) {
+        //     return;
+        // }
+        //
+        // var message_buf: [1024]u8 = undefined;
+        // const message = std.fmt.bufPrint(&message_buf, fmt, args) catch "formatting error";
+        // tracy.Message(message);
+    }
+};
+
+// Module initialization (no-ops for Tracy mode - config initialized on first use)
+pub fn init(_: std.mem.Allocator) void {}
+pub fn deinit() void {}
+
+// Configuration API
+pub fn setScope(name: []const u8, level: LogLevel) !void {
+    try getConfig().setScope(name, level);
+}
+
+pub fn setDefaultLevel(level: LogLevel) void {
+    getConfig().setDefaultLevel(level);
+}
+
+pub fn reset() void {
+    getConfig().reset();
+}
+
+pub fn disableScope(name: []const u8) void {
+    getConfig().disableScope(name);
+}
+
+pub fn findScope(name: []const u8) ?LogLevel {
+    return getConfig().findScope(name);
+}
+
+pub fn scoped(comptime scope: @Type(.enum_literal)) TracingScope {
+    return comptime TracingScope.init(scope);
+}

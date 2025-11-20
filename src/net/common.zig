@@ -7,7 +7,7 @@ pub const StreamId = shared.StreamId;
 pub const StreamKind = shared.StreamKind;
 pub const StreamHandle = @import("stream_handle.zig").StreamHandle;
 
-const trace = @import("../tracing.zig").scoped(.network);
+const trace = @import("tracing").scoped(.network);
 
 /// Callback type for command completion
 pub fn CommandCallback(T: type) type {
@@ -132,7 +132,7 @@ pub const Event = union(enum) {
     },
 
     pub fn invokeCallback(self: Event) void {
-        const span = trace.span(.invoke_event_callback);
+        const span = trace.span(@src(), .invoke_event_callback);
         defer span.deinit();
 
         span.debug("Invoking callback for event: {s}", .{@tagName(self)});
@@ -146,7 +146,7 @@ pub const Event = union(enum) {
     }
 
     pub fn deinit(self: *Event, alloc: std.mem.Allocator) void {
-        const span = trace.span(.deinit_event);
+        const span = trace.span(@src(), .deinit_event);
         defer span.deinit();
 
         switch (self.*) {

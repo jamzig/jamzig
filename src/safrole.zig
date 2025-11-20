@@ -13,7 +13,8 @@ pub const epoch_handler = @import("safrole/epoch_handler.zig");
 const Params = @import("jam_params.zig").Params;
 const StateTransition = state_delta.StateTransition;
 
-const trace = @import("tracing.zig").scoped(.safrole);
+const trace = @import("tracing").scoped(.safrole);
+const tracy = @import("tracy");
 
 pub const Error = error{
     /// Bad slot value.
@@ -35,16 +36,20 @@ pub const Error = error{
 } || std.mem.Allocator.Error || ring_vrf.Error || state_delta.Error;
 
 pub fn transition(
+    comptime IOExecutor: type,
+    io_executor: *IOExecutor,
     comptime params: Params,
     stx: *StateTransition(params),
     ticket_extrinsic: types.TicketsExtrinsic,
 ) Error!Result {
-    const span = trace.span(.transition);
+    const span = trace.span(@src(), .transition);
     defer span.deinit();
     span.debug("Starting state transition", .{});
 
     // Process and validate ticket extrinsic
     const verified_extrinsic = try ticket_validation.processTicketExtrinsic(
+        IOExecutor,
+        io_executor,
         params,
         stx,
         ticket_extrinsic,
@@ -77,6 +82,8 @@ pub fn transition(
     // Generate markers
     var epoch_marker: ?types.EpochMark = null;
     if (stx.time.isNewEpoch()) {
+        const epoch_marker_span = span.child(@src(), .generate_epoch_marker);
+        defer epoch_marker_span.deinit();
         const eta_prime = try stx.ensure(.eta_prime);
         epoch_marker = .{
             .entropy = eta_prime[1],
@@ -90,6 +97,8 @@ pub fn transition(
     if (stx.time.didCrossTicketSubmissionEndInSameEpoch() and
         gamma_prime.a.len == params.epoch_length)
     {
+        const ticket_marker_span = span.child(@src(), .generate_ticket_marker);
+        defer ticket_marker_span.deinit();
         winning_ticket_marker = .{
             .tickets = try ordering.outsideInOrdering(
                 types.TicketBody,
@@ -113,7 +122,7 @@ fn mergeTicketsIntoTicketAccumulatorGammaA(
     extrinsic: []types.TicketBody,
     epoch_length: u32,
 ) ![]types.TicketBody {
-    const span = trace.span(.merge_tickets);
+    const span = trace.span(@src(), .merge_tickets);
     defer span.deinit();
     span.debug("Merging tickets into accumulator gamma_a", .{});
     span.trace("Current gamma_a size: {d}, extrinsic size: {d}, epoch length: {d}", .{

@@ -76,6 +76,11 @@ pub fn JamState(comptime params: Params) type {
         /// (v0.6.7: new component, stores service/hash pairs from last accumulation)
         theta: ?Theta = null,
 
+        /// ancestry: Historical block headers for lookup-anchor validation
+        /// Provides O(1) lookup for header hash -> timeslot mapping
+        /// Used for validating lookup-anchors in work reports
+        ancestry: ?Ancestry = null,
+
         /// Initialize Alpha component
         pub fn initAlpha(self: *JamState(params), _: std.mem.Allocator) !void {
             self.alpha = Alpha(params.core_count, params.max_authorizations_pool_items).init();
@@ -137,6 +142,11 @@ pub fn JamState(comptime params: Params) type {
             self.theta = Theta.init(allocator);
         }
 
+        /// Initialize Ancestry component (historical block headers for lookup-anchor validation)
+        pub fn initAncestry(self: *JamState(params), allocator: std.mem.Allocator) !void {
+            self.ancestry = Ancestry.init(allocator);
+        }
+
         /// Initialize Eta component
         pub fn initEta(self: *JamState(params)) !void {
             // TODO: std.mem.zeroes
@@ -171,6 +181,16 @@ pub fn JamState(comptime params: Params) type {
 
         /// Initialize an empty genesis state with all components properly initialized
         pub fn initGenesis(allocator: std.mem.Allocator) !JamState(params) {
+            return initGenesisWithOptions(allocator, .{ .enable_ancestry = true });
+        }
+
+        /// Initialize options for genesis state
+        pub const InitOptions = struct {
+            enable_ancestry: bool = true,
+        };
+
+        /// Initialize an empty genesis state with configurable options
+        pub fn initGenesisWithOptions(allocator: std.mem.Allocator, options: InitOptions) !JamState(params) {
             var state = try JamState(params).init(allocator);
 
             try state.initAlpha(allocator);
@@ -190,6 +210,11 @@ pub fn JamState(comptime params: Params) type {
             // try state.initEta();
             // try state.initTau();
             try state.initSafrole(allocator);
+
+            // Auxiliary state - only initialize if enabled
+            if (options.enable_ancestry) {
+                try state.initAncestry(allocator);
+            }
 
             return state;
         }
@@ -221,10 +246,20 @@ pub fn JamState(comptime params: Params) type {
             // Define our error type at compile time
             const InitError = comptime StateHelpers.buildInitErrorType(@TypeOf(self.*));
 
-            // Check each field using inline for
+            const auxiliary_fields = [_][]const u8{"ancestry"};
+
             inline for (std.meta.fields(@TypeOf(self.*))) |field| {
-                if (@field(self, field.name) == null) {
-                    return @field(InitError, "Uninitialized" ++ StateHelpers.capitalize(field.name));
+
+                // Only check non-auxiliary fields
+                const is_aux_field = for (auxiliary_fields) |aux_field| {
+                    if (std.mem.eql(u8, aux_field, field.name)) break true;
+                } else false;
+
+                // Skip auxiliary fields (ancestry is optional auxiliary data)
+                if (!is_aux_field) {
+                    if (@field(self, field.name) == null) {
+                        return @field(InitError, "Uninitialized" ++ StateHelpers.capitalize(field.name));
+                    }
                 }
             }
             return true;
@@ -310,6 +345,9 @@ pub fn JamStateView(comptime params: Params) type {
         vartheta: ?*const VarTheta(params.epoch_length) = null,
         theta: ?*const Theta = null,
 
+        // Auxiliary state
+        ancestry: ?*const Ancestry = null,
+
         pub fn init() Self {
             return Self{};
         }
@@ -343,6 +381,7 @@ pub const authorizer_queue = @import("authorizer_queue.zig");
 pub const services_priviledged = @import("services_priviledged.zig");
 pub const disputes = @import("disputes.zig");
 pub const validator_stats = @import("validator_stats.zig");
+pub const ancestry = @import("ancestry.zig");
 
 // State components
 pub const Alpha = authorizer_pool.Alpha;
@@ -366,6 +405,7 @@ pub const Phi = authorizer_queue.Phi;
 pub const Chi = services_priviledged.Chi;
 pub const Psi = disputes.Psi;
 pub const Pi = validator_stats.Pi;
+pub const Ancestry = ancestry.Ancestry;
 
 // Helpers to init decoupled state object by params
 pub const init = @import("state_params_init.zig");

@@ -15,7 +15,7 @@ const dir = @import("jamtestvectors/dir.zig");
 
 const converters = @import("authorizations_test/converters.zig");
 
-const trace = @import("tracing.zig").scoped(.authorizations_test);
+const trace = @import("tracing").scoped(.authorizations_test);
 
 const BASE_PATH = "src/jamtestvectors/data/stf/authorizations/";
 

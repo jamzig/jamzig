@@ -14,7 +14,7 @@ const Params = @import("../jam_params.zig").Params;
 const DeferredTransfer = @import("../pvm_invocations/accumulate.zig").DeferredTransfer;
 const TransferServiceStats = @import("execution.zig").TransferServiceStats;
 
-const trace = @import("../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Error types for transfer execution
 pub const TransferError = error{
@@ -39,7 +39,7 @@ pub fn TransferExecutor(comptime params: Params) type {
             stx: *state_delta.StateTransition(params),
             transfers: []DeferredTransfer,
         ) !std.AutoHashMap(types.ServiceId, TransferServiceStats) {
-            const span = trace.span(.apply_deferred_transfers);
+            const span = trace.span(@src(), .apply_deferred_transfers);
             defer span.deinit();
 
             span.debug("Applying {d} deferred transfers", .{transfers.len});
@@ -105,7 +105,7 @@ pub fn TransferExecutor(comptime params: Params) type {
             self: Self,
             transfers: []DeferredTransfer,
         ) !std.AutoHashMap(types.ServiceId, std.ArrayList(DeferredTransfer)) {
-            const span = trace.span(.group_transfers_by_destination);
+            const span = trace.span(@src(), .group_transfers_by_destination);
             defer span.deinit();
 
             var grouped = std.AutoHashMap(types.ServiceId, std.ArrayList(DeferredTransfer)).init(self.allocator);

@@ -7,7 +7,7 @@ const assurances = @import("../assurances.zig");
 const Params = @import("../jam_params.zig").Params;
 const StateTransition = @import("../state_delta.zig").StateTransition;
 
-const tracing = @import("../tracing.zig");
+const tracing = @import("tracing");
 const trace = tracing.scoped(.stf);
 
 pub const Error = error{};
@@ -30,7 +30,7 @@ pub fn transition(
     extrinsic: types.AssurancesExtrinsic,
     parent_hash: types.HeaderHash,
 ) !AssuranceResult {
-    const span = trace.span(.assurances);
+    const span = trace.span(@src(), .assurances);
     defer span.deinit();
 
     const kappa = try stx.ensure(.kappa);

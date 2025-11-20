@@ -7,6 +7,7 @@ const safrole_test_vector = @import("../jamtestvectors/safrole.zig");
 const stf = @import("../stf.zig");
 const safrole = @import("../safrole.zig");
 const dstate = @import("../state_delta.zig");
+const io = @import("../io.zig");
 
 const Allocator = std.mem.Allocator;
 const Params = @import("../jam_params.zig").Params;
@@ -58,6 +59,7 @@ pub fn transition(
 
     var result = performTransitions(
         params,
+        allocator,
         &stx,
         input,
     ) catch |e| {
@@ -100,14 +102,19 @@ pub fn transition(
 
 fn performTransitions(
     comptime params: Params,
+    allocator: std.mem.Allocator,
     stx: *dstate.StateTransition(params),
     input: safrole_test_vector.Input,
 ) !safrole.Result {
+    var executor = try io.ThreadPoolExecutor.init(allocator);
+    defer executor.deinit();
 
     // Perform all transitions in sequence, propagating any errors
     try stf.time.transition(params, stx, input.slot);
     try stf.eta.transition(params, stx, input.entropy);
     return try stf.safrole.transition(
+        io.ThreadPoolExecutor,
+        &executor,
         params,
         stx,
         input.extrinsic,

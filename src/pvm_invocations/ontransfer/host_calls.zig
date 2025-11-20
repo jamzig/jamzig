@@ -12,7 +12,7 @@ const DeltaSnapshot = @import("../../services_snapshot.zig").DeltaSnapshot;
 const PVM = @import("../../pvm.zig").PVM;
 
 // Add tracing import
-const trace = @import("../../tracing.zig").scoped(.host_calls);
+const trace = @import("tracing").scoped(.host_calls);
 
 // Import shared encoding utilities
 const encoding_utils = @import("../encoding_utils.zig");
@@ -135,7 +135,7 @@ pub fn HostCalls(comptime params: Params) type {
             exec_ctx: *PVM.ExecutionContext,
             call_ctx: ?*anyopaque,
         ) HostCallError!PVM.HostCallResult {
-            const span = trace.span(.host_call_fetch);
+            const span = trace.span(@src(), .host_call_fetch);
             defer span.deinit();
 
             span.debug("charging 10 gas", .{});

@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("../../types.zig");
 const state = @import("../../state.zig");
-const tracing = @import("../../tracing.zig");
+const tracing = @import("tracing");
 
 const trace = tracing.scoped(.reports);
 const StateTransition = @import("../../state_delta.zig").StateTransition;
@@ -21,7 +21,7 @@ pub fn validateReportSlot(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_slot);
+    const span = trace.span(@src(), .validate_slot);
     defer span.deinit();
     
     span.debug("Validating report slot {d} against current slot {d} for core {d}", .{
@@ -42,7 +42,7 @@ pub fn validateRotationPeriod(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_rotation);
+    const span = trace.span(@src(), .validate_rotation);
     defer span.deinit();
 
     const current_rotation = @divFloor(stx.time.current_slot, params.validator_rotation_period);
@@ -73,7 +73,7 @@ pub fn validateSlotRange(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_slot_range);
+    const span = trace.span(@src(), .validate_slot_range);
     defer span.deinit();
 
     const min_guarantee_slot = (@divFloor(stx.time.current_slot, params.validator_rotation_period) -| 1) * params.validator_rotation_period;
@@ -96,7 +96,7 @@ pub fn validateCoreTimeout(
     stx: *StateTransition(params),
     guarantee: types.ReportGuarantee,
 ) !void {
-    const span = trace.span(.validate_timeout);
+    const span = trace.span(@src(), .validate_timeout);
     defer span.deinit();
 
     const rho: *const state.Rho(params.core_count) = try stx.ensure(.rho_prime);

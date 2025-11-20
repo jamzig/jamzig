@@ -4,12 +4,12 @@ const types = @import("../../types.zig");
 const state = @import("../../state.zig");
 const codec = @import("../../codec.zig");
 
-const trace = @import("../../tracing.zig").scoped(.accumulate);
+const trace = @import("tracing").scoped(.accumulate);
 
 /// Checks if a service ID is available and finds the next available one if not
 /// As defined in B.13 of the graypaper
 pub fn check(service_accounts: *const state.Delta.Snapshot, candidate_id: types.ServiceId) types.ServiceId {
-    const span = trace.span(.check_service_id);
+    const span = trace.span(@src(), .check_service_id);
     defer span.deinit();
     span.debug("Checking service ID availability: {d}", .{candidate_id});
 
@@ -33,7 +33,7 @@ pub fn check(service_accounts: *const state.Delta.Snapshot, candidate_id: types.
 /// Generates a deterministic service ID based on creator service, entropy, and timeslot
 /// As defined in B.9 of the graypaper
 pub fn generateServiceId(service_accounts: *const state.Delta.Snapshot, creator_id: types.ServiceId, entropy: [32]u8, timeslot: u32) types.ServiceId {
-    const span = trace.span(.generate_service_id);
+    const span = trace.span(@src(), .generate_service_id);
     defer span.deinit();
     span.debug("Generating service ID - creator: {d}, timeslot: {d}", .{ creator_id, timeslot });
     span.trace("Entropy: {s}", .{std.fmt.fmtSliceHexLower(&entropy)});

@@ -1,5 +1,5 @@
 const std = @import("std");
-const tracing = @import("../tracing.zig");
+const tracing = @import("tracing");
 
 /// Apply quiet scopes by setting them to info level
 pub fn applyQuietScopes(quiet_scopes_str: []const u8) !void {
@@ -10,7 +10,7 @@ pub fn applyQuietScopes(quiet_scopes_str: []const u8) !void {
         const trimmed = std.mem.trim(u8, scope_name, " \t");
         if (trimmed.len == 0) continue;
 
-        tracing.runtime.setScope(trimmed, .info) catch {
+        tracing.setScope(trimmed, .info) catch {
             std.debug.print("Warning: Failed to set quiet scope '{s}' to info level\n", .{trimmed});
         };
         count += 1;
@@ -39,12 +39,12 @@ pub fn applyTraceConfig(config_str: []const u8) !void {
             };
 
             // Apply configuration
-            tracing.runtime.setScope(scope_name, level) catch {
+            tracing.setScope(scope_name, level) catch {
                 std.debug.print("Warning: Failed to set tracing for scope '{s}'\n", .{scope_name});
             };
         } else {
             // Just scope name, default to debug
-            tracing.runtime.setScope(scope_config, .debug) catch {
+            tracing.setScope(scope_config, .debug) catch {
                 std.debug.print("Warning: Failed to set tracing for scope '{s}'\n", .{scope_config});
             };
         }
@@ -58,6 +58,12 @@ pub fn configureTracing(args: struct {
     trace: ?[]const u8,
     trace_quiet: ?[]const u8,
 }) !void {
+    std.debug.print("Configuring tracing with verbose={d}, trace_all={s}, trace={s}, trace_quiet={s}\n", .{
+        args.verbose,
+        args.trace_all orelse "null",
+        args.trace orelse "null",
+        args.trace_quiet orelse "null",
+    });
     // Initialize runtime tracing if any trace options are provided
     if (args.trace_all != null or args.trace != null or args.trace_quiet != null) {
         // Apply default level first if specified
@@ -67,7 +73,7 @@ pub fn configureTracing(args: struct {
                 std.debug.print("Valid levels: trace, debug, info, warn, err\n", .{});
                 return error.InvalidLogLevel;
             };
-            tracing.runtime.setDefaultLevel(default_level);
+            tracing.setDefaultLevel(default_level);
             std.debug.print("Set default trace level to: {s}\n", .{default_level_str});
         }
 
@@ -83,23 +89,34 @@ pub fn configureTracing(args: struct {
     }
 
     // Apply verbose levels
-    try tracing.runtime.setScope("codec", .info); // Keep codec quiet by default
-    
+    // try tracing.setScope("codec", .info); // Keep codec quiet by default
+
+    const SCOPES_TO_ENABLE = [_][]const u8{
+        "fuzz_protocol",
+        "jam_conformance_fuzzer",
+        "jam_conformance_target",
+        "stf",
+        "header_validator",
+        // "accumulate",
+        // "reports",
+        // "host_calls",
+        // "safrole",
+    };
+
     if (args.verbose == 1) {
-        try tracing.runtime.setScope("fuzz_protocol", .debug);
-        try tracing.runtime.setScope("jam_conformance_fuzzer", .debug);
-        try tracing.runtime.setScope("jam_conformance_target", .debug);
-        try tracing.runtime.setScope("header_validator", .debug);
+        inline for (SCOPES_TO_ENABLE) |scope| {
+            try tracing.setScope(scope, .debug);
+        }
     } else if (args.verbose == 2) {
-        try tracing.runtime.setScope("fuzz_protocol", .trace);
-        try tracing.runtime.setScope("jam_conformance_fuzzer", .trace);
-        try tracing.runtime.setScope("jam_conformance_target", .trace);
-        try tracing.runtime.setScope("header_validator", .trace);
+        inline for (SCOPES_TO_ENABLE) |scope| {
+            try tracing.setScope(scope, .debug);
+        }
     } else if (args.verbose == 3) {
-        tracing.runtime.setDefaultLevel(.debug);
+        tracing.setDefaultLevel(.debug);
     } else if (args.verbose == 4) {
-        tracing.runtime.setDefaultLevel(.trace);
+        tracing.setDefaultLevel(.trace);
     } else if (args.verbose == 5) {
-        try tracing.runtime.setScope("codec", .debug);
+        try tracing.setScope("codec", .debug);
     }
 }
+
