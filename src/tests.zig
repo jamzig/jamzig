@@ -124,4 +124,7 @@ comptime {
 
     // JAM Conformance tests
     _ = @import("jam_conformance.zig");
+
+    // Debug tests
+    _ = @import("debug_trace_reconstruction.zig");
 }
