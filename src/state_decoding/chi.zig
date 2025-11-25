@@ -41,10 +41,17 @@ pub fn decode(
     }
     context.pop();
 
-    // Read designate index
+    // Read designate index (delegator)
     try context.push(.{ .field = "designate" });
     chi.designate = reader.readInt(u32, .little) catch |err| {
         return context.makeError(error.EndOfStream, "failed to read designate index: {s}", .{@errorName(err)});
+    };
+    context.pop();
+
+    // Read registrar index (v0.7.1 GP #473)
+    try context.push(.{ .field = "registrar" });
+    chi.registrar = reader.readInt(u32, .little) catch |err| {
+        return context.makeError(error.EndOfStream, "failed to read registrar index: {s}", .{@errorName(err)});
     };
     context.pop();
 

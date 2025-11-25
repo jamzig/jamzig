@@ -36,6 +36,10 @@ pub fn encode(
 
     try writer.writeInt(u32, chi.designate, .little);
 
+    // Write registrar (v0.7.1 GP #473)
+    span.trace("Encoding registrar: {d}", .{chi.registrar});
+    try writer.writeInt(u32, chi.registrar, .little);
+
     // Encode X_g with ordered keys
     // TODO: this could be a method in encoder, map encoder which orders
     // the keys
