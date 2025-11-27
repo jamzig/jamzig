@@ -211,10 +211,12 @@ pub const WorkExecResult = union(enum(u8)) {
     panic: void = 2,
     /// Bad exports error (⊙)
     bad_exports: void = 3,
+    /// Result oversize error (⊖) - output exceeds max report variable size
+    oversize: void = 4,
     /// Bad code error (BAD)
-    bad_code: void = 4,
+    bad_code: void = 5,
     /// Code oversize error (BIG)
-    code_oversize: void = 5,
+    code_oversize: void = 6,
 
     /// length of result
     pub fn len(self: *const @This()) usize {
@@ -257,13 +259,15 @@ pub const WorkExecResult = union(enum(u8)) {
 
     pub fn encode(self: *const @This(), _: anytype, writer: anytype) !void {
         // First write the tag byte based on the union variant
+        // Per graypaper serialization.tex equation O
         const tag: u8 = switch (self.*) {
             .ok => 0,
             .out_of_gas => 1,
             .panic => 2,
             .bad_exports => 3,
-            .bad_code => 4,
-            .code_oversize => 5,
+            .oversize => 4,
+            .bad_code => 5,
+            .code_oversize => 6,
         };
         try writer.writeByte(tag);
 
@@ -285,6 +289,7 @@ pub const WorkExecResult = union(enum(u8)) {
         defer span.deinit();
         span.debug("Decoding WorkExecResult with tag: {d}", .{tag});
 
+        // Per graypaper serialization.tex equation O
         return switch (tag) {
             0 => blk: {
                 const codec = @import("codec.zig");
@@ -301,8 +306,9 @@ pub const WorkExecResult = union(enum(u8)) {
             1 => WorkExecResult{ .out_of_gas = {} },
             2 => WorkExecResult{ .panic = {} },
             3 => WorkExecResult{ .bad_exports = {} },
-            4 => WorkExecResult{ .bad_code = {} },
-            5 => WorkExecResult{ .code_oversize = {} },
+            4 => WorkExecResult{ .oversize = {} },
+            5 => WorkExecResult{ .bad_code = {} },
+            6 => WorkExecResult{ .code_oversize = {} },
             else => error.InvalidTag,
         };
     }

@@ -30,6 +30,7 @@ pub fn Chi(comptime core_count: u16) type {
         manager: ServiceIndex,
         assign: [core_count]ServiceIndex, // Fixed-size array, always exactly C elements
         designate: ServiceIndex,
+        registrar: ServiceIndex, // v0.7.1 GP #473
         always_accumulate: std.AutoHashMap(ServiceIndex, GasLimit),
         allocator: Allocator,
 
@@ -40,6 +41,7 @@ pub fn Chi(comptime core_count: u16) type {
                 .manager = 0,
                 .assign = [_]ServiceIndex{0} ** core_count, // Initialize all to 0
                 .designate = 0,
+                .registrar = 0, // v0.7.1 GP #473
                 .always_accumulate = std.AutoHashMap(ServiceIndex, GasLimit).init(allocator),
                 .allocator = allocator,
             };
@@ -130,6 +132,7 @@ pub fn Chi(comptime core_count: u16) type {
                 .manager = self.manager,
                 .assign = self.assign, // Fixed array can be copied directly
                 .designate = self.designate,
+                .registrar = self.registrar, // v0.7.1 GP #473
                 .always_accumulate = cloned_always_accumulate,
                 .allocator = self.allocator,
             };

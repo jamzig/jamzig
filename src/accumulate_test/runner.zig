@@ -113,6 +113,14 @@ pub fn runAccumulateTest(comptime params: Params, allocator: std.mem.Allocator, 
                 // Print delta if available
                 var delta = try state_diff.JamStateDiff(params).build(allocator, &pre_state, &expected_state);
                 defer delta.deinit();
+
+                // Exclude theta from comparison - test vector format doesn't include theta,
+                // but we already validated it via accumulate_root check above
+                if (delta.fields.getPtr("theta")) |theta_entry| {
+                    theta_entry.deinit(allocator);
+                    _ = delta.fields.remove("theta");
+                }
+
                 delta.printToStdErr();
 
                 // If we have a diff return error

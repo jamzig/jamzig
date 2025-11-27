@@ -37,11 +37,15 @@ const TypeMapping = struct {
         return lib_codec.TicketsMark{ .tickets = tickets };
     }
     pub fn WorkExecResult(allocator: Allocator, from: tv_lib_codec.WorkExecResult) !lib_codec.WorkExecResult {
+        // JSON test vectors use a simplified format with tags 0-4
+        // We convert to graypaper format with tags 0-6
         return switch (from) {
             .ok => |ok| lib_codec.WorkExecResult{ .ok = try allocator.dupe(u8, ok.bytes) },
             .out_of_gas => lib_codec.WorkExecResult.out_of_gas,
             .panic => lib_codec.WorkExecResult.panic,
+            // JSON bad_code (tag 3) maps to graypaper bad_code (tag 5)
             .bad_code => lib_codec.WorkExecResult.bad_code,
+            // JSON code_oversize (tag 4) maps to graypaper code_oversize (tag 6)
             .code_oversize => lib_codec.WorkExecResult.code_oversize,
         };
     }

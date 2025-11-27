@@ -108,8 +108,8 @@ pub const WorkReportBuilder = struct {
         try payload.resize(payload_size);
         random.bytes(payload.items);
 
-        // Generate work execution result
-        const exec_result = switch (random.intRangeAtMost(u8, 0, 5)) {
+        // Generate work execution result - all 7 variants per graypaper
+        const exec_result = switch (random.intRangeAtMost(u8, 0, 6)) {
             0 => blk: {
                 const owned_payload = try payload.toOwnedSlice();
                 break :blk types.WorkExecResult{ .ok = owned_payload };
@@ -117,8 +117,9 @@ pub const WorkReportBuilder = struct {
             1 => types.WorkExecResult.out_of_gas,
             2 => types.WorkExecResult.panic,
             3 => types.WorkExecResult.bad_exports,
-            4 => types.WorkExecResult.bad_code,
-            5 => types.WorkExecResult.code_oversize,
+            4 => types.WorkExecResult.oversize,
+            5 => types.WorkExecResult.bad_code,
+            6 => types.WorkExecResult.code_oversize,
             else => unreachable,
         };
 
