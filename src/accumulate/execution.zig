@@ -55,6 +55,12 @@ pub const OuterAccumulationResult = struct {
         return result;
     }
 
+    pub fn takeInvokedServices(self: *@This()) std.AutoHashMap(types.ServiceId, void) {
+        const result = self.invoked_services;
+        self.invoked_services = std.AutoHashMap(types.ServiceId, void).init(self.invoked_services.allocator);
+        return result;
+    }
+
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         allocator.free(self.deferred_transfers);
         self.accumulation_outputs.deinit(allocator);
