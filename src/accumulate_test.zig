@@ -128,6 +128,26 @@ test "tiny/same_code_different_services-1.bin" {
     try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/same_code_different_services-1.bin");
 }
 
+test "tiny/transfer_for_ejected_service-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/transfer_for_ejected_service-1.bin");
+}
+
+test "tiny/work_for_ejected_service-1.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/work_for_ejected_service-1.bin");
+}
+
+test "tiny/work_for_ejected_service-2.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/work_for_ejected_service-2.bin");
+}
+
+test "tiny/work_for_ejected_service-3.bin" {
+    const allocator = std.testing.allocator;
+    try runTest(TINY_PARAMS, allocator, BASE_PATH ++ "tiny/work_for_ejected_service-3.bin");
+}
+
 // Full test vectors
 pub const FULL_PARAMS = jam_params.FULL_PARAMS;
 
