@@ -21,8 +21,9 @@ pub const AuthPools = struct {
     }
 };
 
-/// ServiceInfo type for test vectors with additional fields
+/// ServiceInfo type for test vectors with additional fields (v0.7.1+)
 pub const ServiceInfoTestVector = struct {
+    version: u8, // v0.7.1: Service information version (GP #472)
     code_hash: types.OpaqueHash,
     balance: types.Balance,
     min_item_gas: types.Gas,
