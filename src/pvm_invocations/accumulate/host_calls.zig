@@ -249,15 +249,16 @@ pub fn HostCalls(comptime params: Params) type {
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
-            // Get registers per graypaper B.7: [m, a, v, o, n] = registers[7..+5]
+            // Get registers per graypaper B.7: [m, a, v, r, o, n] = registers[7..+6]
             const manager_service_id: u32 = @truncate(exec_ctx.registers[7]); // m: Manager service ID
             const assign_ptr: u32 = @truncate(exec_ctx.registers[8]); // a: Pointer to assign service IDs array
             const validator_service_id: u32 = @truncate(exec_ctx.registers[9]); // v: Validator service ID
-            const always_accumulate_ptr: u32 = @truncate(exec_ctx.registers[10]); // o: Pointer to always-accumulate services array
-            const always_accumulate_count: u32 = @truncate(exec_ctx.registers[11]); // n: Number of entries in always-accumulate array
+            const registrar_service_id: u32 = @truncate(exec_ctx.registers[10]); // r: Registrar service ID
+            const always_accumulate_ptr: u32 = @truncate(exec_ctx.registers[11]); // o: Pointer to always-accumulate services array
+            const always_accumulate_count: u32 = @truncate(exec_ctx.registers[12]); // n: Number of entries in always-accumulate array
 
-            span.debug("Host call: bless - m={d}, v={d}, always_accumulate_count={d}", .{
-                manager_service_id, validator_service_id, always_accumulate_count,
+            span.debug("Host call: bless - m={d}, v={d}, r={d}, always_accumulate_count={d}", .{
+                manager_service_id, validator_service_id, registrar_service_id, always_accumulate_count,
             });
 
             // NOTE: that the order of these checks follows the graypaper
@@ -348,13 +349,15 @@ pub fn HostCalls(comptime params: Params) type {
                 return HostCallError.HUH;
             }
 
-            // Check if manager and validator service IDs are in the u32 domain
+            // Check if manager, validator, and registrar service IDs are in the u32 domain
+            // Graypaper: returns WHO when (m, v, r) ∉ serviceid^3
             if (exec_ctx.registers[7] > std.math.maxInt(u32) or
-                exec_ctx.registers[9] > std.math.maxInt(u32))
+                exec_ctx.registers[9] > std.math.maxInt(u32) or
+                exec_ctx.registers[10] > std.math.maxInt(u32))
             {
                 span.err(
-                    "Manager or validator service ID exceeds u32 domain. M={d} V={d}",
-                    .{ exec_ctx.registers[7], exec_ctx.registers[9] },
+                    "Manager, validator, or registrar service ID exceeds u32 domain. M={d} V={d} R={d}",
+                    .{ exec_ctx.registers[7], exec_ctx.registers[9], exec_ctx.registers[10] },
                 );
                 return HostCallError.WHO;
             }
@@ -362,9 +365,10 @@ pub fn HostCalls(comptime params: Params) type {
             // Update privileges
             span.debug("Updating privileges", .{});
 
-            // Update the manager and validator service IDs
+            // Update the manager, validator, and registrar service IDs
             current_privileges.manager = manager_service_id;
             current_privileges.designate = validator_service_id;
+            current_privileges.registrar = registrar_service_id;
 
             // Update the assign service IDs list
             // Chi.assign must have exactly C elements
