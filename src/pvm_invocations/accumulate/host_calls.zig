@@ -62,7 +62,8 @@ pub fn HostCalls(comptime params: Params) type {
             provided_preimages: std.AutoHashMap(ProvidedKey, []const u8),
 
             pub fn commit(self: *@This()) !void {
-                try self.context.commit();
+                // Per graypaper §12.17: only the original delegator's staging set (iota) is used
+                try self.context.commitForService(self.service_id);
             }
 
             /// Apply provided preimages after accumulation

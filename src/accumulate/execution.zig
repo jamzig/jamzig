@@ -16,6 +16,8 @@ const AccumulationOperand = pvm_accumulate.AccumulationOperand;
 const AccumulationResult = pvm_accumulate.AccumulationResult;
 const DeferredTransfer = pvm_accumulate.DeferredTransfer;
 
+const ChiMerger = @import("chi_merger.zig").ChiMerger;
+
 pub const ServiceAccumulationOutput = struct {
     service_id: types.ServiceId,
     output: types.AccumulateRoot,
@@ -170,8 +172,12 @@ pub fn outerAccumulation(
         );
         defer parallelized_result.deinit(allocator);
 
-        // Apply context changes from all service dimensions
+        // Apply context changes from all service dimensions (except chi - handled by R())
         try parallelized_result.applyContextChanges();
+
+        // Apply R() function for chi fields per graypaper §12.17
+        // This merges manager's and privileged services' chi changes
+        try applyChiRResolution(params, allocator, &parallelized_result, context);
 
         // Process all service results in a single loop:
         // - Apply provided preimages
@@ -261,6 +267,66 @@ pub fn ParallelizedAccumulationResult(params: jam_params.Params) type {
             self.* = undefined;
         }
     };
+}
+
+/// Apply R() function for chi field updates per graypaper §12.17
+///
+/// R(o, a, b) = b when a = o (manager unchanged), a otherwise (manager wins)
+///
+/// This function:
+/// 1. Gets manager's chi from the batch results (if manager accumulated)
+/// 2. Gets each privileged service's chi from results (if they accumulated)
+/// 3. Applies R() to select final values for assigners, delegator, registrar
+/// 4. Commits the merged chi to state
+fn applyChiRResolution(
+    comptime params: jam_params.Params,
+    allocator: std.mem.Allocator,
+    parallelized_result: *ParallelizedAccumulationResult(params),
+    context: *const AccumulationContext(params),
+) !void {
+    const span = trace.span(@src(), .apply_chi_r_resolution);
+    defer span.deinit();
+
+    // Create chi merger with original values
+    const merger = ChiMerger(params).init(
+        context.original_manager,
+        context.original_assigners,
+        context.original_delegator,
+        context.original_registrar,
+    );
+
+    // Build map of service_id -> chi pointer from batch results
+    var service_chi_map = std.AutoHashMap(types.ServiceId, *const state.Chi(params.core_count)).init(allocator);
+    defer service_chi_map.deinit();
+
+    var it = parallelized_result.service_results.iterator();
+    while (it.next()) |entry| {
+        const service_id = entry.key_ptr.*;
+        const chi_ptr = entry.value_ptr.collapsed_dimension.context.privileges.getReadOnly();
+        try service_chi_map.put(service_id, chi_ptr);
+    }
+
+    span.debug("Built service chi map with {d} entries", .{service_chi_map.count()});
+
+    // Get manager's result (if manager accumulated in this batch)
+    const manager_result = parallelized_result.service_results.getPtr(context.original_manager) orelse {
+        span.debug("Manager {d} did not accumulate in this batch, skipping R() resolution", .{context.original_manager});
+        return;
+    };
+
+    // Get manager's chi from the map
+    const manager_chi = service_chi_map.get(context.original_manager);
+
+    // Get mutable chi through manager's dimension context (not const)
+    const output_chi = try manager_result.collapsed_dimension.context.privileges.getMutable();
+
+    // Apply R() merge
+    try merger.merge(manager_chi, &service_chi_map, output_chi);
+
+    // Commit the merged chi through manager's dimension context
+    manager_result.collapsed_dimension.context.privileges.commit();
+
+    span.debug("Chi R() resolution complete", .{});
 }
 
 /// 12.17 Parallelized accumulation function Δ*
@@ -475,6 +541,16 @@ pub fn executeAccumulation(
     const span = trace.span(@src(), .execute_accumulation);
     defer span.deinit();
 
+    // Capture original chi values from input state BEFORE any accumulation
+    // Per graypaper §12.17: chi fields use R() function to select between
+    // manager's and privileged services' changes. See chi_merger.zig.
+    const original_chi = try stx.ensure(.chi);
+    span.debug("Original chi - manager={d}, delegator={d}, registrar={d}", .{
+        original_chi.manager,
+        original_chi.designate,
+        original_chi.registrar,
+    });
+
     // Build accumulation context
     var accumulation_context = pvm_accumulate.AccumulationContext(params).build(
         allocator,
@@ -485,6 +561,10 @@ pub fn executeAccumulation(
             .privileges = try stx.ensure(.chi_prime),
             .time = &stx.time,
             .entropy = (try stx.ensure(.eta_prime))[0],
+            .original_manager = original_chi.manager,
+            .original_assigners = original_chi.assign,
+            .original_delegator = original_chi.designate,
+            .original_registrar = original_chi.registrar,
         },
     );
     defer accumulation_context.deinit();
@@ -561,19 +641,34 @@ fn groupWorkItemsByService(
     allocator: std.mem.Allocator,
     work_reports: []const types.WorkReport,
 ) !ServiceAccumulationOperandsMap {
+    const span = trace.span(@src(), .group_work_items);
+    defer span.deinit();
+
     var service_operands = ServiceAccumulationOperandsMap.init(allocator);
     errdefer service_operands.deinit();
 
+    span.debug("Processing {d} work reports", .{work_reports.len});
+
     // Process all work reports, and build operands in order of appearance
-    for (work_reports) |report| {
+    for (work_reports, 0..) |report, idx| {
+        span.debug("Work report {d}: results.len={d}, core_index={d}", .{ idx, report.results.len, report.core_index.value });
+
         // Convert work report to accumulation operands
         var operands = try AccumulationOperand.fromWorkReport(allocator, report);
         defer operands.deinit(allocator);
 
+        span.debug("Work report {d}: created {d} operands", .{ idx, operands.items.len });
+
         // Group by service ID, and store the accumulate_gas per item
-        for (report.results, operands.items) |result, *operand| {
+        for (report.results, operands.items, 0..) |result, *operand, result_idx| {
             const service_id = result.service_id;
             const accumulate_gas = result.accumulate_gas;
+            span.debug("  Operand for service {d}: core={d}, result_idx={d}, payload_hash={s}", .{
+                service_id,
+                report.core_index.value,
+                result_idx,
+                std.fmt.fmtSliceHexLower(&result.payload_hash),
+            });
             try service_operands.addOperand(service_id, .{
                 .operand = try operand.take(),
                 .accumulate_gas = accumulate_gas,

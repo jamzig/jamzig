@@ -99,6 +99,7 @@ comptime {
 
     _ = @import("accumulate.zig");
     _ = @import("accumulate_test.zig");
+    _ = @import("accumulate/chi_merger.zig");
 
     _ = @import("header_validator.zig");
 
@@ -123,5 +124,5 @@ comptime {
     _ = @import("lab/thread/reactor_pattern.zig");
 
     // JAM Conformance tests
-    // _ = @import("jam_conformance.zig");
+    _ = @import("jam_conformance.zig");
 }
