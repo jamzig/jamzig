@@ -127,7 +127,4 @@ comptime {
 
     // Testing infrastructure
     _ = @import("tests/reflection_diff_test.zig");
-
-    // Debug tests
-    _ = @import("test_rho_roundtrip_conformance.zig");
 }
