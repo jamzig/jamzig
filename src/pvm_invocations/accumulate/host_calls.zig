@@ -825,6 +825,15 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("Host call: eject service {d}", .{target_service_id});
             span.debug("Hash pointer: 0x{x}", .{hash_ptr});
 
+            // Per graypaper: Read hash from memory FIRST (before service checks)
+            // This ensures memory errors have priority over protocol errors
+            span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
+            const hash = exec_ctx.memory.readHash(@truncate(hash_ptr)) catch {
+                span.err("Memory access failed while reading hash", .{});
+                return .{ .terminal = .panic };
+            };
+            span.trace("Hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
+
             // Check if target service is current service (can't eject self)
             if (target_service_id == ctx_regular.service_id) {
                 span.debug("Cannot eject current service, returning WHO error", .{});
@@ -836,14 +845,6 @@ pub fn HostCalls(comptime params: Params) type {
                 span.debug("Target service not found, returning WHO error", .{});
                 return HostCallError.WHO;
             };
-
-            // Read hash from memory
-            span.debug("Reading hash from memory at 0x{x}", .{hash_ptr});
-            const hash = exec_ctx.memory.readHash(@truncate(hash_ptr)) catch {
-                span.err("Memory access failed while reading hash", .{});
-                return .{ .terminal = .panic };
-            };
-            span.trace("Hash: {s}", .{std.fmt.fmtSliceHexLower(&hash)});
 
             // Get the current_service
             const current_service = ctx_regular.context.service_accounts.getMutable(ctx_regular.service_id) catch {
