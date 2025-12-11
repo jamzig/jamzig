@@ -332,7 +332,9 @@ pub fn invoke(
             // host call
             break :outer collapsed_dimension.accumulation_output;
         },
-        else => null,
+        // For non-halt termination (panic, out-of-gas, trap), still check if yield was called
+        // The yield hostcall can be invoked before termination, and we should preserve that output
+        else => collapsed_dimension.accumulation_output,
     };
 
     // Return the collapsed dimension to the caller, who will apply preimages and commit changes
