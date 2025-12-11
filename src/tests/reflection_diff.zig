@@ -434,6 +434,41 @@ fn walkAndCompare(
     }
 }
 
+fn formatKeyPath(allocator: std.mem.Allocator, path: []const u8, key: anytype) ![]u8 {
+    const KeyType = @TypeOf(key);
+    const key_type_info = @typeInfo(KeyType);
+
+    // Special formatting for byte arrays (storage keys)
+    if (key_type_info == .array and key_type_info.array.child == u8) {
+        const key_bytes: []const u8 = &key;
+
+        // Check if all bytes are printable ASCII (32-126)
+        var all_ascii = true;
+        for (key_bytes) |byte| {
+            if (byte < 32 or byte > 126) {
+                all_ascii = false;
+                break;
+            }
+        }
+
+        if (all_ascii) {
+            return std.fmt.allocPrint(allocator, "{s}[0x{s} \"{s}\"]", .{
+                path,
+                std.fmt.fmtSliceHexLower(key_bytes),
+                key_bytes,
+            });
+        } else {
+            return std.fmt.allocPrint(allocator, "{s}[0x{s}]", .{
+                path,
+                std.fmt.fmtSliceHexLower(key_bytes),
+            });
+        }
+    }
+
+    // Default formatting for other key types
+    return std.fmt.allocPrint(allocator, "{s}[{any}]", .{ path, key });
+}
+
 fn diffHashMap(
     comptime T: type,
     allocator: std.mem.Allocator,
@@ -491,7 +526,7 @@ fn diffHashMap(
         const exp_value = expected.get(key);
         const act_value = actual.get(key);
 
-        const key_path = try std.fmt.allocPrint(allocator, "{s}[{any}]", .{ path, key });
+        const key_path = try formatKeyPath(allocator, path, key);
         defer allocator.free(key_path);
 
         if (exp_value != null and act_value == null) {
