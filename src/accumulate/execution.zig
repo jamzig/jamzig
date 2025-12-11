@@ -169,9 +169,6 @@ pub fn outerAccumulation(
         );
         defer parallelized_result.deinit(allocator);
 
-        // Apply context changes from all service dimensions (except chi - handled by R())
-        try parallelized_result.applyContextChanges();
-
         // Apply R() function for chi fields per graypaper §12.17
         // This merges manager's and privileged services' chi changes
         try applyChiRResolution(params, allocator, &parallelized_result, context);
@@ -218,6 +215,10 @@ pub fn outerAccumulation(
             // Track total gas for this batch
             batch_gas_used += result.gas_used;
         }
+
+        // Apply context changes from all service dimensions (after preimages are applied)
+        // This commits the dimension state to the context's Delta
+        try parallelized_result.applyContextChanges();
 
         span.debug("Applied state changes for all services", .{});
 
