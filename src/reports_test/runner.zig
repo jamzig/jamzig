@@ -59,7 +59,7 @@ pub fn validateAndProcessGuaranteeExtrinsic(
     defer empty_accumulate_stats.deinit();
     var empty_transfer_stats = std.AutoHashMap(types.ServiceId, @import("../accumulate.zig").execution.TransferServiceStats).init(allocator);
     defer empty_transfer_stats.deinit();
-    var empty_invoked_services = std.AutoHashMap(types.ServiceId, void).init(allocator);
+    var empty_invoked_services = std.AutoArrayHashMap(types.ServiceId, void).init(allocator);
     defer empty_invoked_services.deinit();
 
     const accumulate_result = @import("../accumulate.zig").ProcessAccumulationResult{
