@@ -470,14 +470,17 @@ pub fn HostCalls(comptime params: Params) type {
             });
 
             // CRITICAL: Check gas BEFORE charging (graypaper spec)
-            const gas_costs = 10 + @as(i64, @intCast(gas_limit));
-            if (exec_ctx.gas < gas_costs) {
-                span.debug("Insufficient gas for transfer (need {d}, have {d})", .{ gas_costs, exec_ctx.gas });
+            // v0.7.2 PR #488: Only charge additional gas_limit on success
+            // Verify we have enough gas for full operation
+            const total_gas_needed = 10 + @as(i64, @intCast(gas_limit));
+            if (exec_ctx.gas < total_gas_needed) {
+                span.debug("Insufficient gas for transfer (need {d}, have {d})", .{ total_gas_needed, exec_ctx.gas });
                 return .{ .terminal = .out_of_gas };
             }
 
-            span.debug("charging {d} gas", .{gas_costs});
-            exec_ctx.gas -= gas_costs;
+            // Charge only base gas upfront (additional gas charged on success)
+            span.debug("charging 10 gas (base cost)", .{});
+            exec_ctx.gas -= 10;
 
             // Read memo data from memory
             span.debug("Reading memo data from memory at 0x{x}", .{memo_ptr});
@@ -550,6 +553,10 @@ pub fn HostCalls(comptime params: Params) type {
             // Deduct the amount from the source service's balance
             span.debug("Deducting {d} from source service balance", .{amount});
             source_service.balance -= @intCast(amount);
+
+            // Charge additional gas on success (v0.7.2 PR #488)
+            span.debug("charging {d} gas (on_transfer gas limit)", .{gas_limit});
+            exec_ctx.gas -= @intCast(gas_limit);
 
             // Return success
             span.debug("Transfer scheduled successfully", .{});
