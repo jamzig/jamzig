@@ -251,6 +251,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
@@ -401,6 +406,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
@@ -490,6 +500,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging 10 gas (base cost)", .{});
             exec_ctx.gas -= 10;
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             span.trace("Memo data: {s}", .{std.fmt.fmtSliceHexLower(memo_slice.buffer)});
 
             // Check if destination service exists (WHO check - before accessing self per graypaper)
@@ -558,6 +573,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging {d} gas (on_transfer gas limit)", .{gas_limit});
             exec_ctx.gas -= @intCast(gas_limit);
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging transfer gas limit", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             // Return success
             span.debug("Transfer scheduled successfully", .{});
             exec_ctx.registers[7] = @intFromEnum(ReturnCode.OK);
@@ -574,6 +594,11 @@ pub fn HostCalls(comptime params: Params) type {
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
+
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
@@ -665,6 +690,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
 
             // According to graypaper B.7, the checkpoint operation:
@@ -697,6 +727,11 @@ pub fn HostCalls(comptime params: Params) type {
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
+
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
@@ -821,6 +856,11 @@ pub fn HostCalls(comptime params: Params) type {
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
+
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
@@ -950,6 +990,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
@@ -1051,6 +1096,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
             const current_timeslot = ctx_regular.context.time.current_slot;
@@ -1134,6 +1184,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             var ctx_regular = &host_ctx.regular;
             const current_timeslot = ctx_regular.context.time.current_slot;
@@ -1189,6 +1244,11 @@ pub fn HostCalls(comptime params: Params) type {
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
 
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
+
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
 
@@ -1233,6 +1293,11 @@ pub fn HostCalls(comptime params: Params) type {
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
+
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
@@ -1324,6 +1389,11 @@ pub fn HostCalls(comptime params: Params) type {
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
+
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular: *Dimension = &host_ctx.regular;
@@ -1430,6 +1500,11 @@ pub fn HostCalls(comptime params: Params) type {
 
             span.debug("charging 10 gas", .{});
             exec_ctx.gas -= 10;
+
+            if (exec_ctx.gas < 0) {
+                span.debug("Out of gas after charging", .{});
+                return .{ .terminal = .out_of_gas };
+            }
 
             const host_ctx: *Context = @ptrCast(@alignCast(call_ctx.?));
             const ctx_regular = &host_ctx.regular;
