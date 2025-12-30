@@ -189,6 +189,14 @@ pub const TraceResult = union(enum) {
     no_op: NoOp,
     mismatch: Mismatch,
     @"error": ProcessError,
+
+    pub fn deinit(self: *TraceResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .no_op => |no_op| allocator.free(no_op.error_name),
+            .@"error" => |err_info| allocator.free(err_info.context),
+            else => {},
+        }
+    }
 };
 
 // Lazy-loading trace iterator
@@ -325,7 +333,9 @@ pub fn processTrace(
             // Block import error - check if this was expected (no-op) or an actual error
             if (is_expected_no_op) {
                 span.debug("Block import failed as expected (no-op): {s}", .{err_msg});
-                return TraceResult{ .no_op = .{ .error_name = err_msg } };
+                // Duplicate error message before block_result.deinit() frees it
+                const error_name_copy = try fuzzer.allocator.dupe(u8, err_msg);
+                return TraceResult{ .no_op = .{ .error_name = error_name_copy } };
             } else {
                 span.err("Block import failed: {s}", .{err_msg});
                 return TraceResult{ .@"error" = .{

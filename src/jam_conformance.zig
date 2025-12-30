@@ -231,7 +231,12 @@ test "jam-conformance:traces" {
 
         // Process all traces
         var results = std.ArrayList(trace_runner.TraceResult).init(allocator);
-        defer results.deinit();
+        defer {
+            for (results.items) |*result| {
+                result.deinit(allocator);
+            }
+            results.deinit();
+        }
 
         var trace_names = std.ArrayList([]u8).init(allocator);
         defer {
